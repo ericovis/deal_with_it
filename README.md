@@ -1,5 +1,5 @@
 # Deal With It! :sunglasses:
-A Python API for creating "deal with it"-like GIFs
+A Python API for creating "Deal With It"-like GIFs
 
 
 ## Usage
