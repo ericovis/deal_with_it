@@ -1,0 +1,1 @@
+from deal_with_it import ImageProcessor
