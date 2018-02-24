@@ -1,4 +1,4 @@
-# Deal With It! :eyeglasses:
+# Deal With It! :sunglasses:
 A Python API for creating "deal with it"-like GIFs
 
 
