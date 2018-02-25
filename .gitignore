@@ -110,3 +110,4 @@ tmp/*
 .DS_Store
 dlib
 .data
+.requirements.zip
