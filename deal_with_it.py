@@ -18,17 +18,17 @@ class ImageProcessor(object):
         self.img_arr = fr.load_image_file(BytesIO(req.read()))
         self.output = None
 
-    def __get_glasses(self, new_width, angle=0, increase=0.3,):
-        img = Image.open(self.__glasses_img_path)
-        img = img.convert("RGBA")
+    def get_glasses(self, new_width, angle=0, increase=0.3,):
+        img = Image.open(self.__glasses_img_path).convert("RGBA")
+        if angle != 0:
+            img = img.rotate(angle, expand=True, resample=self.resample)
         width, height = img.size
         new_width = new_width + int(float(new_width) * increase)
         new_height = int((float(height)*float((new_width/float(width)))))
-        if angle != 0:
-            img = img.rotate(angle, expand=False, resample=self.resample)
-        return img.resize((new_width, new_height))
+        img = img.resize((new_width, new_height))
+        return img
 
-    def __get_final_position(self, img_size, left_eye):
+    def __get_final_position(self, img_size, left_eye, angle):
         x = left_eye[0] - int(float(img_size[0]) * self.offset)
         y = left_eye[1] - int(img_size[1]/2)
         return (x, y)
@@ -39,15 +39,15 @@ class ImageProcessor(object):
         return -int(degrees(atan2(yDiff, xDiff)))
 
     def process(self):
+        self.output = Image.fromarray(self.img_arr)
         face_locations = fr.face_locations(self.img_arr)
         for face in face_locations:
             landmarks = fr.face_landmarks(self.img_arr, face_locations=[face])
             left_eye = landmarks[0]['left_eye'][0]
             right_eye = landmarks[0]['right_eye'][3]
             angle = self.__get_angle(left_eye, right_eye)
-            glasses = self.__get_glasses(face[1]-face[3])
-            position = self.__get_final_position(glasses.size, left_eye)
-            self.output = Image.fromarray(self.img_arr)
+            glasses = self.get_glasses(face[1]-face[3], angle=angle)
+            position = self.__get_final_position(glasses.size, left_eye, angle)
             self.output.paste(glasses, position, mask=glasses)
 
     def get_base64_array(self):
