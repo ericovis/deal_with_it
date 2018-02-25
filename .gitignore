@@ -101,8 +101,11 @@ ENV/
 .mypy_cache/
 
 
+# Serverless directories
+.serverless
+
+# General
+tmp/*
 .DS_Store
 dlib
-images/1.jpg
-images/2.jpg
-images/3.jpg
+.data

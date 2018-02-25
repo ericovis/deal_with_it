@@ -1,0 +1,32 @@
+service: deal_with_it
+
+provider:
+  name: aws
+  runtime: python3.6
+  stage: dev
+  region: us-east-1
+
+plugins:
+  - serverless-wsgi
+
+custom:
+  wsgi:
+    app: api.app
+    packRequirements: false
+    pythonBin: python3
+  pythonRequirements:
+    dockerizePip: true
+    dockerFile: .
+    pythonBin: /usr/bin/python3
+
+
+# package:
+#   include:
+#     - include-me.py
+
+functions:
+  api:
+    handler: wsgi.handler
+    events:
+      - http: ANY /
+      - http: ANY {proxy+}
