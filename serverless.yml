@@ -1,4 +1,4 @@
-service: deal_with_it
+service: deal-with-it
 
 provider:
   name: aws
@@ -18,11 +18,21 @@ custom:
     dockerizePip: true
     dockerFile: .
     pythonBin: /usr/bin/python3
+    zip: true
 
 
-# package:
-#   include:
-#     - include-me.py
+package:
+  exclude:
+    - .data/**
+    - env/**
+    - .git/**
+    - __pycache__/**
+    - node_modules/**
+    - Dockerfile
+    - docker-compose.yml
+    - .dockerignore
+    - package.json
+    - package-lock.json
 
 functions:
   api:

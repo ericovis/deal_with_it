@@ -1,0 +1,24 @@
+{
+  "name": "deal_with_it",
+  "version": "1.0.0",
+  "description": "A Python API for creating \"Deal With It\"-like GIFs",
+  "main": "app.py",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ericovis/deal_with_it.git"
+  },
+  "author": "Eric Magalhães",
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/ericovis/deal_with_it/issues"
+  },
+  "homepage": "https://github.com/ericovis/deal_with_it#readme",
+  "dependencies": {
+    "serverless": "^1.26.0",
+    "serverless-python-requirements": "^3.3.0",
+    "serverless-wsgi": "^1.4.6"
+  }
+}

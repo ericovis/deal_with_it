@@ -25,10 +25,9 @@ def route():
         args = request.get_json()
         if args.get('img_url', False):
             proc = ImageProcessor(args['img_url'])
-            img = proc.deal_with_it()
-            media_data = base64.b64encode(img).decode('utf8').replace("'", '')
+            img = proc.get_base64_array()
             return response({'message': 'Deal with it!',
-                             'media_data': media_data})
+                             'media_data': img})
         else:
             return response('I need an image URL to work with.', status=400)
     return response('I only understand JSON', status=400)

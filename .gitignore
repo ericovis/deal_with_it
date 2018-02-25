@@ -105,6 +105,7 @@ ENV/
 .serverless
 
 # General
+node_modules
 tmp/*
 .DS_Store
 dlib

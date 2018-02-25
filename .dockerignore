@@ -3,3 +3,4 @@ dlib
 README.md
 LICENSE
 .travis.yml
+node_modules
