@@ -36,6 +36,8 @@ package:
 functions:
   api:
     handler: wsgi.handler
+    memorySize: 2048
+    timeout: 20
     events:
       - http:
           path: /
