@@ -36,7 +36,8 @@ class ImageProcessor(object):
     def __get_angle(self, left_eye, right_eye):
         xDiff = right_eye[0] - left_eye[0]
         yDiff = right_eye[1] - left_eye[1]
-        return -int(degrees(atan2(yDiff, xDiff)))
+        angle = int(degrees(atan2(yDiff, xDiff)))
+        return -angle
 
     def process(self):
         self.output = Image.fromarray(self.img_arr)

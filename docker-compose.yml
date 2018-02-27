@@ -1,15 +1,21 @@
 version: '3'
 services:
   web:
-    build: .
-    command: python3 app.py
+    build: ./web
+    command: live-server --port=8080 --host=0.0.0.0 --verbose
     restart: always
-    environment:
-      BUCKET_NAME: deal_with_it_dev
-      S3_ACCESS_KEY: key
-      S3_SECRET_KEY: secretKey
-      S3_ENDPOINT: s3:4567
+    ports:
+      - 8080:8080
+      - 35729:35729
     volumes:
-      - .:/app
+      - ./web:/app
+
+
+  api:
+    build: ./api
+    command: python3 api.py
+    restart: always
+    volumes:
+      - ./api:/app
     ports:
       - 5000:5000
