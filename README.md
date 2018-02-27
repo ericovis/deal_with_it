@@ -2,13 +2,34 @@
 A Python API for creating "Deal With It"-like GIFs
 
 
-## Usage
+## Prerequisites
 
-TBD
+Docker and Docker Compose are required in order to run the local environment or deploy this project on AWS Lambda. All the other dependencies are already configured inside the containers described in this project.
 
-## Installation
+## Running local
 
-TBD
+To run a local dev environment first build the containers with:
+
+```
+docker-compose build
+```
+
+Then start the local environment by running:
+
+```
+docker-compose up
+```
+
+The Web application will be available at [http://localhost:8080](http://localhost:8080) and the API at [http://localhost:5000](http://localhost:5000)
+
+
+## Deploying the API on AWS Lambda
+
+- Install the NPM dependencies described at the *package.json* file on [/api/package.json](/api/package.json)
+
+- Configure your local computer with your AWS credentials
+- Run `sls deploy` from the */api* folder
+
 
 ## License
 

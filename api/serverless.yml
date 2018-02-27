@@ -14,10 +14,9 @@ custom:
   wsgi:
     app: api.app
     packRequirements: false
-    pythonBin: python3
   pythonRequirements:
     dockerizePip: true
-    zip: true
+    zip: false
 
 
 package:
@@ -32,6 +31,7 @@ package:
     - .dockerignore
     - package.json
     - package-lock.json
+    - requirements.txt
 
 functions:
   api:

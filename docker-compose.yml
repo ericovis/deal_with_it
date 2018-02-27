@@ -9,8 +9,6 @@ services:
       - 35729:35729
     volumes:
       - ./web:/app
-
-
   api:
     build: ./api
     command: python3 api.py
