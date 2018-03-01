@@ -1,6 +1,8 @@
 # Deal With It! :sunglasses:
 A Python API for creating "Deal With It"-like GIFs
 
+There is a live demo available [here](https://goo.gl/qzAxK8).
+
 
 ## Prerequisites
 
@@ -37,7 +39,7 @@ except ImportError:
   pass
 ```
 
-## Roadmap
+## Feature roadmap
 
 - Create separated APIs for Slack, Web, and Twitter
 - Improve the AWS Lambda deployment process
