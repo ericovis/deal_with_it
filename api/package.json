@@ -18,7 +18,7 @@
   "homepage": "https://github.com/ericovis/deal_with_it#readme",
   "dependencies": {
     "serverless": "^1.26.0",
-    "serverless-wsgi": "^1.4.6"
+    "serverless-wsgi": "git+https://github.com/ericovis/serverless-wsgi.git"
   },
   "devDependencies": {
     "serverless-python-requirements": "^3.3.0"

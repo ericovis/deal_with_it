@@ -30,19 +30,10 @@ The Web application will be available at [http://localhost:8080](http://localhos
 - Install the NPM dependencies described at the *package.json* file on [/api/package.json](/api/package.json)
 - Configure your local computer with your AWS credentials
 - Run `sls deploy` from the */api* folder
-- While creating the deployment package add the following code to *wsgi.py* and save the file:
-
-``` python
-try:
-  import unzip_requirements
-except ImportError:
-  pass
-```
 
 ## Feature roadmap
 
 - Create separated APIs for Slack, Web, and Twitter
-- Improve the AWS Lambda deployment process
 - Create automated deployment (Web + API)
 - Enable face analysis with Amazon Rekognition
 
