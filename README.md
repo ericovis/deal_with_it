@@ -19,10 +19,14 @@ docker-compose up
 
 The app will be available at http://localhost:5000
 
+## API Docs
+
+Check out https://deal-with-it.herokuapp.com/#api
+
 ## Contributing
 
 1. Fork this repo
-2. Make cahnges
+2. Make changes
 3. Open a PR
 
 ### Some features you could build:
