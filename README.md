@@ -1,6 +1,8 @@
 # Deal With It! :sunglasses:
 A Python API for creating "Deal With It"-like Images
 
+[![Build Status](https://travis-ci.org/ericovis/deal_with_it.svg?branch=master)](https://travis-ci.org/ericovis/deal_with_it)
+
 There is a live demo available at https://deal-with-it.herokuapp.com/
 
 ## Prerequisites
