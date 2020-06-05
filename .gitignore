@@ -111,3 +111,4 @@ tmp/*
 dlib
 .data
 .requirements.zip
+.pytest_cache
