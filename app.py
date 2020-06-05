@@ -1,7 +1,7 @@
 import json
 import base64
 from flask import Flask, request, Response
-from deal_with_it import ImageProcessor
+from processors import ImageProcessor
 
 app = Flask(__name__)
 
