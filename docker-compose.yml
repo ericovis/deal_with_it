@@ -1,19 +1,9 @@
 version: '3'
 services:
-  web:
-    build: ./web
-    command: live-server --port=8080 --host=0.0.0.0 --verbose
-    restart: always
-    ports:
-      - 8080:8080
-      - 35729:35729
-    volumes:
-      - ./web:/app
   api:
-    build: ./api
-    command: python3 api.py
-    restart: always
+    build: .
+    command: python3 app.py
     volumes:
-      - ./api:/app
+      - .:/app
     ports:
       - 5000:5000

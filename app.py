@@ -2,10 +2,9 @@ import json
 import base64
 from flask import Flask, request, Response
 from deal_with_it import ImageProcessor
-from flask_cors import CORS
 
 app = Flask(__name__)
-CORS(app)
+
 
 
 def response(message, status=200, mimetype="application/json"):
