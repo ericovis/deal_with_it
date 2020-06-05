@@ -1,8 +1,8 @@
 version: '3'
 services:
-  api:
+  web:
     build: .
-    command: python3 app.py
+    command: python app.py
     volumes:
       - .:/app
     ports:

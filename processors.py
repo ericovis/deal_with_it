@@ -1,3 +1,4 @@
+import re
 import base64
 from urllib import request
 from io import BytesIO
@@ -10,16 +11,25 @@ class ImageProcessor(object):
     offset = 415/1024
     img_format = 'PNG'
     resample = Image.BILINEAR
-    __glasses_img_path = './images/glasses.png'
+    glasses = './static/img/glasses.png'
 
-    def __init__(self, img_url):
-        req = request.urlopen(img_url)
-        self.img_url = img_url
-        self.img_arr = fr.load_image_file(BytesIO(req.read()))
-        self.output = None
+    def __init__(self, image=None, url=None):
+        self.url = url
+        
+        if self.url:
+            req = request.urlopen(url)
+            image = BytesIO(req.read())
+            self.image = fr.load_image_file(image)
+        elif image:
+            base64_data = re.sub('^data:image/.+;base64,', '', image)
+            byte_data = base64.b64decode(base64_data)
+            image_data = BytesIO(byte_data) 
+            self.image = fr.load_image_file(image_data)
+        self.output = Image.fromarray(self.image)
+
 
     def get_glasses(self, new_width, angle=0, increase=0.3,):
-        img = Image.open(self.__glasses_img_path).convert("RGBA")
+        img = Image.open(self.glasses).convert("RGBA")
         if angle != 0:
             img = img.rotate(angle, expand=True, resample=self.resample)
         width, height = img.size
@@ -40,10 +50,10 @@ class ImageProcessor(object):
         return -angle
 
     def process(self):
-        self.output = Image.fromarray(self.img_arr)
-        face_locations = fr.face_locations(self.img_arr)
+    
+        face_locations = fr.face_locations(self.image)
         for face in face_locations:
-            landmarks = fr.face_landmarks(self.img_arr, face_locations=[face])
+            landmarks = fr.face_landmarks(self.image, face_locations=[face])
             left_eye = landmarks[0]['left_eye'][0]
             right_eye = landmarks[0]['right_eye'][3]
             angle = self.__get_angle(left_eye, right_eye)

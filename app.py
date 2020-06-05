@@ -1,48 +1,56 @@
 import json
+import os
 import base64
-from flask import Flask, request, Response
+from flask import Flask, request, render_template, Response
 from processors import ImageProcessor
 
 app = Flask(__name__)
 
-
-
-def response(message, status=200, mimetype="application/json"):
-    res = {
-        'status': status
-    }
-    if type(message) is str:
-        res['message'] = message
-    elif type(message) is dict:
-        res['body'] = message
+def json_response(message, status=200):
+    body = dict(message=message, status=status)
     return Response(
-                    response=json.dumps(res),
+                    response=json.dumps(body),
                     status=status,
-                    mimetype=mimetype
+                    mimetype="application/json"
                    )
 
 
-@app.route('/', methods=['POST'])
-def route():
+def image_response(image, status=200):
+    message = json.dumps({"image": image})
+    return json_response(message, status)
+
+
+@app.route('/', methods=['GET'])
+def index():
+    return render_template('index.html')
+
+
+@app.route('/api', methods=['POST'])
+def api():
     if request.is_json:
-        args = request.get_json()
-        if args.get('img_url', False):
-            app.logger.info("Processing image")
-            proc = ImageProcessor(args['img_url'])
-            img = proc.get_base64_array()
-            app.logger.info("Image was processed")
-            return response({'media_data': img})
+        data = request.get_json()
+    
+        if data.get('image', False):
+            proc = ImageProcessor(image=data['image'])
+            img = proc.get_base64_array()            
+            return image_response(img)
+        elif data.get('url', False):
+            proc = ImageProcessor(url=data['url'])
+            img = proc.get_base64_array()            
+            return image_response(img)
         else:
-            app.logger.info("Missing the 'img_url' field")
-            return response('I need an image URL to work with.', status=400)
-    app.logger.info('Request is not JSON encoded')
-    return response('I only understand JSON', status=400)
+            return json_response("Missing the 'img' field on request body", status=400)
+    
+    return json_response('I only understand JSON', status=400)
 
 
 @app.errorhandler(500)
 def error(e):
-    return response("Something went wrong", status=500)
+    return json_response("Something went wrong", status=500)
 
 
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', debug=True, port=5000)
+    if os.environ.get('PORT'):
+        app.run(host='0.0.0.0', debug=False, port=int(os.environ.get('PORT')))
+    else:
+        app.run(host='0.0.0.0', debug=True, port=5000)
