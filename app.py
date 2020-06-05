@@ -50,7 +50,4 @@ def error(e):
 
 
 if __name__ == '__main__':
-    if os.environ.get('PORT'):
-        app.run(host='0.0.0.0', debug=False, port=int(os.environ.get('PORT')))
-    else:
-        app.run(host='0.0.0.0', debug=True, port=5000)
+    app.run(host='0.0.0.0', debug=True, port=int(os.environ.get('PORT', 5000)))
