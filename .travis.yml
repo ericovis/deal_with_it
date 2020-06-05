@@ -1,0 +1,9 @@
+language: python
+python:
+  - "3.8"
+services:
+  - docker
+install:
+  - docker-compose build
+script:
+  - docker-compose run web pytest

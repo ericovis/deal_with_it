@@ -9,7 +9,7 @@ from math import atan2, degrees
 
 class DealWithItProcessor(object):
     offset = 415/1024
-    img_format = 'GIF'
+    img_format = 'PNG'
     resample = Image.BILINEAR
     glasses = './static/img/glasses.png'    
 
@@ -86,4 +86,4 @@ class DealWithItProcessor(object):
         self.output.save(arr, format=self.img_format)
         arr = arr.getvalue()
         img = base64.b64encode(arr).decode('utf8').replace("'", '')
-        return f'data:image/gif;base64,{img}'
+        return f'data:image/png;base64,{img}'

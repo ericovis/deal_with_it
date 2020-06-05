@@ -1,41 +1,33 @@
 # Deal With It! :sunglasses:
-A Python API for creating "Deal With It"-like GIFs
+A Python API for creating "Deal With It"-like Images
 
-There is a live demo available [here](https://goo.gl/qzAxK8).
-
+There is a live demo available at https://deal-with-it.herokuapp.com/
 
 ## Prerequisites
 
-Docker and Docker Compose are required in order to run the local environment or deploy this project on AWS Lambda. All the other dependencies are already configured inside the containers described in this project.
+Docker and Docker Compose are required in order to run the local environment.
 
 ## Running local
 
-To run a local dev environment first build the containers with:
-
-```
-docker-compose build
-```
-
-Then start the local environment by running:
+To run a local dev environment run:
 
 ```
 docker-compose up
 ```
 
-The Web application will be available at [http://localhost:8080](http://localhost:8080) and the API at [http://localhost:5000](http://localhost:5000)
+The app will be available at http://localhost:5000
 
+## Contributing
 
-## Deploying the API on AWS Lambda
+1. Fork this repo
+2. Make cahnges
+3. Open a PR
 
-- Install the NPM dependencies described at the *package.json* file on [/api/package.json](/api/package.json)
-- Configure your local computer with your AWS credentials
-- Run `sls deploy` from the */api* folder
+### Some features you could build:
 
-## Feature roadmap
-
-- Create separated APIs for Slack, Web, and Twitter
-- Create automated deployment (Web + API)
-- Enable face analysis with Amazon Rekognition
+- Add the ability to create a animated GIF out of the original image
+- Add more processors
+- Add APIs for Slack integration
 
 
 ## License
