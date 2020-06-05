@@ -7,29 +7,40 @@ import face_recognition as fr
 from math import atan2, degrees
 
 
-class ImageProcessor(object):
+class DealWithItProcessor(object):
     offset = 415/1024
-    img_format = 'PNG'
+    img_format = 'GIF'
     resample = Image.BILINEAR
-    glasses = './static/img/glasses.png'
+    glasses = './static/img/glasses.png'    
 
     def __init__(self, image=None, url=None):
         self.url = url
-        
-        if self.url:
-            req = request.urlopen(url)
-            image = BytesIO(req.read())
-            self.image = fr.load_image_file(image)
-        elif image:
-            base64_data = re.sub('^data:image/.+;base64,', '', image)
-            byte_data = base64.b64decode(base64_data)
-            image_data = BytesIO(byte_data) 
-            self.image = fr.load_image_file(image_data)
-        
+        self.image = image        
+        self.__validated = None       
         self.output = None
 
+    def is_valid(self):
+        if self.__validated is not None:
+            return self.__validated
+        
+        try:
+            if self.url:
+                req = request.urlopen(self.url)
+                self.image = fr.load_image_file(BytesIO(req.read()))
+            elif self.image:
+                base64_data = re.sub('^data:image/.+;base64,', '', self.image)
+                byte_data = base64.b64decode(base64_data)
+                image_data = BytesIO(byte_data) 
+                self.image = fr.load_image_file(image_data)
+            self.__validated = True
+        except Exception as e:
+            self.__validated = False
+            raise e
 
-    def get_glasses(self, new_width, angle=0, increase=0.3,):
+        
+        return self.__validated
+
+    def __get_glasses(self, new_width, angle=0, increase=0.3,):
         img = Image.open(self.glasses).convert("RGBA")
         if angle != 0:
             img = img.rotate(angle, expand=True, resample=self.resample)
@@ -51,6 +62,9 @@ class ImageProcessor(object):
         return -angle
 
     def process(self):
+        if not self.__validated:
+            raise Exception('Input image is not validated')
+    
         self.output = Image.fromarray(self.image)
         face_locations = fr.face_locations(self.image)
         for face in face_locations:
@@ -58,14 +72,18 @@ class ImageProcessor(object):
             left_eye = landmarks[0]['left_eye'][0]
             right_eye = landmarks[0]['right_eye'][3]
             angle = self.__get_angle(left_eye, right_eye)
-            glasses = self.get_glasses(face[1]-face[3], angle=angle)
+            glasses = self.__get_glasses(face[1]-face[3], angle=angle)
             position = self.__get_final_position(glasses.size, left_eye, angle)
             self.output.paste(glasses, position, mask=glasses)
+        
+        return self.output
 
-    def get_base64_array(self):
+    def get_base64_image(self):            
         if self.output is None:
             self.process()
+        
         arr = BytesIO()
         self.output.save(arr, format=self.img_format)
         arr = arr.getvalue()
-        return base64.b64encode(arr).decode('utf8').replace("'", '')
+        img = base64.b64encode(arr).decode('utf8').replace("'", '')
+        return f'data:image/gif;base64,{img}'

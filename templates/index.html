@@ -3,7 +3,9 @@
 
 <head>
     <title>Deal With It | Eric Magalhães</title>
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge,chrome=1">
+    <meta name="HandheldFriendly" content="true">
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
     <link rel="icon" href="{{ url_for('static', filename='img/favicon.png') }}" type="image/png" sizes="16x16">
     <link href="https://fonts.googleapis.com/css2?family=Open+Sans:wght@400;700&display=swap" rel="stylesheet">
@@ -18,7 +20,6 @@
                 <ul class="navigation">
                     <li><a href="#demo">Demo</a></li>
                     <li><a href="#api">API Docs</a></li>
-                    <li><a href="#contributing">Contributing</a></li>
                     <li><a href="#license">License</a></li>
                 </ul>
             </div>
@@ -30,16 +31,25 @@
         <section id="demo">
             <div class="container">
                 <h2>Demo</h2>
-                <p>Either insert and valid image URL or click on "Choose File" to load a picture from your computer then click on the "Deal with it!" button to see the API in action.</p>
+                <p>Either insert and valid image URL or click on "Choose File" to load a picture from your computer then
+                    click on the "Deal with it!" button to see the API in action.</p>
+                <div id="loading">
+                    <svg class="spinner" viewBox="0 0 100 100" width="20" height="20">
+                        <circle cx="50" cy="50" r="42" transform="rotate(-90,50,50)" />
+                    </svg>
+                </div>
+                <div id="result">
+                    <p id="message"></p>
+                    <img id="result-img" alt="Deal with me">
+                </div>
                 <form action="/api" method="POST" id="form">
                     <label for="url">URL</label>
                     <input type="text" id="url" name="url" placeholder="https://example.com/image.png">
                     <input type="file" name="image" id="image">
                     <div class="submit">
                         <input type="button" value="Deal with It!" onclick="onSubmit()">
-                    </div>                    
+                    </div>
                 </form>
-                <div id="result"></div>
             </div>
         </section>
         <section id="api">
@@ -52,28 +62,22 @@
 
                 <pre><code class="json">
 {
-    "url": "https://emagalha.es/images/me.jpg"  
+  "url": "https://emagalha.es/images/me.jpg"  
 }
                 </code></pre>
                 <pre><code class="json">
 {
-    "image": "base64 string here"  
+  "image": "base64 string here"  
 }
                 </code></pre>
 
 
-            </div>
-        </section>
-        <section id="contributing">
-            <div class="container">
-                <h2>Contributing</h2>
-                <p>There shall be something here :D</p>
             </div>
         </section>
         <section id="license">
             <div class="container">
                 <h2>License</h2>
-                <p>There shall be something here :D</p>
+                <p><a href="https://github.com/ericovis/deal_with_it/blob/master/LICENSE">MIT License</a></p>
             </div>
         </section>
     </main>

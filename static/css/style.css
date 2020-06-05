@@ -42,6 +42,7 @@ a:hover {
     width: 100%;
     margin: auto;
     padding: 0 1rem;
+    box-sizing: border-box;
 }
 
 .navigation li {
@@ -144,6 +145,13 @@ main {
     }
 }
 
+pre {
+    white-space: pre-wrap;       /* css-3 */
+    white-space: -moz-pre-wrap;  /* Mozilla, since 1999 */
+    white-space: -pre-wrap;      /* Opera 4-6 */
+    white-space: -o-pre-wrap;    /* Opera 7 */
+    word-wrap: break-word;   
+}
 
 input[type=text], select {
     padding: 1rem 1.2rem;
@@ -178,6 +186,45 @@ input[type=button]:hover {
     text-align: center;
 }
 
+@-webkit-keyframes spin {
+    to {
+        stroke-dashoffset: -264;
+    }
+}
+
+@keyframes spin {
+    to {
+        stroke-dashoffset: -264;
+    }
+}
+
+.spinner circle {
+    fill: none;
+    stroke: slategray;
+    stroke-width: 16;
+    stroke-linecap: round;
+    stroke-dasharray: 0, 0, 70, 194;
+    stroke-dashoffset: 0;
+    animation: spin 1s infinite linear;
+    -webkit-animation: spin 1s infinite linear;
+}
+
+#loading {
+    text-align: center;
+    display: none;
+    margin: 2rem 0;
+}
+
+#result {
+    text-align: center;
+    display: none;
+}
+
+#result-img {
+    display: none;
+    width: 100%;
+    margin: 2rem 0;
+}
    
 @media screen and (max-width: 640px) {
     main {

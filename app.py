@@ -2,22 +2,29 @@ import json
 import os
 import base64
 from flask import Flask, request, render_template, Response
-from processors import ImageProcessor
+from processors import DealWithItProcessor
 
 app = Flask(__name__)
 
-def json_response(message, status=200):
-    body = dict(message=message, status=status)
+DEFAULT_CACHE = 60 * 60 * 2 
+
+
+def json_response(body, status=200):
     return Response(
-                    response=json.dumps(body),
-                    status=status,
-                    mimetype="application/json"
-                   )
+        response=json.dumps(body),
+        status=status,
+        mimetype="application/json"
+    )
+
+
+def json_msg_response(message, status=200):
+    body = dict(message=message, status=status)
+    return json_response(body, status)
 
 
 def image_response(image, status=200):
-    message = json.dumps({"image": image})
-    return json_response(message, status)
+    body = json.dumps({"image": image})
+    return json_response(body, status)
 
 
 @app.route('/', methods=['GET'])
@@ -27,21 +34,20 @@ def index():
 
 @app.route('/api', methods=['POST'])
 def api():
-    if request.is_json:
+    if request.is_json:  
         data = request.get_json()
+        if not data.get('image', False) and not data.get('url', False):
+            return json_msg_response("Missing the required fields on request body", status=400)
+
+        proc = DealWithItProcessor(**data)
+
+        if not proc.is_valid():           
+            return json_msg_response("The provided image or url is invalid", 400)     
+        
+        proc.process()
+        return image_response(proc.get_base64_image())                  
     
-        if data.get('image', False):
-            proc = ImageProcessor(image=data['image'])
-            img = proc.get_base64_array()            
-            return image_response(img)
-        elif data.get('url', False):
-            proc = ImageProcessor(url=data['url'])
-            img = proc.get_base64_array()            
-            return image_response(img)
-        else:
-            return json_response("Missing the 'img' field on request body", status=400)
-    
-    return json_response('I only understand JSON', status=400)
+    return json_msg_response('I only understand JSON', status=400)
 
 
 @app.errorhandler(500)
@@ -49,5 +55,20 @@ def error(e):
     return json_response("Something went wrong", status=500)
 
 
+app.config['SEND_FILE_MAX_AGE_DEFAULT'] = DEFAULT_CACHE
+
+
+@app.after_request
+def add_header(response):
+    response.cache_control.max_age = DEFAULT_CACHE
+    return response
+
+
+
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', debug=True, port=int(os.environ.get('PORT', 5000)))
+    debug = bool(os.environ.get('DEBUG', False))
+    app.run(
+        host='0.0.0.0',
+        debug=debug,
+        port=int(os.environ.get('PORT', 5000))
+    )
