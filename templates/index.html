@@ -1,14 +1,62 @@
 <!doctype html>
 <html>
-    <head>
-        <title>Deal With It | Eric Magalhães</title>
-        <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
-        <link rel="icon" href="{{ url_for('static', filename='img/favicon.png') }}" type="image/png" sizes="16x16">
-    </head>
-    <body>
+
+<head>
+    <title>Deal With It | Eric Magalhães</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <link rel="icon" href="{{ url_for('static', filename='img/favicon.png') }}" type="image/png" sizes="16x16">
+    <link href="https://fonts.googleapis.com/css2?family=Open+Sans:wght@400;700&display=swap" rel="stylesheet">
+</head>
+
+<body>
+    <span id="forkongithub"><a href="https://github.com/ericovis/deal_with_it">Fork me on GitHub</a></span>
+    <header>
+        <nav>
+            <div class="container">
+                <ul class="navigation">
+                    <li><a href="#api">API Docs</a></li>
+                    <li><a href="#contributing">Contributing</a></li>
+                    <li><a href="#license">License</a></li>
+                    <li><a href="#author">Author</a></li>
+                </ul>
+            </div>
+        </nav>
         <h1>Deal With It!</h1>
-        <script src="{{ url_for('static', filename='js/main.js') }}"></script>
-    </body>
+        <h2>A GIF generator service written in Python</h2>
+    </header>
+    <main>
+        <section id="api">
+            <div class="container">
+                <h2>Api Docs</h2>
+                <p>There shall be something here :D</p>
+            </div>
+        </section>
+        <section id="contributing">
+            <div class="container">
+                <h2>Contributing</h2>
+                <p>There shall be something here :D</p>
+            </div>
+        </section>
+        <section id="license">
+            <div class="container">
+                <h2>License</h2>
+                <p>There shall be something here :D</p>
+            </div>
+        </section>
+        <section id="author">
+            <div class="container">
+                <h2>Author</h2>
+                <h4>Created by <a href="https://emagalha.es">Eric Magalhães</a></h4>
+            </div>
+        </section>
+    </main>
+    <footer>
+        <div class="container">
+            &copy; 2018 <a href="https://emagalha.es">Eric Magalhães</a></h4>
+        </div>
+    </footer>
+    <script src="{{ url_for('static', filename='js/main.js') }}"></script>
+</body>
+
 </html>
-
-

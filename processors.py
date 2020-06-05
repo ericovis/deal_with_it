@@ -25,7 +25,8 @@ class ImageProcessor(object):
             byte_data = base64.b64decode(base64_data)
             image_data = BytesIO(byte_data) 
             self.image = fr.load_image_file(image_data)
-        self.output = Image.fromarray(self.image)
+        
+        self.output = None
 
 
     def get_glasses(self, new_width, angle=0, increase=0.3,):
@@ -50,7 +51,7 @@ class ImageProcessor(object):
         return -angle
 
     def process(self):
-    
+        self.output = Image.fromarray(self.image)
         face_locations = fr.face_locations(self.image)
         for face in face_locations:
             landmarks = fr.face_landmarks(self.image, face_locations=[face])
