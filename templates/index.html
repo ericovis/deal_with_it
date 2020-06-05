@@ -7,6 +7,7 @@
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
     <link rel="icon" href="{{ url_for('static', filename='img/favicon.png') }}" type="image/png" sizes="16x16">
     <link href="https://fonts.googleapis.com/css2?family=Open+Sans:wght@400;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="//cdnjs.cloudflare.com/ajax/libs/highlight.js/10.0.3/styles/atom-one-dark.min.css">
 </head>
 
 <body>
@@ -15,10 +16,10 @@
         <nav>
             <div class="container">
                 <ul class="navigation">
+                    <li><a href="#demo">Demo</a></li>
                     <li><a href="#api">API Docs</a></li>
                     <li><a href="#contributing">Contributing</a></li>
                     <li><a href="#license">License</a></li>
-                    <li><a href="#author">Author</a></li>
                 </ul>
             </div>
         </nav>
@@ -26,10 +27,41 @@
         <h2>A GIF generator service written in Python</h2>
     </header>
     <main>
+        <section id="demo">
+            <div class="container">
+                <h2>Demo</h2>
+                <p>Either insert and valid image URL or click on "Choose File" to load a picture from your computer then click on the "Deal with it!" button to see the API in action.</p>
+                <form action="/api" method="POST" id="form">
+                    <label for="url">URL</label>
+                    <input type="text" id="url" name="url" placeholder="https://example.com/image.png">
+                    <input type="file" name="image" id="image">
+                    <div class="submit">
+                        <input type="button" value="Deal with It!" onclick="onSubmit()">
+                    </div>                    
+                </form>
+                <div id="result"></div>
+            </div>
+        </section>
         <section id="api">
             <div class="container">
                 <h2>Api Docs</h2>
-                <p>There shall be something here :D</p>
+                <p>There is a simple REST api available at <a href="/api">/api</a> that receives a <b>POST</b> request
+                    and expects either an <b>image</b> encoded in a Base64 string or an <b>url</b></p>
+
+                <h4>Example payloads</h4>
+
+                <pre><code class="json">
+{
+    "url": "https://emagalha.es/images/me.jpg"  
+}
+                </code></pre>
+                <pre><code class="json">
+{
+    "image": "base64 string here"  
+}
+                </code></pre>
+
+
             </div>
         </section>
         <section id="contributing">
@@ -44,18 +76,13 @@
                 <p>There shall be something here :D</p>
             </div>
         </section>
-        <section id="author">
-            <div class="container">
-                <h2>Author</h2>
-                <h4>Created by <a href="https://emagalha.es">Eric Magalhães</a></h4>
-            </div>
-        </section>
     </main>
     <footer>
         <div class="container">
-            &copy; 2018 <a href="https://emagalha.es">Eric Magalhães</a></h4>
+            &copy; 2018-2020 <a href="https://emagalha.es">Eric Magalhães</a></h4>
         </div>
     </footer>
+    <script src="//cdnjs.cloudflare.com/ajax/libs/highlight.js/10.0.3/highlight.min.js"></script>
     <script src="{{ url_for('static', filename='js/main.js') }}"></script>
 </body>
 
