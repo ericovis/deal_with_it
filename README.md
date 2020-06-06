@@ -19,6 +19,12 @@ docker-compose up
 
 The app will be available at http://localhost:5000
 
+## Running tests
+
+```
+docker-compose run web /bin/bash -lc 'pipenv install --system --dev && pytest'
+```
+
 ## Contributing
 
 1. Fork this repo
@@ -30,7 +36,7 @@ The app will be available at http://localhost:5000
 - Add the ability to create a animated GIF out of the original image
 - Add more processors
 - Add APIs for Slack integration
-- Any nonses stuff ;D
+- Nonsense stuff ;D
 
 
 ## License
