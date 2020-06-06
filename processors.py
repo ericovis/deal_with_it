@@ -18,7 +18,8 @@ class DealWithItProcessor(object):
     def __init__(self, image=None, url=None):
         self.url = url
         self.image = image        
-        self.__validated = None       
+        self.__validated = None     
+        self.found_faces = False  
         self.output = None
 
     def is_valid(self):
@@ -37,8 +38,6 @@ class DealWithItProcessor(object):
             self.__validated = True
         except Exception as e:
             self.__validated = False
-            raise e
-
         
         return self.__validated
 
@@ -69,6 +68,10 @@ class DealWithItProcessor(object):
     
         self.output = Image.fromarray(self.image)
         face_locations = fr.face_locations(self.image)
+        
+        if face_locations:
+            self.found_faces = True
+        
         for face in face_locations:
             landmarks = fr.face_landmarks(self.image, face_locations=[face])
             left_eye = landmarks[0]['left_eye'][0]

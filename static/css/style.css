@@ -240,6 +240,10 @@ input[type=button]:hover {
     display: none;
 }
 
+#message {
+    font-weight: bold;
+}
+
 #result-img {
     display: none;
     margin: 2rem 0;

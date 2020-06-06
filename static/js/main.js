@@ -33,7 +33,7 @@ function isLoading() {
     form.style.display = 'none';
     loading.style.display = 'block';
     result.style.display = 'none';
-    message.value = '';
+    setMessage(null)
 }
 
 function loaded() {
@@ -61,7 +61,7 @@ async function onSubmit() {
         setMessage('No image or URL was provided!')
         result.style.display = 'block';
         loaded();
-        return false;
+        return;
     }
 
     fetch('/api', {
@@ -74,21 +74,20 @@ async function onSubmit() {
     }).then(
         function(response) {
         if (response.status !== 200) {
-            setMessage('Something went wrong!');
-            loaded();
-            return false;
+            response.json().then(function(data) {
+                setMessage(data.message);
+                
+            });            
+        } else {
+            response.json().then(function(data) {
+                let img = document.getElementById('result-img');
+                let out = JSON.parse(data);
+                img.src = out.image;
+                img.style.display = 'block';                        
+            });
         }
-
-        // Examine the text in the response
-        response.json().then(function(data) {
-            let img = document.getElementById('result-img');
-            let out = JSON.parse(data);
-            img.src = out.image;
-            img.style.display = 'block';
-            loaded();
-        
-            return true;
-        });
+        loaded();
+        return;
         }
     )
     .catch(function(err) {

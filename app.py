@@ -45,6 +45,9 @@ def api():
             return json_msg_response("The provided image or url is invalid", 400)     
         
         proc.process()
+        if not proc.found_faces:
+            return json_msg_response("No faces were found on this image", 400)     
+
         return image_response(proc.get_base64_image())                  
     
     return json_msg_response('I only understand JSON', status=400)
