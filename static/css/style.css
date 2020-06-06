@@ -83,6 +83,26 @@ main {
     justify-content: flex-start;
 }
 
+img {
+    width: 100%;
+}
+
+.showcase {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    margin: 0 -1rem;
+}
+
+
+.showcase-img {
+    text-align: center;
+    padding: 1rem;
+    width: 50%;
+    box-sizing: border-box;
+}
+
+
 #forkongithub a {
     background: #37392E;
     color: #fff;
@@ -222,10 +242,9 @@ input[type=button]:hover {
 
 #result-img {
     display: none;
-    width: 100%;
     margin: 2rem 0;
 }
-   
+
 @media screen and (max-width: 640px) {
     main {
         font-size: 4vw;
@@ -240,15 +259,26 @@ input[type=button]:hover {
     }
 
     header h1 {
-        font-size: 3rem;
+        font-size: 1rem;
+        text-align: left;
+        padding: 1.175rem;
+        margin: 0;
     }
 
     header h2 {
-        font-size: 1rem;
+        display: none;
     }
 
     header {
-        height: 10rem;
+        height: 3rem;
+        background-position: 95% center;
+        display: absolute;
+    }
+    .showcase {
+        flex-direction: column;
     }
 
+    .showcase-img {
+        width: 100%;
+    }
 }

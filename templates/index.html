@@ -6,6 +6,16 @@
     <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
     <meta http-equiv="X-UA-Compatible" content="IE=edge,chrome=1">
     <meta name="HandheldFriendly" content="true">
+    <meta name="twitter:card" content="summary_large_image">
+    <meta name="twitter:creator" content="@ericovis">
+    <meta name="twitter:title" content="Deal with it!">
+    <meta name="twitter:description" content='A Python API for creating "Deal With It"-like Images'>
+    <meta name="twitter:image" content="https://deal-with-it.herokuapp.com/static/img/deal_with_me.png">
+    <meta property="og:title" content="Deal with it!" />
+    <meta property="og:type" content="website" />
+    <meta property="og:url" content="https://deal-with-it.herokuapp.com" />
+    <meta property="og:image" content="https://deal-with-it.herokuapp.com/static/img/deal_with_me.png" />
+    <meta property="og:description" content='A Python API for creating "Deal With It"-like Images' />
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
     <link rel="icon" href="{{ url_for('static', filename='img/favicon.png') }}" type="image/png" sizes="16x16">
     <link href="https://fonts.googleapis.com/css2?family=Open+Sans:wght@400;700&display=swap" rel="stylesheet">
@@ -18,7 +28,8 @@
         <nav>
             <div class="container">
                 <ul class="navigation">
-                    <li><a href="#demo">Demo</a></li>
+                    <li><a href="#how">How it works</a></li>
+                    <li><a href="#demo">Try it</a></li>
                     <li><a href="#api">API Docs</a></li>
                     <li><a href="#license">License</a></li>
                 </ul>
@@ -28,9 +39,49 @@
         <h2>A Python API for creating "Deal With It"-like Images</h2>
     </header>
     <main>
+        <section id="how">
+            <div class="container">
+                <h2>How it works</h2>
+                <p>They say that "a picture is worth a thousand words". So well, this is what this API does:</p>
+                <div class="showcase">
+                    <div class="showcase-img">
+                        <p>Turns this:</p>
+                        <img src="{{ url_for('static', filename='img/me.jpg') }}" alt="Original picture">
+                    </div>
+                    <div class="showcase-img">
+                        <p>Into this:</p>
+                        <img src="{{ url_for('static', filename='img/deal_with_me.png') }}" alt="Processed picture">
+                    </div>
+                </div>
+                <p>It also works on pictures with multiple people:</p>
+                <div class="showcase">
+                    <div class="showcase-img">
+                        <p>Before:</p>
+                        <img src="{{ url_for('static', filename='img/multiple_people.jpg') }}" alt="Original picture">
+                    </div>
+                    <div class="showcase-img">
+                        <p>After:</p>
+                        <img src="{{ url_for('static', filename='img/deal_with_multiple_people.png') }}" alt="Processed picture">
+                    </div>
+                </div>
+                <p>
+                    Behind the scenes, this project uses the <a
+                        href="https://github.com/ageitgey/face_recognition">face_recognition</a> library to identify
+                    faces in a given picture. On every identified face the library returns, among other stuff, the
+                    information about face landmarks which includes coordinates for a person's eyes.                    
+                </p>
+                <p>
+                    With that information, this package then calculates the angle on which a person's' head is leaned to
+                    correctly place the "deal with it" glasses on the person's eyes.
+                </p>
+                <p>
+                    The whole image manipulation is done using <a href="https://github.com/python-pillow/Pillow">Pillow</a> and the REST API is written using <a href="https://flask.palletsprojects.com/en/1.1.x/">Flask</a>.
+                </p>
+            </div>
+        </section>
         <section id="demo">
             <div class="container">
-                <h2>Demo</h2>
+                <h2>Try it</h2>
                 <p>Either insert and valid image URL or click on "Choose File" to load a picture from your computer then
                     click on the "Deal with it!" button to see the API in action.</p>
                 <div id="loading">
