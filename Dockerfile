@@ -11,4 +11,4 @@ COPY Pipfile Pipfile.lock ./
 
 RUN pipenv install --system
 
-COPY . .
+COPY static/ templates/ *.py ./

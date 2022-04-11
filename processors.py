@@ -8,7 +8,6 @@ import image_to_numpy
 from math import atan2, degrees
 
 
-
 class DealWithItProcessor(object):
     offset = 415/1024
     img_format = 'PNG'
