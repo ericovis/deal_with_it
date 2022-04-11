@@ -1,11 +1,4 @@
-FROM python:3.8
-
-WORKDIR /app
-
-RUN apt-get update \
-    && apt-get install -y build-essential gcc g++ imagemagick cmake
-
-RUN pip install pipenv dlib==19.19.0
+FROM ericovis/python3-10-dlib:latest
 
 COPY Pipfile Pipfile.lock ./
 
