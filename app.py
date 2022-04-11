@@ -1,6 +1,7 @@
 import json
 import os
-import base64
+
+from datetime import datetime
 from flask import Flask, request, render_template, Response
 from processors import DealWithItProcessor
 
@@ -25,6 +26,11 @@ def json_msg_response(message, status=200):
 def image_response(image, status=200):
     body = json.dumps({"image": image})
     return json_response(body, status)
+
+
+@app.context_processor
+def inject_now():
+    return {'now': datetime.utcnow()}
 
 
 @app.route('/', methods=['GET'])
@@ -65,7 +71,6 @@ app.config['SEND_FILE_MAX_AGE_DEFAULT'] = DEFAULT_CACHE
 def add_header(response):
     response.cache_control.max_age = DEFAULT_CACHE
     return response
-
 
 
 if __name__ == '__main__':

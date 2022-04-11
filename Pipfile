@@ -12,6 +12,7 @@ Flask = "*"
 Pillow = "*"
 face_recognition = "*"
 image-to-numpy = "*"
+gunicorn = "*"
 
 [requires]
 python_version = "3.8"
