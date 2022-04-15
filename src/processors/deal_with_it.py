@@ -30,10 +30,7 @@ class DealWithItProcessor(object):
                 req = request.urlopen(self.url)
                 self.image = image_to_numpy.load_image_file(BytesIO(req.read()))
             elif self.image:
-                base64_data = re.sub('^data:image/.+;base64,', '', self.image)
-                byte_data = base64.b64decode(base64_data)
-                image_data = BytesIO(byte_data) 
-                self.image = image_to_numpy.load_image_file(image_data)
+
             self.__validated = True
         except Exception as e:
             self.__validated = False

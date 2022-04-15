@@ -1,10 +1,18 @@
 import pytest
-from app import app
+import os
+
+from fastapi.testclient import TestClient
+from src.app import app
+
+
+HERE = os.path.dirname(os.path.abspath(__file__))
 
 
 @pytest.fixture
 def client():
-    with app.test_client() as client:
-        yield client
+    return TestClient(app)
 
-
+@pytest.fixture
+def base64_image():
+    with open(os.path.join(HERE, 'fixtures/img.base64.txt'), 'r') as file:
+        return file.read()

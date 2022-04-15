@@ -6,6 +6,8 @@ from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
+from src.models import Image
+
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 STATIC_DIR = os.path.join(HERE, 'static')
@@ -20,3 +22,7 @@ templates = Jinja2Templates(directory=TEMPLATES_DIR)
 async def index(request: Request):
     return templates.TemplateResponse("index.html", dict(request=request, now=datetime.now()))
 
+
+@app.post("/api")
+async def api(image: Image):
+    return image
