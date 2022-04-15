@@ -2,10 +2,9 @@ version: '3'
 services:
   web:
     build: .
-    command: python app.py
+    command: python dev.py
     environment: 
       DEBUG: 1
-      PORT: 5000
     volumes:
       - .:/app
     ports:

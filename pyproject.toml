@@ -1,0 +1,21 @@
+[tool.poetry]
+name = "deal_with_it"
+version = "0.1.0"
+description = ""
+authors = ["Eric Magalhães <eric@emagalha.es>"]
+license = "MIT"
+
+[tool.poetry.dependencies]
+python = "^3.9"
+uvicorn = "^0.17.6"
+fastapi = "^0.75.1"
+dlib = "19.19.0"
+image-to-numpy = "^1.0.0"
+face-recognition = "^1.3.0"
+Jinja2 = "^3.1.1"
+
+[tool.poetry.dev-dependencies]
+
+[build-system]
+requires = ["poetry-core>=1.0.0"]
+build-backend = "poetry.core.masonry.api"
