@@ -29,16 +29,22 @@ class ImageModel(BaseModel):
 
     @root_validator(pre=True)
     def a_parameter_must_be_passed(cls, values):
-        if True not in map(lambda x: bool(x), values):
-            raise ValueError('An url or a base64 string must be passed')
+        if True not in map(lambda x: bool(x), values.values()):
+            raise ValueError('An url or a base64 string must be passed.')
         return values
-            
+
+    @root_validator()
+    def only_a_single_parameter_must_be_passed(cls, values):
+        if True not in map(lambda x: bool(x is None), values.values()):
+            raise ValueError('An url OR a base64 string must be passed, not both.')
+        return values
+
     @validator('base64')
     def base64_must_have_a_header(cls, v):    
         if v is not None:
             pattern = re.compile('^data:image/.+;base64,')            
             if not pattern.match(v):
-                raise ValueError('base64 image must have a format header')        
+                raise ValueError('The base64 image must have a format header.')        
         return v
 
     @validator('url')
@@ -46,9 +52,9 @@ class ImageModel(BaseModel):
         if v is not None:
             req = requests.head(v)
             if req.status_code != 200:
-                raise ValueError(f'The URL is not acessible. HTTP status: {req.status_code}')
+                raise ValueError(f'The URL is not acessible. HTTP status: {req.status_code}.')
             if not req.headers['content-type'].startswith('image/'):
-                raise ValueError('The URL is not an image')
+                raise ValueError('The URL is not an image.')
         return v
 
     def _load_image_data(self):

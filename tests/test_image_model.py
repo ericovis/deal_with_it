@@ -1,3 +1,4 @@
+import base64
 import pytest
 
 from src.models import ImageModel
@@ -8,6 +9,9 @@ def test_a_param_must_be_passed_to_the_image():
     with pytest.raises(ValidationError):
         ImageModel()
 
+def test_only_a_single_patem_must_be_passed_to_the_image(image_url, base64_image):
+    with pytest.raises(ValidationError):
+        ImageModel(url=image_url, base64=base64_image)
 
 def test_a_base64_image_should_have_a_valid_header(base64_image):
     with pytest.raises(ValidationError):
