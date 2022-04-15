@@ -9,12 +9,13 @@ from pydantic import (
     BaseModel,
     validator,
     PrivateAttr,
-    root_validator
+    root_validator,
+    AnyHttpUrl
 )
 
 
-class Image(BaseModel):
-    url: str | None = None
+class ImageModel(BaseModel):
+    url: AnyHttpUrl | None = None
     base64: str | None = None
     _data: Any = PrivateAttr(None)  
 
@@ -34,18 +35,20 @@ class Image(BaseModel):
             
     @validator('base64')
     def base64_must_have_a_header(cls, v):    
-        pattern = re.compile('^data:image/.+;base64,')            
-        if not pattern.match(v):
-            raise ValueError('base64 image must have a format header')        
+        if v is not None:
+            pattern = re.compile('^data:image/.+;base64,')            
+            if not pattern.match(v):
+                raise ValueError('base64 image must have a format header')        
         return v
 
     @validator('url')
     def url_must_be_an_existing_image(cls, v):
-        req = requests.head(v)
-        if req.status_code != 200:
-            raise ValueError(f'The URL is not acessible. HTTP status: {req.status_code}')
-        if not req.headers['content-type'].startswith('image/'):
-            raise ValueError('The URL is not an image')
+        if v is not None:
+            req = requests.head(v)
+            if req.status_code != 200:
+                raise ValueError(f'The URL is not acessible. HTTP status: {req.status_code}')
+            if not req.headers['content-type'].startswith('image/'):
+                raise ValueError('The URL is not an image')
         return v
 
     def _load_image_data(self):
