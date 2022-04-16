@@ -20,5 +20,5 @@ jobs:
       run: docker tag ericovis/python3-10-dlib:$(date +%s) ericovis/python3-10-dlib:latest
     - name: Docker login
       run: docker login -u ericovis -p ${DOCKER_HUB_TOKEN}
-    - name: Add latest tag
+    - name: Docker push
       run: docker push ericovis/python3-10-dlib:$(date +%s) ericovis/python3-10-dlib:latest
