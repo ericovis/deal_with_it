@@ -9,14 +9,28 @@ on:
       - 'poetry.lock'
   pull_request:
     branches: [ master ]
+    paths:
+      - 'src/**'
+      - 'tests/**'
+      - 'poetry.lock'
 
 jobs:
 
-  build:
-
+  test:
     runs-on: ubuntu-latest
 
     steps:
     - uses: actions/checkout@v3
     - name: Test
-      run: docker-compose run web pytest -vvv
+      run: docker-compose run web coverage run pytest -vvv 
+  coverage:
+    needs: [ test ]
+    name: coverage
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@master
+    - uses: paambaati/codeclimate-action@v2.2.4
+      env:
+        CC_TEST_REPORTER_ID: $CODE_CLIMATE_TOKEN
+      with:
+        coverageCommand: yarn coverage
