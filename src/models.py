@@ -33,7 +33,7 @@ class ImageModel(BaseModel):
 
     @root_validator(pre=True)
     def a_single_parameter_must_be_passed(cls, values):
-        if len(values.keys()) > 1:
+        if 'base64' in values and 'url' in values:
             raise ValueError('An url OR a base64 string must be passed, not both.')
         if 'base64' not in values and 'url' not in values:
             raise ValueError('An url or a base64 string must be passed.')       
