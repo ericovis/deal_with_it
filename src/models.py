@@ -35,7 +35,7 @@ class ImageModel(BaseModel):
     def a_single_parameter_must_be_passed(cls, values):
         if len(values.keys()) > 1:
             raise ValueError('An url OR a base64 string must be passed, not both.')
-        if True not in map(lambda x: bool(x), values.values()):
+        if 'base64' not in values and 'url' not in values:
             raise ValueError('An url or a base64 string must be passed.')       
         return values
 
