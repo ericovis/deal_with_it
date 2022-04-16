@@ -14,6 +14,10 @@ from pydantic import (
 )
 
 
+class ApiResponseModel(BaseModel):
+    image: str
+
+
 class ImageModel(BaseModel):
     url: AnyHttpUrl | None = None
     base64: str | None = None
