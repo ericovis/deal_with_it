@@ -3,6 +3,10 @@ name: Tests
 on:
   push:
     branches: [ master ]
+    paths:
+      - 'src/**'
+      - 'tests/**'
+      - 'poetry.lock'
   pull_request:
     branches: [ master ]
 
