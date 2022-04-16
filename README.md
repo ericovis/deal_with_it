@@ -1,7 +1,8 @@
 # Deal With It! :sunglasses:
 A Python API for creating "Deal With It"-like Images
 
-[![Build Status](https://travis-ci.org/ericovis/deal_with_it.svg?branch=master)](https://travis-ci.org/ericovis/deal_with_it)
+[![Maintainability](https://api.codeclimate.com/v1/badges/c605c377abc80d6e9a7b/maintainability)](https://codeclimate.com/github/ericovis/deal_with_it/maintainability)
+[![Test Coverage](https://api.codeclimate.com/v1/badges/c605c377abc80d6e9a7b/test_coverage)](https://codeclimate.com/github/ericovis/deal_with_it/test_coverage)
 
 Demo and docs available at https://deal-with-it.herokuapp.com/
 
@@ -22,7 +23,7 @@ The app will be available at http://localhost:5000
 ## Running tests
 
 ```
-docker-compose run web /bin/bash -lc 'pipenv install --system --dev && pytest'
+docker-compose run web pytest
 ```
 
 ## Contributing
