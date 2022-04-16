@@ -24,8 +24,9 @@ jobs:
 
     steps:
     - uses: actions/checkout@v3
-    - uses: paambaati/codeclimate-action@v2.2.4
+    - run: curl -L https://codeclimate.com/downloads/test-reporter/test-reporter-latest-linux-amd64 > ./cc-test-reporter
+    - run: chmod +x ./cc-test-reporter
+    - run: ./cc-test-reporter before-build
+    - run: docker-compose run web coverage run pytest -vvv && ./cc-test-reporter after-build --exit-code $?
       env:
         CC_TEST_REPORTER_ID: $CODE_CLIMATE_TOKEN
-      with:
-        coverageCommand: docker-compose run web coverage run pytest -vvv 
