@@ -1,4 +1,4 @@
-name: Base Docker image push
+name: Tests
 
 on:
   push:
@@ -15,4 +15,4 @@ jobs:
     steps:
     - uses: actions/checkout@v3
     - name: Test
-      run: docker-compose run web pytest
+      run: docker-compose run web pytest -vvv
