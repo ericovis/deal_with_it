@@ -1,7 +1,7 @@
 # Deal With It! :sunglasses:
 A Python API for creating "Deal With It"-like Images
 
-![Tests](https://github.com/ericovis/deal_with_it/actions/workflows/tests.yml/badge.svg?branch=master)
+[![Tests](https://github.com/ericovis/deal_with_it/actions/workflows/tests.yml/badge.svg?branch=master)](https://github.com/ericovis/deal_with_it/actions/workflows/tests.yml)
 [![Maintainability](https://api.codeclimate.com/v1/badges/c605c377abc80d6e9a7b/maintainability)](https://codeclimate.com/github/ericovis/deal_with_it/maintainability)
 [![Test Coverage](https://api.codeclimate.com/v1/badges/c605c377abc80d6e9a7b/test_coverage)](https://codeclimate.com/github/ericovis/deal_with_it/test_coverage)
 
