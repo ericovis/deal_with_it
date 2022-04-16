@@ -29,4 +29,6 @@ jobs:
     - run: ./cc-test-reporter before-build
     - run: docker-compose run web coverage run -m pytest -vvv
     - run: docker-compose run web coverage xml
-    - run: ./cc-test-reporter after-build --exit-code $? -r ${{ secrets.CODE_CLIMATE_TOKEN }}
+    - run: ./cc-test-reporter after-build --exit-code $?
+      env:
+        CC_TEST_REPORTER_ID: ${{ secrets.CODE_CLIMATE_TOKEN }}
