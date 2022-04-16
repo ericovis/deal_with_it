@@ -21,16 +21,8 @@ jobs:
 
     steps:
     - uses: actions/checkout@v3
-    - name: Test
-      run: docker-compose run web coverage run pytest -vvv 
-  coverage:
-    needs: [ test ]
-    name: coverage
-    runs-on: ubuntu-latest
-    steps:
-    - uses: actions/checkout@master
     - uses: paambaati/codeclimate-action@v2.2.4
       env:
         CC_TEST_REPORTER_ID: $CODE_CLIMATE_TOKEN
       with:
-        coverageCommand: yarn coverage
+        coverageCommand: docker-compose run web coverage run pytest -vvv 
