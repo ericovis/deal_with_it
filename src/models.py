@@ -32,15 +32,11 @@ class ImageModel(BaseModel):
         return self._data
 
     @root_validator(pre=True)
-    def a_parameter_must_be_passed(cls, values):
-        if True not in map(lambda x: bool(x), values.values()):
-            raise ValueError('An url or a base64 string must be passed.')
-        return values
-
-    @root_validator()
-    def only_a_single_parameter_must_be_passed(cls, values):
-        if True not in map(lambda x: bool(x is None), values.values()):
+    def a_single_parameter_must_be_passed(cls, values):
+        if len(values.keys()) > 1:
             raise ValueError('An url OR a base64 string must be passed, not both.')
+        if 'base64' not in values and 'url' not in values:
+            raise ValueError('An url or a base64 string must be passed.')       
         return values
 
     @validator('base64')
