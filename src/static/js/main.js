@@ -12,14 +12,14 @@ const toBase64 = file => new Promise((resolve, reject) => {
 async function getData() {
     let data = {
         url: null,
-        image: null
+        base64: null
     };
     let form = document.getElementById('form');
 
     if (form.elements.url.value) {
         data.url = form.elements.url.value
     } else if (form.elements.image.files[0]) {
-        data.image = await toBase64(form.elements.image.files[0]);
+        data.base64 = await toBase64(form.elements.image.files[0]);
     }
     return data;
 }
@@ -56,7 +56,7 @@ async function onSubmit() {
     isLoading();
     let data = await getData();
 
-    if (!data.url && !data.image) {        
+    if (!data.url && !data.base64) {        
         form.style.display = 'block';
         setMessage('No image or URL was provided!')
         result.style.display = 'block';
@@ -75,14 +75,12 @@ async function onSubmit() {
         function(response) {
         if (response.status !== 200) {
             response.json().then(function(data) {
-                setMessage(data.message);
-                
+                setMessage(data.message);                
             });            
         } else {
             response.json().then(function(data) {
                 let img = document.getElementById('result-img');
-                let out = JSON.parse(data);
-                img.src = out.image;
+                img.src = data.image;
                 img.style.display = 'block';                        
             });
         }

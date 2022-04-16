@@ -1,7 +1,7 @@
 FROM ericovis/python3-10-dlib:latest
 
-COPY Pipfile Pipfile.lock ./
+COPY pyproject.toml poetry.lock ./
 
-RUN pipenv install --system
+RUN poetry install
 
 COPY . . 

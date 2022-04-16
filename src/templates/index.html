@@ -17,8 +17,8 @@
     <meta property="og:image" content="https://deal-with-it.herokuapp.com/static/img/deal_with_me.png" />
     <meta name="author" content="Eric Magalhães">
     <meta property="og:description" content='A Python API for creating "Deal With It"-like Images. Check https://deal-with-it.herokuapp.com/ for information about how it works, demo and docs.' />
-    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
-    <link rel="icon" href="{{ url_for('static', filename='img/favicon.png') }}" type="image/png" sizes="16x16">
+    <link rel="stylesheet" href="{{ url_for('static', path='css/style.css') }}">
+    <link rel="icon" href="{{ url_for('static', path='img/favicon.png') }}" type="image/png" sizes="16x16">
     <link href="https://fonts.googleapis.com/css2?family=Open+Sans:wght@400;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="//cdnjs.cloudflare.com/ajax/libs/highlight.js/10.0.3/styles/atom-one-dark.min.css">
 </head>
@@ -47,22 +47,22 @@
                 <div class="showcase">
                     <div class="showcase-img">
                         <p>Turns this:</p>
-                        <img src="{{ url_for('static', filename='img/me.jpg') }}" alt="Original picture">
+                        <img src="{{ url_for('static', path='img/me.jpg') }}" alt="Original picture">
                     </div>
                     <div class="showcase-img">
                         <p>Into this:</p>
-                        <img src="{{ url_for('static', filename='img/deal_with_me.png') }}" alt="Processed picture">
+                        <img src="{{ url_for('static', path='img/deal_with_me.png') }}" alt="Processed picture">
                     </div>
                 </div>
                 <p>It also works on pictures with multiple people:</p>
                 <div class="showcase">
                     <div class="showcase-img">
                         <p>Before:</p>
-                        <img src="{{ url_for('static', filename='img/multiple_people.jpg') }}" alt="Original picture">
+                        <img src="{{ url_for('static', path='img/multiple_people.jpg') }}" alt="Original picture">
                     </div>
                     <div class="showcase-img">
                         <p>After:</p>
-                        <img src="{{ url_for('static', filename='img/deal_with_multiple_people.png') }}" alt="Processed picture">
+                        <img src="{{ url_for('static', path='img/deal_with_multiple_people.png') }}" alt="Processed picture">
                     </div>
                 </div>
                 <p>
@@ -119,7 +119,7 @@
                 </code></pre>
                 <pre><code class="json">
 {
-  "image": "base64 string here"  
+  "base64": "base64 string here"  
 }
                 </code></pre>
 
@@ -150,7 +150,7 @@
         </div>
     </footer>
     <script src="//cdnjs.cloudflare.com/ajax/libs/highlight.js/10.0.3/highlight.min.js"></script>
-    <script src="{{ url_for('static', filename='js/main.js') }}"></script>
+    <script src="{{ url_for('static', path='js/main.js') }}"></script>
 </body>
 
 </html>
