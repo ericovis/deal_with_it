@@ -1,8 +1,12 @@
 name: Base Docker image push
 
 on:
+  workflow_dispatch: {}
   push:
     branches: [ master ]
+    paths:
+      - 'Dockerfile-base'
+      - '.github/workflows/base-docker-image.yml'
 
 jobs:
 
