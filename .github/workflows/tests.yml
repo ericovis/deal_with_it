@@ -6,12 +6,14 @@ on:
     paths:
       - 'src/**'
       - 'tests/**'
+      - '.github/**'
       - 'poetry.lock'
   pull_request:
     branches: [ master ]
     paths:
       - 'src/**'
       - 'tests/**'
+      - '.github/**'
       - 'poetry.lock'
 
 jobs:
