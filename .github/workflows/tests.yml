@@ -27,6 +27,7 @@ jobs:
     - run: curl -L https://codeclimate.com/downloads/test-reporter/test-reporter-latest-linux-amd64 > ./cc-test-reporter
     - run: chmod +x ./cc-test-reporter
     - run: ./cc-test-reporter before-build
-    - run: docker-compose run web coverage run -m pytest -vvv
+    - name: Tests
+      run: docker-compose run web coverage run -m pytest -vvv
     - run: docker-compose run web coverage xml
     - run: ./cc-test-reporter after-build --exit-code $? -r be45f5310772816cc4b9d2581caaf684ea560d08bafd11fee6af30b69e1178b2
