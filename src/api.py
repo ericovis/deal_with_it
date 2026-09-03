@@ -8,7 +8,7 @@ Redis round trip.
 
 import logging
 
-from fastapi import APIRouter, FastAPI, HTTPException, Request, status
+from fastapi import APIRouter, HTTPException, Request, status
 
 from src import jobs
 from src.models import ImageRequest, JobCreated, JobResult
@@ -57,14 +57,3 @@ async def read_job(job_id: str) -> JobResult:
 @router.get('/health', summary='Liveness and broker connectivity')
 async def health() -> dict:
     return {'status': 'ok', 'redis': jobs.is_broker_reachable()}
-
-
-def create_api() -> FastAPI:
-    api = FastAPI(
-        title='Deal With It!',
-        description='A Python API for creating "Deal With It"-like images.',
-        version='1.0.0',
-        redoc_url=None,
-    )
-    api.include_router(router)
-    return api

@@ -11,7 +11,7 @@ import ipaddress
 import re
 import socket
 from io import BytesIO
-from urllib.parse import urlparse, urlunparse
+from urllib.parse import urljoin, urlparse, urlunparse
 
 import numpy as np
 import requests
@@ -127,7 +127,7 @@ def fetch_url(url: str, settings: Settings | None = None) -> bytes:
                     raise ImageSourceError('The URL redirected without a target.')
                 # Re-validate every hop: the first URL being public says
                 # nothing about where it points.
-                target = _validated_target(requests.compat.urljoin(target, location), settings)
+                target = _validated_target(urljoin(target, location), settings)
                 continue
 
             if response.status_code != 200:

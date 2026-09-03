@@ -13,7 +13,9 @@ services:
       timeout: 3s
       retries: 5
     ports:
-      - "6379:6379"
+      # Bound to localhost only: this Redis has no password, and it is only
+      # published so a uvicorn running outside compose can reach it.
+      - "127.0.0.1:6379:6379"
 
   web:
     build:
@@ -34,6 +36,7 @@ services:
     build:
       context: .
       target: dev
+    # No reloader: RQ has none, so restart this service after editing a task.
     command: python -m src.worker
     environment:
       DWI_REDIS_URL: redis://redis:6379/0
