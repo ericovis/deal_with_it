@@ -186,7 +186,7 @@ input {
     width: 100%;
 }
 
-input[type=button] {
+input[type=button], button[type=submit] {
     color: white;
     background-color: #19647E;
     width: 150px;
@@ -198,8 +198,35 @@ input[type=button] {
     text-transform: uppercase;
 }
 
-input[type=button]:hover {
+input[type=button]:hover, button[type=submit]:hover {
     background-color: #28AFB0;
+}
+
+button[type=submit] {
+    font-family: inherit;
+    font-size: 1rem;
+}
+
+/* HTMX disables the button for the duration of the request. */
+button[type=submit]:disabled {
+    background-color: #9bb7c0;
+    cursor: progress;
+}
+
+fieldset {
+    border: none;
+    padding: 0;
+    margin: 0;
+}
+
+label {
+    display: block;
+    font-weight: bold;
+}
+
+label.file-label {
+    margin-top: 1rem;
+    font-weight: normal;
 }
 
 .submit {
@@ -229,24 +256,26 @@ input[type=button]:hover {
     -webkit-animation: spin 1s infinite linear;
 }
 
-#loading {
-    text-align: center;
-    display: none;
-    margin: 2rem 0;
-}
-
 #result {
     text-align: center;
-    display: none;
+}
+
+/* The self-polling fragment htmx swaps in while a job is running. */
+.working {
+    margin: 2rem 0;
 }
 
 #message {
     font-weight: bold;
 }
 
+#message.error {
+    color: #b3261e;
+}
+
 #result-img {
-    display: none;
     margin: 2rem 0;
+    border-radius: 4px;
 }
 
 @media screen and (max-width: 640px) {
