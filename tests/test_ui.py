@@ -42,10 +42,19 @@ class TestPage:
         assert 'hx-encoding="multipart/form-data"' in body
         assert 'hx-target="#result"' in body
 
-    def test_points_at_the_api_docs_rather_than_a_dead_host(self, client):
+    def test_points_at_its_own_api_docs(self, client):
+        assert '/api/docs' in client.get('/').text
+
+    def test_social_card_urls_are_relative_by_default(self, client):
+        """The page used to hardcode a deployment host that stopped existing."""
+        assert 'content="/static/img/deal_with_me.png"' in client.get('/').text
+
+    def test_social_card_urls_are_absolute_when_a_public_url_is_configured(
+            self, client, monkeypatch):
+        monkeypatch.setenv('DWI_PUBLIC_URL', 'https://example.test/')
+        jobs.get_settings.cache_clear()
         body = client.get('/').text
-        assert '/api/docs' in body
-        assert 'herokuapp.com' not in body
+        assert 'content="https://example.test/static/img/deal_with_me.png"' in body
 
     def test_static_assets_are_served(self, client):
         for path in ('/static/css/style.css', '/static/img/glasses.png'):

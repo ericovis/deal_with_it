@@ -156,7 +156,7 @@ ONNX-exported detector. `image_to_numpy` was already dropped — it only did
 
 ## Testing
 
-`uv run pytest` — 163 tests, ~30s (the real detector accounts for nearly all
+`uv run pytest` — 165 tests, ~30s (the real detector accounts for nearly all
 of it). Everything is hermetic:
 
 - `stub_dns` (autouse) replaces `socket.getaddrinfo`, so no test resolves a
@@ -200,9 +200,10 @@ Every numbered pitfall from the original audit, for the record:
 - Detection also runs on a copy downscaled to `DWI_MAX_DETECTION_SIZE` (1600px
   longest side): 12.5s → 2.6s on the group photo, same 5 faces, glasses
   centroid drifting 0.8% of image width. Compositing stays full-resolution.
-- **Stale everything** → Heroku, Poetry, Pipenv, gunicorn, the Flask mention in
-  the page copy, `Dockerfile-base`, the Docker Hub push workflow and the dead
-  CodeClimate badges are all gone.
+- **Stale everything** → the packaging and deployment leftovers of three
+  earlier hosting arrangements, the wrong framework named in the page copy,
+  `Dockerfile-base`, the Docker Hub push workflow and the dead CodeClimate
+  badges are all gone. uv and the compose stack are the whole story now.
 
 ## Known rough edges
 
