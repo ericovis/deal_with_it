@@ -176,12 +176,23 @@ class TestDetectionDownscaling:
         assert small_area == pytest.approx(full_area, rel=0.25)
 
 
-def test_the_showcase_group_photo_still_has_faces_to_draw_on(multiple_faces_image):
-    """The page's before/after is only convincing if the detector agrees.
+@pytest.mark.parametrize('filename,claimed', [
+    ('me.jpg', 1),
+    ('apollo_11_crew.jpg', 3),
+    ('multiple_people.jpg', 8),
+    ('solvay_1927.jpg', 29),
+    ('glasses.png', 0),
+])
+def test_every_sample_has_the_faces_its_caption_claims(filename, claimed):
+    """The tiles say "Three faces", "Twenty-nine faces" and so on.
 
-    Pinned because the image is replaceable: swap it for one the detector
-    struggles with and the showcase quietly stops demonstrating anything.
+    Pinned because the images are replaceable and the captions are not
+    generated: resize one, swap one, or upgrade the detector, and the page
+    would quietly start lying. Anyone who changes a picture has to change the
+    number in src/ui.py:SAMPLES to match.
     """
     import face_recognition as fr
 
-    assert len(fr.face_locations(as_array(multiple_faces_image))) >= 5
+    from tests.conftest import STATIC_IMG
+
+    assert len(fr.face_locations(as_array(STATIC_IMG / filename))) == claimed

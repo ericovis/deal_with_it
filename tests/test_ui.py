@@ -42,11 +42,13 @@ class TestPage:
     def test_the_furniture_is_all_there(self, client, needle):
         assert needle in client.get('/').text
 
-    def test_offers_the_three_samples(self, client):
+    def test_offers_every_sample(self, client):
+        from src.ui import SAMPLES
+
         body = client.get('/').text
-        for name in ('me', 'group', 'glasses'):
+        for name in SAMPLES:
             assert f'hx-vals=\'{{"sample": "{name}"}}\'' in body
-        assert body.count('class="sample"') == 3
+        assert body.count('class="sample"') == len(SAMPLES)
 
     def test_the_queue_starts_empty(self, client):
         body = client.get('/').text

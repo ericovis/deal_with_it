@@ -95,9 +95,13 @@ class Sample:
     art: bool = False
 
 
+#: Ordered easiest to hardest, ending with the one that is meant to fail.
+#: Counts are what the detector actually finds -- see tests/test_processor.py.
 SAMPLES = {
     'me': Sample('me.jpg', 'One face', 'image/jpeg'),
+    'apollo': Sample('apollo_11_crew.jpg', 'Three faces', 'image/jpeg'),
     'group': Sample('multiple_people.jpg', 'Eight faces', 'image/jpeg'),
+    'solvay': Sample('solvay_1927.jpg', 'Twenty-nine faces', 'image/jpeg'),
     'glasses': Sample('glasses.png', 'No faces · fails', 'image/png', art=True),
 }
 
@@ -208,7 +212,7 @@ def site_header(active: str, theme: str | None, reachable: bool) -> Header:
 
     return Header(
         Div(
-            A(Img(src='/static/img/glasses.png', alt=''), Span('Deal With It!'),
+            A(Img(src='/static/img/glasses.svg', alt=''), Span('Deal With It!'),
               href='/', cls='brand'),
             Nav(
                 nav_link('App', '/', 'app'),
@@ -270,7 +274,7 @@ def upload_form(replace: bool = False) -> Form:
               hx_post='/submit', hx_trigger='change', hx_encoding='multipart/form-data',
               hx_target='#queue', hx_swap='afterbegin'),
         Label(
-            Img(src='/static/img/glasses.png', alt=''),
+            Img(src='/static/img/glasses.svg', alt=''),
             Span('Drop pictures here', cls='title'),
             Span('or ', Em('browse your computer'), cls='sub'),
             Span('PNG or JPEG, up to 10 MB each. Several at once is fine.', cls='limits'),

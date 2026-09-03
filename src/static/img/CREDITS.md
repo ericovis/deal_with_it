@@ -1,14 +1,42 @@
 # Image credits
 
+Everything the app ships is either the project's own or public domain. Each
+sample was resized from the original and is not otherwise altered.
+
+## Public domain
+
 `multiple_people.jpg` — the 2013 class of NASA astronauts, photographed by
-Robert Markowitz for NASA. **Public domain**: a work of the United States
-federal government, so it carries no copyright.
+Robert Markowitz for NASA. A work of the United States federal government, so
+it carries no copyright.
 
 - Source: https://commons.wikimedia.org/wiki/File:2013_class_of_NASA_astronauts.jpg
-- Resized to 1280px wide from the original; not otherwise altered.
+- Resized to 1280px wide.
 
-`deal_with_multiple_people.png` is that photo run through this app, so it
-inherits the same public domain status.
+`apollo_11_crew.jpg` — the Apollo 11 crew: Neil Armstrong, Michael Collins and
+Buzz Aldrin, photographed for NASA in 1969. A work of the United States
+federal government.
 
-`glasses.png`, `favicon.png`, `me.jpg` and `deal_with_me.png` are the
-project's own.
+- Source: https://commons.wikimedia.org/wiki/File:Apollo_11_Crew.jpg
+- Resized to 1280px wide.
+
+`solvay_1927.jpg` — the fifth Solvay Conference on electrons and photons,
+Brussels, October 1927, photographed by Benjamin Couprie. Published in 1927
+and long out of copyright.
+
+- Source: https://commons.wikimedia.org/wiki/File:Solvay_conference_1927.jpg
+- Resized to 1600px wide.
+
+`deal_with_multiple_people.png` is `multiple_people.jpg` run through this app,
+so it inherits the same status.
+
+## The project's own
+
+`glasses.png`, `glasses.svg`, `favicon.png`, `me.jpg` and `deal_with_me.png`.
+
+`glasses.svg` is `glasses.png` traced with potrace -- the same artwork as
+paths rather than pixels. It is used for the interface's decoration, where it
+stays sharp at any size; the compositor still pastes the PNG, because Pillow
+cannot rasterise SVG without a native dependency the worker does not need.
+
+The sunglasses themselves are the ones from the
+[Deal With It](https://knowyourmeme.com/memes/deal-with-it) meme.
