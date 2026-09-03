@@ -1,171 +1,204 @@
 # CLAUDE.md — deal_with_it
 
-Context for working on this codebase. Written 2026-09-03 while reviving the project; the code
-itself was last touched 2022-04-16.
+Context for working on this codebase. Originally written 2026-09-03 from an
+archaeological read of the 2022-era code; rewritten the same day once the
+revival landed. If something here contradicts the code, the code wins — say so.
 
 ## What it is
 
-A small web app + JSON API that pastes "Deal With It" sunglasses onto every face in a picture.
-`POST /api` takes either an image `url` or a data-URI `base64` string and returns the processed
-image back as a data-URI. `GET /` serves a one-page HTML demo/docs site (Jinja2 template + vanilla
-JS + a static CSS file). FastAPI's `/docs` (Swagger) is enabled; `/redoc` is disabled.
+A web app + JSON API that pastes "Deal With It" sunglasses onto every face in
+a picture. Submitting an image enqueues a background job; the page polls until
+the worker is done.
 
-Face detection is `face_recognition` (which wraps `dlib`); compositing is Pillow. The rotation
-angle of the glasses comes from the vector between the outer left-eye landmark and an inner
-right-eye landmark.
+Face detection is `face_recognition` (a wrapper over `dlib`), compositing is
+Pillow. The glasses angle comes from the vector between the outer left-eye
+landmark and an inner right-eye landmark.
 
-## Layout
+## Architecture
+
+Three processes, because face detection is CPU-bound and takes seconds:
 
 ```
-src/app.py                     FastAPI app: 2 routes, static mount, template config
-src/models.py                  ImageModel (input) + ApiResponseModel (output) — pydantic v1
-src/processors/base.py          BaseProcessor: holds output PIL image, renders base64 data-URI
-src/processors/deal_with_it.py  DealWithItProcessor: detection, angle, glasses resize/paste
-src/templates/index.html        the whole demo/docs page
-src/static/{css,js,img}         style.css, main.js, glasses.png + showcase images
-tests/                          pytest; conftest gives a TestClient, a base64 fixture, a URL
-Dockerfile                      2 stages (dev, heroku) on a prebuilt dlib base image
-Dockerfile-base                 builds ericovis/python3-10-dlib (python:3.10 + dlib + poetry)
-docker-compose.yml              single `web` service, uvicorn --reload on :5000
-heroku.yml                      Heroku container deploy pointing at the `heroku` stage
-.github/workflows/              tests.yml (pytest + CodeClimate coverage), base-docker-image.yml
+        POST /api/jobs                      RQ / Redis
+browser ───────────────► web (FastAPI+FastHTML) ──────► worker (rq)
+        ◄─────────────── 202 {job_id}                     │
+        GET  /api/jobs/{id}  (htmx polls every 1s)         │ fetch, detect, paste
+        ◄─────────────── {state, image}  ◄─────────────────┘
 ```
 
-Request flow: `POST /api` → `ImageModel(**body)` — validation *and* the actual image download /
-decode happen here, inside the model's `__init__` → `DealWithItProcessor(image, STATIC_DIR)` →
-`.call()` mutates `self.output` → `.base64_output` encodes it → response.
+The web tier never touches an image. It validates the request shape, puts a
+payload on the queue and reads job state back — nothing in a handler can block
+longer than a Redis round trip. **The task is enqueued by name**
+(`src/jobs.py:TASK = 'src.tasks.process_image'`) rather than imported, so the
+web process and its container never load dlib. Keep that boundary.
+
+```
+src/app.py          Composition root. FastAPI outer app, FastHTML mounted at /
+src/api.py          The JSON API router, mounted under /api
+src/ui.py           The FastHTML interface: page, form handler, poll fragment
+src/jobs.py         The queue seam: enqueue / result_for / is_broker_reachable
+src/worker.py       `python -m src.worker` — the RQ worker entry point
+src/tasks.py        process_image(): what the worker actually runs
+src/images.py       Fetching (SSRF-guarded) and decoding into a numpy array
+src/models.py       Pydantic v2 request/response schemas. Validates shape only
+src/config.py       Settings, all DWI_-prefixed env vars
+src/errors.py       DealWithItError: failures whose message is safe to show
+src/processors/     BaseProcessor + DealWithItProcessor
+src/static/         style.css and the showcase/glasses images
+tests/              Hermetic: no network, no Redis server, no fixtures on disk
+```
+
+### Why FastAPI *and* FastHTML
+
+Both are Starlette apps, so this is one ASGI stack, not two frameworks
+fighting. FastAPI gives the API pydantic validation and OpenAPI docs at
+`/api/docs`; FastHTML gives the UI htmx-driven interactivity with no
+hand-written JavaScript.
+
+**FastAPI must stay the outer app.** FastHTML installs a static-file catch-all
+as its *first* route, matching any path ending in one of ~50 asset extensions.
+With FastHTML on the outside, `/api/report.csv` never reaches FastAPI.
+`tests/test_api.py::TestDocs::test_api_paths_are_not_swallowed_by_the_static_handler`
+locks that in. That catch-all is also a bare `FileResponse` over the process
+CWD, so `create_ui()` strips it and `src/app.py` mounts `StaticFiles` instead.
+
+### Why RQ
+
+Considered and rejected: Celery (far more machinery than a one-queue app
+needs), arq (asyncio-first, and this work is CPU-bound sync code), Dramatiq
+(fine, but no advantage here). RQ is Redis-only, ~30 lines of integration, and
+its worker **forks per job** — which matters when the job calls into a native
+library that could segfault: only the work horse dies. `src/worker.py` uses the
+forking `Worker` deliberately; `SimpleWorker` appears only in tests.
 
 ## Running it
 
-Everything assumed Docker Compose (the dlib build is why):
+```
+docker compose up                      # http://localhost:5000, docs at /api/docs
+docker compose run --rm web pytest
+docker compose up --scale worker=3     # more detection throughput
+```
+
+`docker` is aliased to `podman` in the user's zsh, and `docker compose`
+delegates to `podman-compose` 1.6.0. Verified working under it: service-name
+DNS, port mapping, and `depends_on: condition: service_healthy`. Image names
+are fully qualified (`docker.io/library/...`) because Podman will not guess a
+registry.
+
+Locally, without containers:
 
 ```
-docker-compose up                      # http://localhost:5000
-docker-compose run web pytest
+uv sync --all-extras                   # dlib-bin is a wheel; no compiler needed
+uv run pytest
+docker compose up -d redis && uv run rq worker deal_with_it &
+uv run uvicorn src.app:app --reload --port 5000
 ```
 
-Local machine as of this writing has **podman 5.4.2, no docker, no poetry, Python 3.13**, so none
-of the above runs as-is — expect to sort out the container story before you can execute anything.
-The base image `ericovis/python3-10-dlib:latest` may or may not still exist on Docker Hub;
-verify before assuming a build works.
+## The dependency situation
 
-## History worth knowing
+`dlib` and `face_recognition` are staying for now (user's call), but they are
+the fragile part of the tree and there are three load-bearing details:
 
-- **2018** — born as an AWS Lambda project: Flask app behind `serverless` + a forked
-  `serverless-wsgi`, with a separate static `web/` front-end.
-- **2020-06** (`5e62248`) — rewritten as a single Heroku container: Flask + Pipenv + Docker,
-  `web/index.html` became a Jinja2 template, images consolidated under `static/`.
-- **2022-04** (`4545883`) — gunicorn added, with `workers = cpu_count() * 2 + 1`.
-- **2022-04-16** (PR #9, `b8646a5`) — the big one: Flask → FastAPI, Pipenv → Poetry, flat modules →
-  `src/` package, `processors.py` split into `base.py` + `deal_with_it.py`, gunicorn dropped for
-  bare uvicorn, `.travis.yml` deleted in favour of GitHub Actions.
-- **2022-04-16** (PRs #10, #11) — the tests and validators in their current shape. Last commits.
-- The seven `origin/archive/pr-*` branches are all abandoned dependabot Pillow/Jinja2 bumps against
-  the **pre-FastAPI Pipfile**. Nothing there to salvage; they can be deleted.
+1. **`setuptools>=80,<82` is not cosmetic.** `face_recognition_models` calls
+   `pkg_resources` at import time; setuptools 82 removed it. Without the upper
+   bound, `import face_recognition` fails with a *misleading* "please install
+   face_recognition_models" — which is already installed. Bisected: 81 works,
+   82 does not.
+2. **`dlib-bin==20.0.1` instead of `dlib`.** Same code, prebuilt manylinux
+   wheel: installs in ~1s instead of a ~5min compile, and was verified to
+   produce bit-identical landmarks. It writes the same files as `dlib`, and
+   `face-recognition` hard-depends on `dlib`, so `[tool.uv]
+   override-dependencies` neutralises that or both get installed and one
+   clobbers the other. To go back to source builds: swap to `dlib==20.0.1`,
+   drop the override, and note modern dlib pulls cmake in as a PEP 517 build
+   dep (no system cmake needed).
+3. **No apt packages are required.** Verified with `ldd`: the dlib extension
+   needs only libstdc++/libm/libgcc/libc, all present in `python:3.12-slim`.
+   It is built without BLAS, LAPACK, CUDA or image codecs; Pillow does the
+   image I/O. Don't add an apt layer "just in case".
 
-Design intent that no longer holds: it was deliberately built to run in **one Heroku container with
-no worker/queue**, doing CPU-bound face detection inline in the request. Multi-container is now on
-the table, so that constraint is gone — this is the main thing the revival is about.
+Replacement candidates when the time comes: mediapipe, InsightFace, or an
+ONNX-exported detector. `image_to_numpy` was already dropped — it only did
+`ImageOps.exif_transpose`, verified identical across all 8 EXIF orientations.
 
-## Known pitfalls (roughly by severity)
+## Testing
 
-These were found by reading the code, not by running it — the ones marked *unverified* need a
-reproduction before being treated as fact.
+`uv run pytest` — 142 tests, ~30s (the real detector accounts for nearly all
+of it). Everything is hermetic:
 
-**Blocking / concurrency**
-1. `src/app.py:28` — the endpoint is `async def` but calls fully synchronous, CPU-heavy code
-   (`fr.face_locations`, Pillow). Every request blocks the event loop, so one uvicorn worker
-   serialises all traffic and can't even answer a health check while processing. Either move the
-   work off-process (queue + worker) or, as a stopgap, make the handler `def` so Starlette runs it
-   in a threadpool.
-2. `src/models.py:53,67` — `requests.head` / `requests.get` run *inside pydantic validators*, i.e.
-   synchronous network I/O in the request path, with **no timeout**. A slow host hangs a worker
-   indefinitely.
-3. The URL is fetched twice (HEAD to validate, GET to download). Racy and wasteful.
+- `stub_dns` (autouse) replaces `socket.getaddrinfo`, so no test resolves a
+  real name and the SSRF guard has predictable addresses to reject.
+- `responses` intercepts HTTP; `fakeredis` stands in for the broker.
+- `sync_queue` runs jobs inline (`is_async=False`). RQ records a failing job
+  as failed rather than re-raising, exactly as a real worker does, so failure
+  paths are genuinely exercised.
+- `async_queue` + `drain` (a `SimpleWorker` burst) covers the
+  queued→finished transition. The forking `Worker` **silently does nothing**
+  against fakeredis — never use it in a test.
+- `stub_task` repoints `jobs.TASK` at a fake in `tests/support.py`. Job
+  functions must be importable, so they cannot be defined in a test body.
+- Real detection runs against the repo's own images: `me.jpg` (1 face),
+  `multiple_people.jpg` (5 faces), `glasses.png` (none).
 
-**Correctness**
-4. *unverified* — The demo form is almost certainly broken against the current API. `main.js`
-   `getData()` always builds `{url: null, base64: null}` and fills one in, so both keys are always
-   present in the JSON; `a_single_parameter_must_be_passed` (`src/models.py:36`) tests key
-   *presence*, not value, and rejects it with "not both". The validator should check for non-`None`
-   values instead.
-5. Error display in the browser is also broken: `main.js` reads `data.message`, but FastAPI
-   validation failures return `{"detail": [...]}`. The `message` shape is a leftover from the Flask
-   API.
-6. No faces found → `self.output` stays `None` → `base64_output` returns `None` → fails
-   `ApiResponseModel.image: str` → 500. The Flask version returned a clean 400 "No faces were
-   found on this image". This is a regression from PR #9.
-7. Malformed base64 raises `binascii.Error` from `ImageModel.__init__` → 500 instead of 422.
-   Doing the decode in `__init__` (outside the validation machinery) is the root cause; it belongs
-   in a validator or, better, out of the model entirely.
-8. `functools.cache` on the method `BaseProcessor._base64_output` (`src/processors/base.py:24`)
-   caches on `self`, so the global cache holds a strong reference to every processor — and its
-   decoded numpy image — for the life of the process. Unbounded memory growth per request.
+## What the revival changed
 
-**Security**
-9. Unauthenticated server-side fetch of any user-supplied URL = SSRF. No allowlist, no
-   private-IP/link-local blocking, no redirect limit, no `Content-Length` cap, no timeout.
-10. No cap on input image size or dimensions anywhere; a large image is a cheap way to exhaust
-    CPU and memory (no `Image.MAX_IMAGE_PIXELS` handling / decompression-bomb guard).
-11. No rate limiting, no CORS config, and `--forwarded-allow-ips '*'` in the Dockerfile trusts
-    `X-Forwarded-*` from anyone.
+Every numbered pitfall from the original audit, for the record:
 
-**Dependencies / toolchain**
-12. `pyproject.toml` claims `python = "^3.9"` but `src/models.py:22` uses `X | None`, which needs
-    3.10. The declared floor is wrong.
-13. Everything is pinned to 2022: pydantic **1.9.0** (v1 `validator`/`root_validator` API — a v2
-    migration is a rewrite of `models.py`), fastapi 0.75.1, starlette 0.17.1, uvicorn 0.17.6,
-    Pillow 9.1.0, numpy 1.22.3, requests 2.27.1, pytest 7.1.1.
-14. `dlib` hard-pinned to `19.19.0` and built from source in the base image — the reason for the
-    whole custom-base-image dance. `face_recognition` 1.3.0 is unmaintained.
-    **User's decision: keep both for now, replace later.** Candidate replacements when that time
-    comes: mediapipe, InsightFace, or ONNX-exported detectors/landmarkers.
-15. `image_to_numpy` 1.0.0 is a tiny abandoned package whose only job is EXIF-orientation-correct
-    loading. Trivially replaceable with `PIL.ImageOps.exif_transpose` + `np.asarray`.
-16. `Dockerfile` uses `poetry install --no-dev --remove-untracked`; both flags are gone in modern
-    Poetry (`--without dev`, `--sync`). `[tool.poetry.dev-dependencies]` is likewise deprecated.
-17. Base image is referenced as `:latest` — unpinned and mutable.
-18. No `.dockerignore`, so `.git` and everything else lands in the build context.
+- **Event-loop blocking** → the work moved to an RQ worker; handlers only
+  talk to Redis.
+- **Network I/O in pydantic validators** → gone. `src/models.py` validates
+  shape only, and `tests/test_models.py` asserts it never touches the network.
+- **The demo form was broken for years** — the old validator checked key
+  *presence*, so the page's `{"url": null, "base64": "..."}` was rejected as
+  "both". Now value-based, with a regression test.
+- **Error display was broken** — the JS read `data.message`, a leftover from
+  the Flask API that returned `detail`. No JS left to get it wrong.
+- **No-faces → 500** → a `failed` state with the message
+  "No faces were found in this image."
+- **`functools.cache` on a method** leaked every processor and its decoded
+  image. Now memoised per instance, with a weakref test to prove it.
+- **SSRF** → `src/images.py` resolves the host, refuses non-global addresses,
+  re-validates every redirect hop, caps the body while streaming, and enforces
+  a timeout. Off-by-default escape hatch: `DWI_ALLOW_PRIVATE_ADDRESSES`.
+- **No size limits** → `DWI_MAX_IMAGE_BYTES` (10 MB) and `DWI_MAX_IMAGE_PIXELS`
+  (40 MP, checked from the header before decoding).
+- **Per-face `face_landmarks` calls** re-ran detection on the whole image for
+  every person: 11.4s vs 0.02s on the group photo. One batched call now.
+- Detection also runs on a copy downscaled to `DWI_MAX_DETECTION_SIZE` (1600px
+  longest side): 12.5s → 2.6s on the group photo, same 5 faces, glasses
+  centroid drifting 0.8% of image width. Compositing stays full-resolution.
+- **Stale everything** → Heroku, Poetry, Pipenv, gunicorn, the Flask mention in
+  the page copy, `Dockerfile-base`, the Docker Hub push workflow and the dead
+  CodeClimate badges are all gone.
 
-**Tests / CI**
-19. Tests hit the live internet: `tests/conftest.py:22` and several `test_image_model.py` cases
-    depend on `https://emagalha.es/...` responding a particular way. Not hermetic, and the 404/
-    non-image cases assert on someone's live server behaviour.
-20. `tests/test_api.py` asserts on exact pydantic v1 error strings — these will all change under
-    pydantic v2.
-21. `.github/workflows/tests.yml` calls `docker-compose` (v1 CLI, no longer on GitHub runners) and
-    posts to CodeClimate with a hardcoded reporter ID; CodeClimate's free OSS product is
-    discontinued, so those README badges are dead weight.
-22. Coverage config lives nowhere — `coverage run -m pytest` with no `[tool.coverage]` section.
+## Known rough edges
 
-**Stale content**
-23. `index.html` still says the REST API "is written using Flask" (`:79`) and links
-    `deal-with-it.herokuapp.com` in five places (og/twitter meta + API docs); Heroku's free tier is
-    gone, so that host is dead. README points at the same URL.
-24. `main.js:3` uses `hljs.initHighlightingOnLoad()`, removed in highlight.js 11; the page pins
-    10.0.3 from cdnjs.
-25. `docker-compose.yml` declares the obsolete `version: '3'` key; its `DEBUG: 1` env var is read
-    by nothing.
-
-**Minor / quality**
-26. `deal_with_it.py:45` calls `fr.face_landmarks` once per face inside the loop, re-processing the
-    whole image each time. One call with all `face_locations` does the same work once.
-27. Magic numbers with no explanation: `offset = 415/1024`, `increase=0.3`. Worth a comment.
-28. No `/health` endpoint, no logging configuration, no settings/config module.
-29. `BaseProcessor.call()` is a silent `pass` rather than raising `NotImplementedError`.
-
-## Direction for the revival
-
-Agreed so far: keep `dlib` + `face_recognition` for now, and move off the single-container design
-to a multi-container one (API + worker + broker), which is what unblocks pitfalls 1–3. Nothing
-else is decided yet — ask before assuming a target architecture, queue technology, or deployment
-platform.
+- The API is unauthenticated and unthrottled. The SSRF guard stops it being a
+  network proxy, but nothing stops someone burning worker CPU.
+- Redis runs with no `maxmemory` and no persistence. Results are base64 data
+  URIs stored at ~1.33x their size; a flood of 10 MB submissions is a memory
+  problem. Serving results from an object store (or the filesystem) and
+  returning a URL would fix both that and the giant JSON payloads.
+- The SSRF guard validates the DNS answer it sees, then makes a second
+  resolution when connecting — a rebinding attacker has a window. Closing it
+  means pinning the socket to the validated IP, which breaks TLS hostname
+  verification.
+- `face_recognition_models` puts ~100 MB of model data in the worker image.
+- The HOG detector is CPU-only and mediocre on small or side-on faces.
+- `style.css` is hand-written from 2020 and has had no responsive testing
+  since the rewrite.
+- No structured logging, no metrics, no tracing.
+- CI runs lint + tests only. Building or pushing images is deliberately not
+  wired up yet.
 
 ## Conventions
 
-- 4-space indent, single quotes for strings, double quotes in decorators/route paths (mixed in
-  practice; follow the file you're in).
-- Type hints on function signatures in `src/processors/`, absent in `src/app.py`.
-- Processors subclass `BaseProcessor`, take an `ImageModel`, and expose `call()` + `base64_output`.
-- Tests are plain functions with descriptive `test_<sentence>` names and pytest fixtures from
-  `conftest.py`. No mocking library in use.
+- 4-space indent, single quotes, double quotes in route decorators. Ruff
+  (`line-length 100`, `E,F,W,I,UP,B,SIM,C4`) is the arbiter: `uv run ruff check`.
+- Type hints on function signatures. Comments explain *why*, especially where
+  the obvious-looking alternative is a trap — several here were bugs once.
+- Processors subclass `BaseProcessor`, take a numpy array, expose `call()` and
+  `base64_output`.
+- Failures a user should read subclass `DealWithItError`; anything else is a
+  bug and gets a generic message plus a logged traceback.
+- Tests are grouped in `Test*` classes by behaviour, named as sentences.

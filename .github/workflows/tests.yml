@@ -3,19 +3,9 @@ name: Tests
 on:
   workflow_dispatch: {}
   push:
-    branches: [ master ]
-    paths:
-      - 'src/**'
-      - 'tests/**'
-      - '.github/**'
-      - 'poetry.lock'
+    branches: [master, revival]
   pull_request:
-    branches: [ master ]
-    paths:
-      - 'src/**'
-      - 'tests/**'
-      - '.github/**'
-      - 'poetry.lock'
+    branches: [master]
 
 jobs:
 
@@ -23,11 +13,19 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-    - uses: actions/checkout@v3
-    - run: curl -L https://codeclimate.com/downloads/test-reporter/test-reporter-latest-linux-amd64 > ./cc-test-reporter
-    - run: chmod +x ./cc-test-reporter
-    - run: ./cc-test-reporter before-build
+    - uses: actions/checkout@v4
+
+    - name: Install uv
+      uses: astral-sh/setup-uv@v5
+      with:
+        enable-cache: true
+        cache-dependency-glob: uv.lock
+
+    - name: Install dependencies
+      run: uv sync --locked --all-extras
+
+    - name: Lint
+      run: uv run ruff check .
+
     - name: Tests
-      run: docker-compose run web coverage run -m pytest -vvv
-    - run: docker-compose run web coverage xml
-    - run: ./cc-test-reporter after-build --exit-code $? -r be45f5310772816cc4b9d2581caaf684ea560d08bafd11fee6af30b69e1178b2
+      run: uv run pytest -vvv --cov=src --cov-report=term-missing
