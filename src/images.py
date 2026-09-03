@@ -24,6 +24,54 @@ from src.errors import DealWithItError
 DATA_URI_RE = re.compile(r'^data:image/[\w.+-]+;base64,')
 ALLOWED_SCHEMES = ('http', 'https')
 
+#: The three rejections a caller can be told about verbatim. They are
+#: constants because the web tier shows the same sentences in the live hint
+#: under the URL field, and two wordings for one rule is a bug waiting to
+#: happen.
+SCHEME_ERROR = f'Only {" and ".join(ALLOWED_SCHEMES)} URLs are supported.'
+NO_HOST_ERROR = 'The URL has no host.'
+
+
+def non_public_error(host: str) -> str:
+    return f'The host {host!r} resolves to a non-public address, which is not allowed.'
+
+
+#: Hosts a shape-only check can rule out on sight. Deliberately not the real
+#: guard: that one resolves the name, and resolving is exactly what the web
+#: tier must not do. Anything this lets through is checked again in the worker.
+_PRIVATE_LITERAL = re.compile(
+    r'\A(?:localhost|0\.0\.0\.0'
+    r'|127(?:\.\d{1,3}){3}'
+    r'|10(?:\.\d{1,3}){3}'
+    r'|192\.168(?:\.\d{1,3}){2}'
+    r'|169\.254(?:\.\d{1,3}){2}'
+    r'|172\.(?:1[6-9]|2\d|3[01])(?:\.\d{1,3}){2})\Z',
+    re.IGNORECASE,
+)
+
+
+def shape_error(url: str) -> str | None:
+    """What is wrong with a URL, judged without touching the network.
+
+    Feeds the hint under the URL field. A handler may not block on DNS, so
+    this only catches what is visible in the string itself; returning None
+    means "nothing obviously wrong", not "safe to fetch".
+    """
+    try:
+        parts = urlparse(url)
+        host = parts.hostname
+    except ValueError:
+        # A malformed IPv6 literal, e.g. "http://[oops/". urlparse raises on
+        # some of those and defers the rest to .hostname, so both are here.
+        return NO_HOST_ERROR
+    if parts.scheme not in ALLOWED_SCHEMES:
+        return SCHEME_ERROR
+    if not host:
+        return NO_HOST_ERROR
+    if _PRIVATE_LITERAL.match(host) or host.endswith('.local'):
+        return non_public_error(host)
+    return None
+
 
 class ImageSourceError(DealWithItError):
     """An image could not be obtained or decoded, for a reason worth showing
@@ -68,17 +116,15 @@ def _assert_public_address(host: str, settings: Settings) -> None:
         # is_global is False for loopback, private, link-local, multicast and
         # every other reserved range, which is exactly the set we want to bar.
         if not ipaddress.ip_address(info[4][0]).is_global:
-            raise ImageSourceError(
-                f'The host {host!r} resolves to a non-public address, which is not allowed.'
-            )
+            raise ImageSourceError(non_public_error(host))
 
 
 def _validated_target(url: str, settings: Settings) -> str:
     parts = urlparse(url)
     if parts.scheme not in ALLOWED_SCHEMES:
-        raise ImageSourceError(f'Only {" and ".join(ALLOWED_SCHEMES)} URLs are supported.')
+        raise ImageSourceError(SCHEME_ERROR)
     if not parts.hostname:
-        raise ImageSourceError('The URL has no host.')
+        raise ImageSourceError(NO_HOST_ERROR)
     _assert_public_address(parts.hostname, settings)
     return urlunparse(parts)
 

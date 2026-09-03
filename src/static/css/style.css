@@ -1,276 +1,1063 @@
+/* Deal With It -- the whole stylesheet.
+
+   Two pages share this file: the app (/) and the docs (/docs). Everything is
+   driven by the custom properties in the theme blocks below, so the light and
+   dark palettes are the only place a colour is written down. */
+
+/* ---------------------------------------------------------------- themes */
+
+/* Light is the default. Every token that dark redefines must exist here, or
+   the dark blocks would be the only definition and a light page would fall
+   back to the browser's own colours. */
 body {
-    font-family: 'Open Sans', sans-serif;
-    font-weight: 300;
-    padding: 0;
-    margin: 0;
-    color: #37392E;
-    background-color: #f8f8f8;
+    color-scheme: light;
+
+    --bg: #f9f8f6;
+    --surface: #ffffff;
+    --surface-2: #efeee9;
+    --border: #e3e2dc;
+    --border-strong: #cfd0c7;
+    --text: #37392E;
+    --muted: #6b6f62;
+
+    --band: #24261F;
+    --band-fg: #f9f8f6;
+    --band-muted: rgba(249, 248, 246, .7);
+    --band-line: rgba(249, 248, 246, .16);
+
+    --accent: #b3591c;
+    --accent-hover: #d47a2a;
+    --accent-ink: #8e4512;
+    --accent-soft: #f7e8da;
+    --focus: rgba(179, 89, 28, .18);
+
+    --primary: #24261F;
+    --primary-hover: #3a3d33;
+    --primary-fg: #f9f8f6;
+
+    --ok: #3f8f4c;
+    --error: #b3261e;
+    --error-soft: #fbeeed;
+    --track: #e3e2dc;
+    --code-bg: #24261F;
+    --code-fg: #e8e6df;
+
+    /* The glasses PNG is dark line art, so it needs inverting anywhere the
+       surface underneath it is dark. */
+    --invert: none;
+
+    /* The switch is styled from the theme rather than from :checked, so the
+       knob always shows the theme actually in force -- including the first
+       load on a dark desktop, where there is no cookie and no checked box. */
+    --switch-bg: rgba(249, 248, 246, .22);
+    --knob-left: 3px;
+    --theme-label: "light";
 }
 
-header {
-    text-align: center;
-    background-color: #19647E;
-    color: white;
-    height: 24rem;
-    background-image: url('../img/glasses.png');
-    background-position: center 95%;
-    background-repeat: no-repeat;
-    background-size: 30%;
-    line-height: 0.5;
+/* Three rules decide the theme, and the order matters.
+
+   #theme-state carries the cookie: absent attribute means "no preference
+   recorded yet", in which case the OS wins. Toggling the switch htmx-swaps
+   this one span, which is why the whole page can change colour with no
+   JavaScript and no reload. */
+@media (prefers-color-scheme: dark) {
+    body:not(:has(#theme-state[data-theme="light"])) {
+        color-scheme: dark;
+
+        --bg: #171814;
+        --surface: #1f2119;
+        --surface-2: #2a2c24;
+        --border: #33362e;
+        --border-strong: #484b42;
+        --text: #e8e6df;
+        --muted: #9a9d92;
+
+        --band: #0f100c;
+
+        --accent: #e08a3a;
+        --accent-hover: #f0a55c;
+        --accent-ink: #f0a55c;
+        --accent-soft: rgba(224, 138, 58, .16);
+        --focus: rgba(224, 138, 58, .28);
+
+        --primary: #f9f8f6;
+        --primary-hover: #ffffff;
+        --primary-fg: #24261F;
+
+        --ok: #6cc47a;
+        --error: #f08a80;
+        --error-soft: rgba(179, 38, 30, .24);
+        --track: #33362e;
+        --code-bg: #0f100c;
+
+        --invert: invert(1);
+
+        --switch-bg: var(--accent);
+        --knob-left: 21px;
+        --theme-label: "dark";
+    }
+}
+
+body:has(#theme-state[data-theme="dark"]) {
+    color-scheme: dark;
+
+    --bg: #171814;
+    --surface: #1f2119;
+    --surface-2: #2a2c24;
+    --border: #33362e;
+    --border-strong: #484b42;
+    --text: #e8e6df;
+    --muted: #9a9d92;
+
+    --band: #0f100c;
+
+    --accent: #e08a3a;
+    --accent-hover: #f0a55c;
+    --accent-ink: #f0a55c;
+    --accent-soft: rgba(224, 138, 58, .16);
+    --focus: rgba(224, 138, 58, .28);
+
+    --primary: #f9f8f6;
+    --primary-hover: #ffffff;
+    --primary-fg: #24261F;
+
+    --ok: #6cc47a;
+    --error: #f08a80;
+    --error-soft: rgba(179, 38, 30, .24);
+    --track: #33362e;
+    --code-bg: #0f100c;
+
+    --invert: invert(1);
+
+    --switch-bg: var(--accent);
+    --knob-left: 21px;
+    --theme-label: "dark";
+}
+
+/* ------------------------------------------------------------ foundation */
+
+* {
+    box-sizing: border-box;
+}
+
+body {
+    margin: 0;
+    min-height: 100vh;
     display: flex;
     flex-direction: column;
-}
-
-header h1 {
-    font-size: 6rem;
-    margin-bottom: 0;
-    text-transform: uppercase;
-    margin-bottom: 10px;
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'Manrope', system-ui, -apple-system, 'Segoe UI', sans-serif;
+    font-size: 15px;
+    line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
 }
 
 a {
-    color: inherit;
-    font-weight: 700;
-    text-decoration: none;
+    color: var(--accent);
+    text-decoration: underline;
+    text-decoration-color: color-mix(in srgb, var(--accent) 40%, transparent);
+    text-underline-offset: 2px;
 }
+
 a:hover {
-    color: #28AFB0;
-}
-
-.container {
-    max-width: 960px;
-    width: 100%;
-    margin: auto;
-    padding: 0 1rem;
-    box-sizing: border-box;
-}
-
-.navigation li {
-    display: inline;
-    margin: 0 1rem;
-}
-
-.navigation {
-    padding: 0;
-    text-align: center;
-}
-
-section {
-    margin: 2rem 0;
-}
-
-nav {
-    height: 4rem;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    text-transform: uppercase;
-    font-weight: 300;
-}
-
-footer {
-    background-color: #37392E;
-    color: #f8f8f8;
-    height: 4rem;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-}
-
-main {
-    display: flex;
-    flex-direction: column;
-    justify-content: flex-start;
+    color: var(--accent-hover);
+    text-decoration-color: currentColor;
 }
 
 img {
+    max-width: 100%;
+}
+
+button {
+    font-family: inherit;
+}
+
+.container {
     width: 100%;
+    max-width: 1120px;
+    margin: 0 auto;
+    padding: 0 24px;
 }
 
-.showcase {
-    display: flex;
-    justify-content: center;
-    align-items: center;
-    margin: 0 -1rem;
-}
-
-
-.showcase-img {
-    text-align: center;
-    padding: 1rem;
-    width: 50%;
-    box-sizing: border-box;
-}
-
-
-#forkongithub a {
-    background: #37392E;
-    color: #fff;
-    text-decoration: none;
-    font-family: arial, sans-serif;
-    text-align: center;
-    font-weight: bold;
-    padding: 5px 40px;
-    font-size: 1rem;
-    line-height: 2rem;
-    position: relative;
-    transition: 0.5s;
-}
-
-#forkongithub a:hover {
-    background: #28AFB0;
-    color: #fff;
-}
-
-#forkongithub a::before,
-#forkongithub a::after {
-    content: "";
-    width: 100%;
-    display: block;
+/* Kept off-screen rather than display:none: a hidden input is not focusable
+   and would drop the file picker and the theme switch out of the tab order. */
+.visually-hidden {
     position: absolute;
-    top: 1px;
-    left: 0;
+    width: 1px;
     height: 1px;
-    background: #fff;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
 }
 
-#forkongithub a::after {
-    bottom: 1px;
-    top: auto;
+/* ---------------------------------------------------------------- header */
+
+.band {
+    background: var(--band);
+    color: var(--band-fg);
 }
 
-@media screen and (min-width:640px) {
-    #forkongithub {
-        position: absolute;
-        display: block;
-        top: 0;
-        right: 0;
-        width: 200px;
-        overflow: hidden;
-        height: 200px;
-        z-index: 9999;
-    }
-
-    #forkongithub a {
-        width: 200px;
-        position: absolute;
-        top: 60px;
-        right: -60px;
-        transform: rotate(45deg);
-        -webkit-transform: rotate(45deg);
-        -ms-transform: rotate(45deg);
-        -moz-transform: rotate(45deg);
-        -o-transform: rotate(45deg);
-        box-shadow: 4px 4px 10px rgba(0, 0, 0, 0.8);
-    }
+.band .container {
+    height: 60px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 24px;
 }
 
-pre {
-    white-space: pre-wrap;       /* css-3 */
-    white-space: -moz-pre-wrap;  /* Mozilla, since 1999 */
-    white-space: -pre-wrap;      /* Opera 4-6 */
-    white-space: -o-pre-wrap;    /* Opera 7 */
-    word-wrap: break-word;   
+.brand {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    color: var(--band-fg);
+    text-decoration: none;
+    flex: none;
 }
 
-input[type=text], select {
-    padding: 1rem 1.2rem;
-    display: inline-block;
-    border: 1px solid #ccc;
-    border-radius: 4px;
-    box-sizing: border-box;
+.brand img {
+    /* The band is dark in both themes, so this inversion is not theme-aware. */
+    width: 44px;
+    height: auto;
+    display: block;
+    filter: invert(1);
 }
 
-input {
-    margin: 1rem 0;
-    width: 100%;
-}
-
-input[type=button], button[type=submit] {
-    color: white;
-    background-color: #19647E;
-    width: 150px;
-    padding: 14px 20px;
-    margin: 8px 0;
-    border: none;
-    border-radius: 4px;
-    cursor: pointer;
+.brand span {
+    font-weight: 800;
+    font-size: 16px;
+    letter-spacing: .04em;
     text-transform: uppercase;
 }
 
-input[type=button]:hover, button[type=submit]:hover {
-    background-color: #28AFB0;
+.nav {
+    display: flex;
+    align-items: center;
+    gap: 22px;
+    font-size: 14px;
+    font-weight: 600;
+    min-width: 0;
 }
 
-button[type=submit] {
+.nav a {
+    color: var(--band-muted);
+    text-decoration: none;
+    padding: 4px 0;
+    border-bottom: 2px solid transparent;
+    white-space: nowrap;
+}
+
+.nav a:hover {
+    color: var(--band-fg);
+}
+
+.nav a.here {
+    color: var(--band-fg);
+    border-bottom-color: var(--accent);
+}
+
+/* The status pill, refreshed by htmx every 30 seconds. */
+.pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    flex: none;
+    font-family: 'Fira Code', ui-monospace, monospace;
+    font-size: 12px;
+    font-weight: 400;
+    color: var(--band-muted);
+    padding: 5px 10px;
+    border: 1px solid var(--band-line);
+    border-radius: 999px;
+    white-space: nowrap;
+}
+
+.pill::before {
+    content: "";
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    /* Green and red read the same against the band in both themes, so these
+       two are deliberately not tokens. */
+    background: #5db56a;
+    box-shadow: 0 0 0 3px rgba(93, 181, 106, .22);
+}
+
+.pill.down::before {
+    background: #e0574d;
+    box-shadow: 0 0 0 3px rgba(224, 87, 77, .22);
+}
+
+/* The switch: a checkbox that posts to /theme, plus a label drawn as a track
+   and a knob. Both follow the theme tokens, not :checked -- see --switch-bg. */
+.switch {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    flex: none;
+    cursor: pointer;
+    color: var(--band-muted);
+    font-family: 'Fira Code', ui-monospace, monospace;
+    font-size: 12px;
+}
+
+.switch::before {
+    content: "";
+    position: relative;
+    display: block;
+    width: 40px;
+    height: 22px;
+    border-radius: 999px;
+    background: var(--switch-bg);
+    transition: background .2s;
+}
+
+.switch::after {
+    content: var(--theme-label);
+}
+
+.switch .knob {
+    position: absolute;
+    top: 3px;
+    left: var(--knob-left);
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+    background: #f9f8f6;
+    transition: left .2s;
+    pointer-events: none;
+}
+
+.switch-wrap {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+}
+
+#theme:focus-visible + .switch::before {
+    outline: 2px solid var(--band-fg);
+    outline-offset: 2px;
+}
+
+/* ------------------------------------------------------------ app layout */
+
+.layout {
+    flex: 1;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 40px;
+    align-items: flex-start;
+    padding-top: 36px;
+    padding-bottom: 72px;
+}
+
+/* Not sticky. It was, until the sample list grew past the height of a
+   window: a sticky element taller than the viewport pins its top and puts its
+   own bottom permanently out of reach. */
+.pane {
+    flex: 1 1 320px;
+    max-width: 400px;
+    display: flex;
+    flex-direction: column;
+    gap: 18px;
+}
+
+.lede h1 {
+    margin: 0 0 10px;
+    font-size: 26px;
+    line-height: 1.2;
+    font-weight: 800;
+    letter-spacing: -.02em;
+    text-wrap: pretty;
+}
+
+.lede p {
+    margin: 0;
+    color: var(--muted);
+    font-size: 14px;
+}
+
+#form {
+    margin: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+/* The dropzone is a <label> for the file input, which is what makes dropping
+   work without a line of JavaScript: a file input is a native drop target,
+   and dropping on its label counts as choosing files. Browsers also fire
+   :hover while a drag is over the element, so that doubles as the drag state. */
+.dropzone {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    min-height: 176px;
+    padding: 24px;
+    border-radius: 14px;
+    border: 1.5px dashed var(--border-strong);
+    background: var(--surface);
+    cursor: pointer;
+    text-align: center;
+    transition: background .15s, border-color .15s;
+}
+
+.dropzone:hover {
+    border-color: var(--accent);
+    background: var(--accent-soft);
+}
+
+#files:focus-visible + .dropzone {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px var(--focus);
+}
+
+.dropzone img {
+    width: 72px;
+    height: auto;
+    display: block;
+    margin-bottom: 6px;
+    filter: var(--invert);
+}
+
+.dropzone .title {
+    font-size: 16px;
+    font-weight: 700;
+}
+
+.dropzone .sub {
+    font-size: 13px;
+    color: var(--muted);
+}
+
+.dropzone .sub em {
+    color: var(--accent);
+    font-style: normal;
+    font-weight: 600;
+    text-decoration: underline;
+    text-underline-offset: 2px;
+}
+
+.dropzone .limits {
+    font-size: 12px;
+    color: var(--muted);
+    margin-top: 2px;
+}
+
+.divider,
+.samples-label {
+    color: var(--muted);
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: .1em;
+}
+
+.divider {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin: 8px 0 0;
+}
+
+.divider::before,
+.divider::after {
+    content: "";
+    flex: 1;
+    height: 1px;
+    background: var(--border);
+}
+
+.url-row {
+    display: flex;
+    gap: 8px;
+}
+
+input[type="text"] {
+    flex: 1;
+    min-width: 0;
+    height: 44px;
+    padding: 0 14px;
+    border: 1px solid var(--border-strong);
+    border-radius: 9px;
+    background: var(--surface);
+    color: var(--text);
     font-family: inherit;
-    font-size: 1rem;
+    font-size: 14px;
+    outline: none;
 }
 
-/* HTMX disables the button for the duration of the request. */
-button[type=submit]:disabled {
-    background-color: #9bb7c0;
+input[type="text"]:focus {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px var(--focus);
+}
+
+.btn {
+    height: 44px;
+    padding: 0 18px;
+    border: none;
+    border-radius: 9px;
+    background: var(--primary);
+    color: var(--primary-fg);
+    font-weight: 700;
+    font-size: 14px;
+    cursor: pointer;
+    white-space: nowrap;
+}
+
+.btn:hover {
+    background: var(--primary-hover);
+}
+
+/* htmx sets this while the submit is in flight (hx-disabled-elt). */
+.btn:disabled {
+    opacity: .6;
     cursor: progress;
 }
 
-fieldset {
-    border: none;
-    padding: 0;
+#url-hint {
     margin: 0;
+    font-size: 13px;
+    font-weight: 600;
 }
 
-label {
+#url-hint.ok {
+    color: var(--ok);
+}
+
+#url-hint.error {
+    color: var(--error);
+}
+
+.samples-label {
     display: block;
-    font-weight: bold;
+    margin: 6px 0 8px;
 }
 
-label.file-label {
-    margin-top: 1rem;
-    font-weight: normal;
+.samples {
+    display: grid;
+    /* Packs three across a narrow column and four across a wide one, rather
+       than stretching three tiles to whatever width is going. */
+    grid-template-columns: repeat(auto-fill, minmax(88px, 1fr));
+    gap: 10px;
 }
 
-.submit {
+.sample {
+    padding: 0;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    background: var(--surface);
+    color: inherit;
+    cursor: pointer;
+    text-align: left;
+    overflow: hidden;
+}
+
+.sample:hover {
+    border-color: var(--accent);
+}
+
+.sample img {
+    width: 100%;
+    aspect-ratio: 1;
+    object-fit: cover;
+    display: block;
+}
+
+.sample .caption {
+    display: block;
+    padding: 6px 8px 7px;
+    min-width: 0;
+}
+
+.sample .caption b {
+    display: block;
+    font-size: 12px;
+    font-weight: 700;
+}
+
+.sample .caption span {
+    display: block;
+    font-size: 10px;
+    color: var(--muted);
+    font-family: 'Fira Code', ui-monospace, monospace;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+/* ----------------------------------------------------------- the session */
+
+.session {
+    flex: 2 1 460px;
+    min-width: 0;
+}
+
+.session-head {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 12px;
+}
+
+.session-head h2 {
+    margin: 0;
+    font-size: 18px;
+    font-weight: 800;
+    letter-spacing: -.01em;
+}
+
+.clear {
+    border: none;
+    background: none;
+    padding: 4px 0;
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--muted);
+    cursor: pointer;
+    /* Nothing to clear until a card exists. */
+    display: none;
+}
+
+.clear:hover {
+    color: var(--error);
+}
+
+body:has(#queue article) .clear {
+    display: inline-block;
+}
+
+.note {
+    margin: 2px 0 16px;
+    font-size: 13px;
+    color: var(--muted);
+}
+
+#queue {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+}
+
+/* The empty state sits after #queue in the DOM so the sibling combinator can
+   reach it; an empty #queue takes no vertical space, so it still reads as
+   being in the list's place.
+
+   :not(:has(article)) rather than :empty, which counts text nodes: htmx
+   leaves the whitespace around a swapped-in card behind when the card is
+   removed, and the empty state would then never come back. */
+.empty {
+    display: none;
+    border: 1.5px dashed var(--border);
+    border-radius: 14px;
+    padding: 48px 24px;
     text-align: center;
+    color: var(--muted);
+    font-size: 14px;
 }
 
-/* The progress bar htmx swaps in while a job runs. */
+#queue:not(:has(article)) + .empty {
+    display: block;
+}
+
+/* ----------------------------------------------------------------- cards */
+
+.card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 14px 16px 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.card-head {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.thumb {
+    width: 44px;
+    height: 44px;
+    flex: none;
+    border-radius: 8px;
+    object-fit: cover;
+    background: var(--surface-2);
+}
+
+.card-id {
+    flex: 1;
+    min-width: 0;
+}
+
+.card-id b {
+    display: block;
+    font-size: 15px;
+    font-weight: 700;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.card-id span {
+    display: block;
+    margin-top: 2px;
+    font-family: 'Fira Code', ui-monospace, monospace;
+    font-size: 12px;
+    color: var(--muted);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.chip {
+    flex: none;
+    font-size: 11px;
+    font-weight: 800;
+    letter-spacing: .08em;
+    text-transform: uppercase;
+    padding: 4px 9px;
+    border-radius: 999px;
+    background: var(--surface-2);
+    color: var(--muted);
+}
+
+.chip.working {
+    background: var(--accent-soft);
+    color: var(--accent-ink);
+}
+
+.chip.done {
+    background: var(--primary);
+    color: var(--primary-fg);
+}
+
+.chip.failed {
+    background: var(--error-soft);
+    color: var(--error);
+}
+
+.remove {
+    flex: none;
+    width: 28px;
+    height: 28px;
+    border: none;
+    border-radius: 50%;
+    background: none;
+    color: var(--muted);
+    font-size: 18px;
+    line-height: 1;
+    cursor: pointer;
+}
+
+.remove:hover {
+    background: var(--surface-2);
+    color: var(--text);
+}
+
+.card-error {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    flex-wrap: wrap;
+    background: var(--error-soft);
+    border-radius: 9px;
+    padding: 10px 12px;
+}
+
+.card-error p {
+    margin: 0;
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--error);
+}
+
+.retry {
+    border: 1px solid var(--error);
+    background: transparent;
+    color: var(--error);
+    border-radius: 7px;
+    padding: 6px 12px;
+    font-size: 13px;
+    font-weight: 700;
+    cursor: pointer;
+}
+
+.retry:hover {
+    background: var(--error);
+    color: #fff;
+}
+
+.frame {
+    background: var(--surface-2);
+    border-radius: 10px;
+    overflow: hidden;
+    display: flex;
+    justify-content: center;
+}
+
+.frame img {
+    display: block;
+    max-height: 460px;
+    max-width: 100%;
+}
+
+/* Before/After with no script: two radios and :has(). The radios stay in the
+   tab order, so the toggle is keyboard-operable. */
+.result {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.result input[type="radio"] {
+    position: absolute;
+    opacity: 0;
+    pointer-events: none;
+}
+
+.result:has([value="after"]:checked) .before,
+.result:has([value="before"]:checked) .after {
+    display: none;
+}
+
+.card-foot {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    flex-wrap: wrap;
+}
+
+.segmented {
+    /* The radios are absolutely positioned to get them out of sight; without
+       this they would resolve against the page instead of the control. */
+    position: relative;
+    display: inline-flex;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    overflow: hidden;
+    font-size: 13px;
+    font-weight: 700;
+}
+
+.segmented label {
+    padding: 7px 12px;
+    cursor: pointer;
+    background: var(--surface);
+    color: var(--text);
+}
+
+/* Matched through the container rather than as `input:checked + label`, so
+   the same rule can style a control that is not a sibling of its radios --
+   which is what lets the overlay reuse them. */
+.result:has([value="before"]:checked) label[data-view="before"],
+.result:has([value="after"]:checked) label[data-view="after"] {
+    background: var(--primary);
+    color: var(--primary-fg);
+}
+
+.result input:focus-visible + label {
+    outline: 2px solid var(--accent);
+    outline-offset: -2px;
+}
+
+.spacer {
+    flex: 1;
+}
+
+.open-full {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--accent);
+    cursor: pointer;
+    text-decoration: underline;
+    text-underline-offset: 2px;
+}
+
+.open-full:hover {
+    color: var(--accent-hover);
+}
+
+.full-toggle:focus-visible + .open-full {
+    outline: 2px solid var(--accent);
+    outline-offset: 3px;
+    border-radius: 3px;
+}
+
+.download {
+    display: inline-flex;
+    align-items: center;
+    height: 34px;
+    padding: 0 14px;
+    border-radius: 8px;
+    background: var(--primary);
+    color: var(--primary-fg);
+    text-decoration: none;
+    font-size: 13px;
+    font-weight: 700;
+}
+
+.download:hover {
+    background: var(--primary-hover);
+    color: var(--primary-fg);
+}
+
+/* ------------------------------------------------------ full-screen view */
+
+/* The same frame and footer, re-laid-out as an overlay -- not a second copy
+   of them, which would put the whole result data URI in the card twice. A
+   checkbox and :has() rather than <dialog>, which cannot be opened without
+   showModal() and therefore without script.
+
+   The trade-off that buys: no focus trap and no Escape key. The close button,
+   the backdrop and the checkbox itself (still in the tab order) are the ways
+   out. */
+.backdrop,
+.lightbox-close {
+    display: none;
+}
+
+body:has(.full-toggle:checked) {
+    overflow: hidden;
+}
+
+.result:has(.full-toggle:checked) .backdrop {
+    display: block;
+    position: fixed;
+    inset: 0;
+    z-index: 100;
+    /* Dark in both themes: it is a viewer, and a light one fights the image. */
+    background: rgba(15, 16, 12, .93);
+    cursor: zoom-out;
+}
+
+.result:has(.full-toggle:checked) .frame {
+    position: fixed;
+    inset: 0;
+    z-index: 101;
+    align-items: center;
+    background: none;
+    border-radius: 0;
+    padding: 72px 24px 96px;
+    /* So a click beside the image falls through to the backdrop and closes. */
+    pointer-events: none;
+}
+
+.result:has(.full-toggle:checked) .frame img {
+    max-width: 100%;
+    max-height: 100%;
+    object-fit: contain;
+    border-radius: 8px;
+    pointer-events: auto;
+}
+
+.result:has(.full-toggle:checked) .lightbox-close {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    position: fixed;
+    top: 18px;
+    right: 18px;
+    z-index: 102;
+    width: 40px;
+    height: 40px;
+    border-radius: 50%;
+    border: 1px solid rgba(249, 248, 246, .24);
+    background: rgba(249, 248, 246, .08);
+    color: #f9f8f6;
+    font-size: 22px;
+    line-height: 1;
+    cursor: pointer;
+}
+
+.result:has(.full-toggle:checked) .lightbox-close:hover {
+    background: rgba(249, 248, 246, .2);
+}
+
+.result:has(.full-toggle:checked) .card-foot {
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 102;
+    justify-content: center;
+    padding: 18px 24px 26px;
+}
+
+.result:has(.full-toggle:checked) .spacer,
+.result:has(.full-toggle:checked) .open-full {
+    display: none;
+}
+
+/* The overlay is dark whatever the theme, so its controls cannot use the
+   theme's surfaces. */
+.result:has(.full-toggle:checked) .segmented {
+    border-color: rgba(249, 248, 246, .28);
+}
+
+.result:has(.full-toggle:checked) .segmented label {
+    background: rgba(249, 248, 246, .1);
+    color: #f9f8f6;
+}
+
+.result:has(.full-toggle:checked):has([value="before"]:checked) label[data-view="before"],
+.result:has(.full-toggle:checked):has([value="after"]:checked) label[data-view="after"] {
+    background: #f9f8f6;
+    color: #24261F;
+}
+
+.result:has(.full-toggle:checked) .download {
+    background: #f9f8f6;
+    color: #24261F;
+}
+
+/* -------------------------------------------------------------- progress */
+
 progress {
     -webkit-appearance: none;
     appearance: none;
+    display: block;
     width: 100%;
-    max-width: 420px;
-    height: 12px;
+    height: 6px;
     border: none;
-    border-radius: 6px;
-    background-color: #e6ecee;
+    border-radius: 99px;
+    background: var(--track);
 }
 
 progress::-webkit-progress-bar {
-    background-color: #e6ecee;
-    border-radius: 6px;
+    background: var(--track);
+    border-radius: 99px;
 }
 
 progress::-webkit-progress-value {
-    background-color: #19647E;
-    border-radius: 6px;
+    background: var(--accent);
+    border-radius: 99px;
+    transition: width .4s ease;
 }
 
 progress::-moz-progress-bar {
-    background-color: #19647E;
-    border-radius: 6px;
+    background: var(--accent);
+    border-radius: 99px;
 }
 
 /* A queued job has no percentage to show, so the bar sweeps instead of
    sitting at zero looking broken. Stripping the native appearance also
    strips the browser's own indeterminate animation. */
 progress:indeterminate {
-    background-image: linear-gradient(90deg, #e6ecee 0%, #19647E 50%, #e6ecee 100%);
+    background-image: linear-gradient(90deg, var(--track) 0%, var(--accent) 50%, var(--track) 100%);
     background-size: 200% 100%;
     animation: sweep 1.2s infinite linear;
 }
 
 progress:indeterminate::-webkit-progress-bar {
-    background-color: transparent;
+    background: transparent;
 }
 
 @keyframes sweep {
@@ -283,106 +1070,373 @@ progress:indeterminate::-webkit-progress-bar {
     }
 }
 
-#result {
-    text-align: center;
-}
+/* ------------------------------------------------------------------ docs */
 
-/* The self-polling fragment htmx swaps in while a job is running. */
-.working {
-    margin: 2rem 0;
-}
-
-#message {
-    font-weight: bold;
-}
-
-#message.error {
-    color: #b3261e;
-}
-
-#result-img {
-    margin: 2rem 0;
-    border-radius: 4px;
-}
-
-/* Everything made this session, newest first. Nothing is stored server
-   side, so this is the only copy until someone downloads one. */
-#gallery-section {
-    margin-top: 3rem;
-}
-
-#gallery-section:not(:has(.gallery-item)) {
-    display: none;
-}
-
-#gallery {
+.docs {
+    flex: 1;
     display: flex;
-    flex-wrap: wrap;
-    gap: 1.5rem;
+    gap: 56px;
+    align-items: flex-start;
+    padding-top: 40px;
+    padding-bottom: 80px;
+    font-size: 16px;
+    line-height: 1.6;
+}
+
+.toc {
+    flex: none;
+    width: 180px;
+    position: sticky;
+    top: 32px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    font-size: 14px;
+    font-weight: 600;
+}
+
+.toc .label {
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: .1em;
+    color: var(--muted);
+    margin-bottom: 6px;
+}
+
+.toc a {
+    color: var(--text);
+    text-decoration: none;
+    padding: 4px 0;
+}
+
+.toc a.sub {
+    color: var(--muted);
+    font-weight: 500;
+    padding: 2px 0 2px 14px;
+}
+
+.toc a:hover {
+    color: var(--accent);
+}
+
+.toc .try-it {
+    margin-top: 18px;
+    display: inline-flex;
+    align-items: center;
     justify-content: center;
+    height: 38px;
+    border-radius: 9px;
+    background: var(--primary);
+    color: var(--primary-fg);
+    font-size: 13px;
+    font-weight: 700;
 }
 
-.gallery-item {
-    width: 200px;
+.toc .try-it:hover {
+    background: var(--primary-hover);
+    color: var(--primary-fg);
 }
 
-.gallery-item img {
+.doc {
+    flex: 1;
+    min-width: 0;
+    max-width: 760px;
+}
+
+.doc section {
+    margin: 0 0 56px;
+}
+
+.doc section:last-child {
+    margin-bottom: 0;
+}
+
+.doc h1 {
+    margin: 0 0 12px;
+    font-size: 36px;
+    line-height: 1.15;
+    font-weight: 800;
+    letter-spacing: -.02em;
+}
+
+.doc h2 {
+    margin: 0 0 10px;
+    font-size: 28px;
+    line-height: 1.2;
+    font-weight: 800;
+    letter-spacing: -.02em;
+}
+
+.doc h3 {
+    margin: 0 0 8px;
+    font-size: 19px;
+    font-weight: 700;
+}
+
+.doc h3 .n {
+    font-family: 'Fira Code', ui-monospace, monospace;
+    color: var(--accent-ink);
+    font-weight: 500;
+    margin-right: 10px;
+}
+
+.doc p {
+    margin: 0 0 14px;
+    text-wrap: pretty;
+}
+
+.doc .lead {
+    margin: 0 0 24px;
+    font-size: 18px;
+    color: var(--muted);
+}
+
+.figures {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+    margin-bottom: 12px;
+}
+
+.figures figure {
+    margin: 0;
+}
+
+.figures img {
     display: block;
     width: 100%;
-    border-radius: 4px;
+    border-radius: 10px;
 }
 
-.gallery-item p {
-    margin: 0.5rem 0 0;
-    text-align: center;
-    font-size: 0.9rem;
+.figures figcaption,
+.credit {
+    margin-top: 8px;
+    font-family: 'Fira Code', ui-monospace, monospace;
+    font-size: 12px;
+    color: var(--muted);
 }
 
 .credit {
-    font-size: 0.8rem;
-    color: #5b6b70;
-    text-align: center;
+    margin: 0 0 28px;
+    line-height: 1.5;
 }
 
-.gallery-note {
-    font-size: 0.9rem;
-    color: #5b6b70;
+.tiles {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 12px;
 }
 
-@media screen and (max-width: 640px) {
-    main {
-        font-size: 4vw;
-    }
+.tile {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 14px 16px;
+}
 
-    #forkongithub {
-        display: none;
-    }
+.tile b {
+    display: block;
+    font-family: 'Fira Code', ui-monospace, monospace;
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--accent-ink);
+    margin-bottom: 4px;
+}
 
-    nav {
-        display: none;
-    }
+.tile span {
+    font-size: 14px;
+}
 
-    header h1 {
-        font-size: 1rem;
-        text-align: left;
-        padding: 1.175rem;
-        margin: 0;
-    }
+code {
+    font-family: 'Fira Code', ui-monospace, monospace;
+    font-size: 14px;
+    background: var(--surface-2);
+    padding: 2px 6px;
+    border-radius: 5px;
+}
 
-    header h2 {
-        display: none;
-    }
+.snippet {
+    position: relative;
+    margin: 0 0 20px;
+}
 
-    header {
-        height: 3rem;
-        background-position: 95% center;
-        display: absolute;
-    }
-    .showcase {
+.snippet pre {
+    margin: 0;
+    padding: 14px 16px;
+    background: var(--code-bg);
+    color: var(--code-fg);
+    border-radius: 10px;
+    font-family: 'Fira Code', ui-monospace, monospace;
+    font-size: 13px;
+    line-height: 1.55;
+    /* Selecting the whole snippet with one click is the fallback for anyone
+       whose browser refuses clipboard access. */
+    white-space: pre-wrap;
+    word-break: break-word;
+    user-select: all;
+}
+
+.snippet pre code {
+    background: none;
+    padding: 0;
+    font-size: inherit;
+}
+
+.pair {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+    margin: 0 0 20px;
+}
+
+.pair .snippet {
+    margin: 0;
+}
+
+.copy {
+    position: absolute;
+    top: 8px;
+    right: 8px;
+    height: 26px;
+    padding: 0 9px;
+    /* On the code background in both themes, so fixed rather than tokenised. */
+    border: 1px solid rgba(249, 248, 246, .2);
+    border-radius: 6px;
+    background: rgba(249, 248, 246, .06);
+    color: #f9f8f6;
+    font-size: 11px;
+    font-weight: 700;
+    cursor: pointer;
+}
+
+.copy:hover {
+    background: rgba(249, 248, 246, .16);
+}
+
+/* The confirmation, with no timer of our own: :active shows it instantly,
+   and releasing the button starts a delayed fade. */
+.copied {
+    position: absolute;
+    top: 8px;
+    right: 66px;
+    height: 26px;
+    display: inline-flex;
+    align-items: center;
+    font-size: 11px;
+    font-weight: 700;
+    color: var(--accent-hover);
+    opacity: 0;
+    transition: opacity .3s ease 1.2s;
+}
+
+.copy:active + .copied {
+    opacity: 1;
+    transition: none;
+}
+
+.stages {
+    display: grid;
+    grid-template-columns: repeat(5, 1fr);
+    gap: 8px;
+    margin: 0 0 36px;
+}
+
+.stage {
+    border-top: 3px solid var(--accent);
+    padding-top: 8px;
+}
+
+.stage b {
+    display: block;
+    font-family: 'Fira Code', ui-monospace, monospace;
+    font-size: 12px;
+    font-weight: 400;
+    color: var(--accent-ink);
+}
+
+.stage span {
+    display: block;
+    font-size: 13px;
+    font-weight: 600;
+}
+
+.stage.last {
+    border-top-color: var(--primary);
+}
+
+.stage.last b {
+    color: var(--text);
+}
+
+/* ---------------------------------------------------------------- footer */
+
+.site-footer {
+    border-top: 1px solid var(--border);
+    color: var(--muted);
+    font-size: 13px;
+}
+
+.site-footer .container {
+    padding-top: 18px;
+    padding-bottom: 18px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    flex-wrap: wrap;
+}
+
+.site-footer a {
+    color: inherit;
+}
+
+.site-footer .links {
+    display: flex;
+    gap: 18px;
+    flex-wrap: wrap;
+}
+
+/* ------------------------------------------------------------ responsive */
+
+@media (max-width: 860px) {
+    .docs {
         flex-direction: column;
+        gap: 32px;
     }
 
-    .showcase-img {
+    .toc {
+        position: static;
         width: 100%;
+    }
+}
+
+@media (max-width: 760px) {
+    .pane {
+        max-width: none;
+    }
+
+    .pair,
+    .figures {
+        grid-template-columns: 1fr;
+    }
+
+    .stages {
+        grid-template-columns: repeat(2, 1fr);
+    }
+
+    .nav {
+        gap: 14px;
+    }
+
+    .band .container {
+        height: auto;
+        padding-top: 10px;
+        padding-bottom: 10px;
+        flex-wrap: wrap;
+    }
+
+    .doc h1 {
+        font-size: 28px;
     }
 }

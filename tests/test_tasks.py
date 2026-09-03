@@ -81,3 +81,37 @@ def test_revalidates_the_payload_it_was_given():
 
     with pytest.raises(ValidationError):
         tasks.process_image({'url': None, 'base64': None})
+
+
+class TestFaceCount:
+    """The number in one checkpoint is worth keeping past that checkpoint."""
+
+    @pytest.fixture
+    def meta(self, monkeypatch):
+        recorded = {}
+
+        class FakeJob:
+            meta = recorded
+
+            def save_meta(self):
+                pass
+
+        monkeypatch.setattr(tasks, 'get_current_job', FakeJob)
+        return recorded
+
+    def test_the_drawing_step_leaves_the_count_behind(self, meta):
+        tasks.report_progress(75, 'Drawing glasses on 8 faces')
+        tasks.report_progress(90, 'Encoding the result')
+        assert meta['faces'] == 8
+        assert meta['step'] == 'Encoding the result', 'the step itself is gone by then'
+
+    def test_one_face_is_singular(self, meta):
+        tasks.report_progress(75, 'Drawing glasses on 1 face')
+        assert meta['faces'] == 1
+
+    @pytest.mark.parametrize('step', [
+        'Fetching the image', 'Looking for faces', 'Encoding the result', 'Done',
+    ])
+    def test_no_other_step_claims_a_count(self, meta, step):
+        tasks.report_progress(10, step)
+        assert 'faces' not in meta

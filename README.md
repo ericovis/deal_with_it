@@ -17,12 +17,14 @@ so the app is split in three:
 | `redis`  | The queue, and where results wait to be collected.                 |
 
 Submitting an image enqueues a job and returns immediately with a job id; the
-page then polls until the result is ready. The interface is
+page then polls until the result is ready. There are two pages: the app at
+`/`, where pictures go in and results come back, and `/docs`. Both are
 [FastHTML](https://fastht.ml) + htmx, the JSON API is
 [FastAPI](https://fastapi.tiangolo.com), the queue is
 [RQ](https://python-rq.org), and the glasses are pasted on with
 [Pillow](https://python-pillow.org) using landmarks from
-[face_recognition](https://github.com/ageitgey/face_recognition).
+[face_recognition](https://github.com/ageitgey/face_recognition). The glasses
+themselves are an SVG, rasterised at the size each face needs.
 
 ## Prerequisites
 
@@ -63,12 +65,25 @@ uv run pytest
 
 The suite is hermetic: no test reaches the network or needs a Redis server.
 
+There is also a browser suite, for the CSS-only interactions and the htmx
+swaps that no test client can see:
+
+```
+uv sync --group e2e
+uv run playwright install chromium
+uv run pytest tests/e2e
+```
+
+It runs against a real server with a real worker, both started in-process.
+Without the `e2e` group installed those tests are skipped and `uv run pytest`
+still passes.
+
 ## API
 
 `POST /api/jobs` with **either** a `url` **or** a `base64` data URI:
 
 ```json
-{ "url": "https://ericovis.com/images/me.jpg" }
+{ "url": "https://example.com/photo.jpg" }
 ```
 ```json
 { "base64": "data:image/png;base64,..." }
@@ -102,13 +117,15 @@ carries a human-readable `error` -- an unreachable URL, an undecodable image,
 or no faces found. An unknown or expired job id gives a `404`.
 
 While a job runs, `progress` and `step` report the stage it has reached
-("Looking for faces", "Drawing glasses on 5 faces", "Encoding the result").
+("Looking for faces", "Drawing glasses on 8 faces", "Encoding the result").
 They are checkpoints rather than measurements -- neither dlib nor Pillow
 reports how far through it is.
 
-The page uses the same fields to drive a progress bar, drops each finished
-image into a gallery that lives only in that tab, and blanks the form so the
-next one can be submitted straight away.
+The page uses the same fields. Each submission becomes a card in the session
+list; the card polls itself, shows the progress bar, and turns into the result
+in place -- with a Before/After toggle, a download link, and a Retry button if
+it failed. Several pictures can be dropped at once, each getting its own card.
+The list lives in that tab only.
 
 `GET /api/health` reports whether the broker is reachable.
 
@@ -123,6 +140,9 @@ That last one is a footgun on purpose: the worker refuses to fetch URLs that
 resolve to private or loopback addresses, because otherwise anyone could use
 the API to read whatever is reachable from inside your network. Only turn it
 on for local fixtures.
+
+The only thing the page stores about a person is a `dwi_theme` cookie holding
+`light` or `dark`. With no cookie it follows the operating system.
 
 ## Contributing
 
@@ -139,9 +159,17 @@ on for local fixtures.
 
 ## Credits
 
+Every sample picture is public domain and credited in
+[`src/static/img/CREDITS.md`](/src/static/img/CREDITS.md) — NASA photographs,
+the 1927 Solvay conference, and paintings by Leonardo, Vermeer, Rembrandt,
+Grant Wood, van Gogh, Munch, Landseer, Ronner-Knip and Coolidge.
+
+The sunglasses are the ones from the
+[Deal With It](https://knowyourmeme.com/memes/deal-with-it) meme.
+
 The group photo in the showcase is the 2013 class of NASA astronauts by
 Robert Markowitz, a work of the US federal government and therefore public
-domain. See [`src/static/img/CREDITS.md`](/src/static/img/CREDITS.md).
+domain.
 
 ## License
 

@@ -77,7 +77,7 @@ def multiple_faces_image() -> Path:
 
 @pytest.fixture
 def faceless_image() -> Path:
-    return STATIC_IMG / 'glasses.png'
+    return STATIC_IMG / 'socks_the_cat.jpg'
 
 
 @pytest.fixture(autouse=True)

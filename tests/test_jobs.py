@@ -136,3 +136,93 @@ def test_states_are_terminal_after_the_worker_is_done(
     result = jobs.result_for(job_id)
     assert result.state == expected_state
     assert result.state.is_terminal
+
+
+class TestMetadata:
+    """What the UI hangs on a job so a card can name itself."""
+
+    def test_meta_survives_the_round_trip(self, sync_queue, stub_task):
+        stub_task(support.SUCCESS)
+        job_id, _ = jobs.enqueue(PAYLOAD, meta={'kind': 'upload', 'label': 'holiday.jpg'})
+        _, source = jobs.describe(job_id)
+        assert source.kind == 'upload'
+        assert source.label == 'holiday.jpg'
+
+    def test_the_worker_and_the_web_tier_share_one_meta_dict(
+            self, async_queue, stub_task, drain):
+        """save_meta rewrites the whole dict, so progress must not evict the
+        label the submitting request put there."""
+        stub_task(support.REPORTS_PROGRESS)
+        job_id, _ = jobs.enqueue(PAYLOAD, meta={'kind': 'url', 'label': 'example.test/a.png'})
+        drain()
+        result, source = jobs.describe(job_id)
+        assert source.label == 'example.test/a.png'
+        assert result.progress == 100
+
+    def test_a_job_with_no_meta_is_described_from_its_payload(self, sync_queue, stub_task):
+        """The JSON API records nothing, and its jobs still render."""
+        stub_task(support.SUCCESS)
+        job_id, _ = jobs.enqueue(PAYLOAD)
+        _, source = jobs.describe(job_id)
+        assert source.kind == 'url'
+        assert source.label == 'example.test/a.png'
+        assert source.thumb == PAYLOAD['url']
+
+    def test_an_upload_with_no_meta_gets_a_stand_in_name(self, sync_queue, stub_task):
+        stub_task(support.SUCCESS)
+        job_id, _ = jobs.enqueue({'url': None, 'base64': support.IMAGE})
+        _, source = jobs.describe(job_id)
+        assert source.kind == 'upload'
+        assert source.label == 'Uploaded image'
+        assert source.thumb is None, 'nothing cheap enough to show on every poll'
+
+    @pytest.mark.parametrize('url,expected', [
+        ('https://example.test/a.png', 'example.test/a.png'),
+        ('https://example.test/', 'example.test'),
+        ('https://example.test', 'example.test'),
+    ])
+    def test_a_url_is_labelled_by_host_and_path(self, url, expected):
+        assert jobs.label_for({'url': url, 'base64': None}) == expected
+
+    def test_describe_is_none_for_an_unknown_id(self, sync_queue):
+        assert jobs.describe('long-gone') is None
+
+    def test_the_face_count_reaches_the_card(self, async_queue, stub_task, drain):
+        stub_task(support.COUNTS_FACES)
+        job_id, _ = jobs.enqueue(PAYLOAD)
+        drain()
+        _, source = jobs.describe(job_id)
+        assert source.faces == 8
+
+
+class TestPayloadAndRetry:
+    def test_payload_for_returns_what_was_submitted(self, sync_queue, stub_task):
+        stub_task(support.SUCCESS)
+        job_id, _ = jobs.enqueue(PAYLOAD)
+        assert jobs.payload_for(job_id) == PAYLOAD
+
+    def test_payload_for_is_none_for_an_unknown_id(self, sync_queue):
+        assert jobs.payload_for('long-gone') is None
+
+    def test_resubmit_queues_the_same_payload_as_a_new_job(self, sync_queue, stub_task):
+        stub_task(support.REJECTS)
+        job_id, _ = jobs.enqueue(PAYLOAD, meta={'kind': 'sample', 'label': 'socks_the_cat.jpg'})
+
+        stub_task(support.SUCCESS)
+        new_id, _ = jobs.resubmit(job_id)
+
+        assert new_id != job_id
+        assert jobs.payload_for(new_id) == PAYLOAD
+        assert jobs.result_for(new_id).state == JobState.FINISHED
+
+    def test_resubmit_keeps_the_label_but_not_the_old_progress(self, sync_queue, stub_task):
+        stub_task(support.SUCCESS)
+        job_id, _ = jobs.enqueue(
+            PAYLOAD, meta={'kind': 'sample', 'label': 'socks_the_cat.jpg', 'faces': 3})
+        new_id, _ = jobs.resubmit(job_id)
+        _, source = jobs.describe(new_id)
+        assert source.label == 'socks_the_cat.jpg'
+        assert source.kind == 'sample'
+
+    def test_resubmit_is_none_for_an_unknown_id(self, sync_queue):
+        assert jobs.resubmit('long-gone') is None

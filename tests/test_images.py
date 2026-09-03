@@ -1,4 +1,5 @@
 import base64
+import socket
 
 import numpy as np
 import pytest
@@ -208,3 +209,48 @@ class TestLoad:
     def test_requires_a_source(self, settings):
         with pytest.raises(ImageSourceError, match='must be passed'):
             images.load(settings=settings)
+
+
+class TestShapeError:
+    """The shape-only check behind the live hint under the URL field."""
+
+    @pytest.mark.parametrize('url,expected', [
+        ('https://example.test/a.png', None),
+        ('http://example.test/a.png', None),
+        ('https://example.test:8443/a.png', None),
+        ('ftp://example.test/a.png', images.SCHEME_ERROR),
+        ('not a url', images.SCHEME_ERROR),
+        ('', images.SCHEME_ERROR),
+        ('http:///a.png', images.NO_HOST_ERROR),
+        ('http://[oops/a.png', images.NO_HOST_ERROR),
+    ])
+    def test_judges_what_it_can_see(self, url, expected):
+        assert images.shape_error(url) == expected
+
+    @pytest.mark.parametrize('host', [
+        'localhost', '0.0.0.0', '127.0.0.1', '10.1.2.3', '192.168.0.1',
+        '169.254.169.254', '172.16.0.1', '172.31.255.255', 'printer.local',
+    ])
+    def test_turns_away_the_obviously_private(self, host):
+        assert images.shape_error(f'http://{host}/a.png') == images.non_public_error(host)
+
+    @pytest.mark.parametrize('host', ['172.15.0.1', '172.32.0.1', '11.0.0.1', '10.example.test'])
+    def test_does_not_over_reach(self, host):
+        """These only look private. Judging them here would reject real hosts."""
+        assert images.shape_error(f'http://{host}/a.png') is None
+
+    def test_it_never_resolves_anything(self, monkeypatch):
+        """The point of the exercise: a web handler must not wait on DNS."""
+        monkeypatch.setattr(socket, 'getaddrinfo', _refuse_to_resolve)
+        assert images.shape_error('https://example.test/a.png') is None
+
+    def test_it_is_not_the_real_guard(self, settings, monkeypatch):
+        """A name that resolves privately passes the shape check and is still
+        refused by the worker, which is the one that asks."""
+        assert images.shape_error('http://internal.test/a.png') is None
+        with pytest.raises(ImageSourceError, match='non-public'):
+            images.fetch_url('http://internal.test/a.png', settings)
+
+
+def _refuse_to_resolve(*args, **kwargs):
+    raise AssertionError('shape_error must not resolve a hostname')
