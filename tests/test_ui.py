@@ -236,6 +236,30 @@ class TestSamples:
         assert 'hx-swap-oob' not in submit(client, hx, sample='me').text
 
 
+class TestTheApiExample:
+    """The docs snippet has to be something a reader can paste and run."""
+
+    def test_it_is_a_real_public_url_by_default(self, client):
+        from src.ui import EXAMPLE_SOURCE
+
+        body = client.get('/docs').text
+        assert EXAMPLE_SOURCE in body
+        assert 'example.com' not in body
+
+    def test_it_never_points_at_ourselves_over_localhost(self, client):
+        """The worker refuses non-public addresses, so a self-URL would be an
+        example that fails on the first try."""
+        body = client.get('/docs').text
+        assert 'localhost:5000/static' not in body
+
+    def test_it_uses_our_own_copy_once_we_have_a_public_address(
+            self, client, monkeypatch):
+        monkeypatch.setenv('DWI_PUBLIC_URL', 'https://example.test/')
+        jobs.get_settings.cache_clear()
+        body = client.get('/docs').text
+        assert 'https://example.test/static/img/apollo_11_crew.jpg' in body
+
+
 class TestValidate:
     @pytest.mark.parametrize('url,expected', [
         ('', ''),

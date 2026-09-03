@@ -148,6 +148,12 @@ Rembrandt), an impressionist painting no (van Gogh's brushwork and Munch's
 Scream both come back empty), and a cat never. The detector only knows human
 faces; the picture of a handler and his dog finds the handler.
 
+The API example on `/docs` points at a sample too. It is our own
+`/static/img/...` once `DWI_PUBLIC_URL` is set, and the picture's source on
+Wikimedia Commons otherwise -- **not** a localhost URL, because the worker's
+SSRF guard refuses non-public addresses and the app cannot fetch itself. See
+`_example_url`.
+
 ### Why RQ
 
 Considered and rejected: Celery (far more machinery than a one-queue app
@@ -225,7 +231,7 @@ ONNX-exported detector. `image_to_numpy` was already dropped — it only did
 
 ## Testing
 
-`uv run pytest` — 270 tests, ~26s (the real detector accounts for nearly all
+`uv run pytest` — 273 tests, ~26s (the real detector accounts for nearly all
 of it). Everything is hermetic:
 
 - `stub_dns` (autouse) replaces `socket.getaddrinfo`, so no test resolves a
@@ -253,7 +259,7 @@ of it). Everything is hermetic:
 CSS doing what scripts usually do -- `:has()` switches Before/After, opens the
 full-screen view and flips the palette -- and a test client sees the markup
 that implies all of it and none of the behaviour. Both htmx bugs fixed during
-the redesign were found by writing these, not by the 270 tests above.
+the redesign were found by writing these, not by the 273 tests above.
 
 ```
 uv sync --group e2e && uv run playwright install chromium

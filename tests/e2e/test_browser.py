@@ -3,7 +3,7 @@
 import pytest
 from playwright.sync_api import Page, expect
 
-from src.ui import SAMPLES
+from src.ui import EXAMPLE_SOURCE, SAMPLES
 from tests.conftest import make_png
 from tests.e2e.conftest import TIMEOUT
 
@@ -237,4 +237,4 @@ class TestTheRestOfTheFurniture:
         page.goto('/docs')
         page.locator('.snippet .copy').first.click()
         copied = page.evaluate('navigator.clipboard.readText()')
-        assert '"url": "https://example.com/photo.jpg"' in copied
+        assert f'"url": "{EXAMPLE_SOURCE}"' in copied

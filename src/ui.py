@@ -127,6 +127,12 @@ SAMPLES = {
     'earth': Sample('blue_marble.jpg', 'No faces', 'image/jpeg'),
 }
 
+#: Which sample the API example points at, and where that picture came from.
+#: The Commons copy is the fallback because it is public and permanent; see
+#: _example_url for why we cannot always print our own path.
+EXAMPLE_SAMPLE = 'apollo'
+EXAMPLE_SOURCE = 'https://upload.wikimedia.org/wikipedia/commons/3/3d/Apollo_11_Crew.jpg'
+
 
 @cache
 def sample_data_uri(name: str) -> str:
@@ -152,6 +158,23 @@ def _first_message(exc: ValidationError) -> str:
 def _absolute(path: str) -> str:
     base = get_settings().public_url.rstrip('/')
     return f'{base}{path}' if base else path
+
+
+def _example_url() -> str:
+    """A URL for the API example that will actually fetch.
+
+    Our own copy of the picture once the app knows its public address: those
+    are known paths and it is the most useful thing to show. With no public
+    address the only self-URL we could print is localhost, and the worker's
+    SSRF guard refuses to fetch a non-public address by design -- so the
+    fallback is where the picture came from, which is public, permanent, and
+    small enough to clear the size limit. An example that fails on the first
+    try is worse than no example at all.
+    """
+    base = get_settings().public_url.rstrip('/')
+    if base.startswith(('http://', 'https://')):
+        return f'{base}/static/img/{SAMPLES[EXAMPLE_SAMPLE].filename}'
+    return EXAMPLE_SOURCE
 
 
 # --------------------------------------------------------------- the shell
@@ -658,7 +681,7 @@ def docs_page(theme: str | None, reachable: bool) -> tuple:
                     P(Code('POST /api/jobs'), ' with either a ', Code('url'), ' or a ',
                       Code('base64'), ' data URI, not both:'),
                     Div(
-                        snippet('{\n  "url": "https://example.com/photo.jpg"\n}'),
+                        snippet('{\n  "url": "' + _example_url() + '"\n}'),
                         snippet('{\n  "base64": "data:image/png;base64,..."\n}'),
                         cls='pair',
                     ),
