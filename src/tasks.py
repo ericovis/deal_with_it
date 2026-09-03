@@ -5,6 +5,7 @@ must not import anything web-related -- the worker container has no app.
 """
 
 import logging
+import re
 
 from rq import get_current_job
 
@@ -15,6 +16,9 @@ from src.models import ImageRequest
 from src.processors.deal_with_it import DealWithItProcessor
 
 logger = logging.getLogger(__name__)
+
+#: The one checkpoint that carries a number worth keeping. See below.
+FACE_COUNT_RE = re.compile(r'^Drawing glasses on (\d+) ')
 
 
 def report_progress(percent: int, step: str) -> None:
@@ -27,6 +31,12 @@ def report_progress(percent: int, step: str) -> None:
         return
     job.meta['progress'] = percent
     job.meta['step'] = step
+    # The face count only exists while this one step is being reported: the
+    # next checkpoint overwrites 'step', and the finished card still wants to
+    # say how many faces it drew on. Lifted here rather than in the reader,
+    # which would be parsing a string that no longer exists.
+    if match := FACE_COUNT_RE.match(step):
+        job.meta['faces'] = int(match.group(1))
     job.save_meta()
 
 

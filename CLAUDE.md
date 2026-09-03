@@ -36,7 +36,7 @@ web process and its container never load dlib. Keep that boundary.
 src/app.py          Composition root. FastAPI outer app, FastHTML mounted at /
 src/api.py          The JSON API router, mounted under /api
 src/ui.py           The FastHTML interface: page, form handler, poll fragment
-src/jobs.py         The queue seam: enqueue / result_for / is_broker_reachable
+src/jobs.py         The queue seam: enqueue / describe / resubmit / health
 src/worker.py       `python -m src.worker` — the RQ worker entry point
 src/tasks.py        process_image(): what the worker actually runs
 src/images.py       Fetching (SSRF-guarded) and decoding into a numpy array
@@ -64,27 +64,62 @@ CWD, so `create_ui()` strips it and `src/app.py` mounts `StaticFiles` instead.
 
 ### htmx swaps in the UI
 
-Three things happen when a job finishes, all as out-of-band swaps in one
-response (`src/ui.py:finished`): the polling fragment empties, the image is
-inserted at the top of `#gallery`, and a blank `#form` replaces the filled-in
-one. Only on success -- a failure leaves the form alone so it can be
-corrected.
+Two pages: the app at `/` and the docs at `/docs`, sharing a header and
+footer built by `shell`-ish helpers in `src/ui.py`.
 
-**The gallery item is wrapped in an envelope div, and that nesting is
-load-bearing.** htmx inserts the element carrying `hx-swap-oob` only when the
-swap style is `outerHTML`; for anything else, including `afterbegin`, it
-inserts that element's *children* (`isInlineSwap` in htmx 2.0.7 returns true
-for `outerHTML` alone). Put the class on the outer div and the `.gallery-item`
-wrapper vanishes silently, taking its styling and the
-`:has(.gallery-item)` rule that unhides the section.
+**Everything on the app page is a card that replaces itself.** A submission
+returns one `article` per picture, swapped `afterbegin` into `#queue`. While
+a job is queued or started the article carries `hx-get="/jobs/{id}"`,
+`hx-trigger="load delay:1s"` and `hx-swap="outerHTML"`; a terminal one does
+not, so the poll chain ends by itself rather than leaving a timer running
+against whatever replaced it. Queued/started render a `<progress>`, finished
+renders the image, failed renders the message and a Retry button. There is no
+`hx-swap-oob` gallery envelope any more -- that whole mechanism, and the
+`:has(.gallery-item)` rule, went with the redesign.
 
-The gallery is DOM-only: nothing is written to disk or kept server-side, so a
-reload loses it. That is deliberate, and the page says so.
+Only two things are still swapped out of band: the blank `#form` that comes
+back after a submission (so the URL, the file input and the hint reset at
+once), and the `#url-hint` when a URL is rejected before it becomes a job.
+
+**A polling card must not carry a data URI.** The thumbnail and the "before"
+image come from `JobSource.thumb`, which is a remote URL for a URL job and a
+`/static` path for a sample. An upload has neither, so its card shows a blank
+thumbnail until it finishes -- putting the data URI there would re-send the
+entire upload once a second, for as long as the job runs.
 
 Progress comes from the worker writing checkpoints to `job.meta`
-(`src/tasks.py:report_progress`), which `jobs.result_for` reads back. They are
+(`src/tasks.py:report_progress`), which `jobs.describe` reads back. They are
 stage markers, not measurements. A queued job renders `<progress>` with no
-value, which browsers animate as indeterminate.
+value, which browsers animate as indeterminate. `report_progress` also lifts
+the face count out of the "Drawing glasses on N faces" step, because the next
+checkpoint overwrites `step` and the finished card still wants the number.
+
+The session list is DOM-only: nothing is written to disk or kept server-side,
+so a reload loses it. That is deliberate, and the page says so.
+
+### The theme switch, and why it is a span
+
+Light/dark is a checkbox that posts to `/theme`. The response is one hidden
+`<span id="theme-state" data-theme="light|dark">`, swapped in place, plus the
+cookie that makes the next load agree. `style.css` reads *only* that span:
+
+```css
+body { /* light */ }
+@media (prefers-color-scheme: dark) {
+    body:not(:has(#theme-state[data-theme="light"])) { /* dark */ }
+}
+body:has(#theme-state[data-theme="dark"]) { /* dark */ }
+```
+
+An absent `data-theme` means nobody has chosen, which is the only case where
+the OS gets a say. Driving it from `:has(#theme:checked)` instead looks
+simpler and is wrong: an unchecked box cannot be told apart from "no
+preference", so a first-ever toggle *off* on a dark desktop has nothing to
+override the media query with. The switch's own knob and label are drawn from
+`--knob-left` and `--theme-label`, tokens defined in the theme blocks, so they
+always show the theme actually in force. The one seam left: on a dark desktop
+with no cookie the page is dark while the checkbox is unchecked, so the first
+click is a no-op. Fixing that needs `Sec-CH-Prefers-Color-Scheme`.
 
 ### Why RQ
 
@@ -201,6 +236,9 @@ Every numbered pitfall from the original audit, for the record:
   longest side). On `multiple_people.jpg` upscaled to a phone-sized 3840x3072,
   that is 17.2s against 4.3s, with the same 8 faces found. Compositing stays
   full-resolution, and the glasses centroid moves under 1% of image width.
+- **The interface was one long page** -- form, showcase, API docs and licence
+  stacked together, with a single result slot. It is now the app at `/` and
+  the docs at `/docs`, and each submission gets its own card.
 - **Stale everything** → the packaging and deployment leftovers of three
   earlier hosting arrangements, the wrong framework named in the page copy,
   `Dockerfile-base`, the Docker Hub push workflow and the dead CodeClimate
@@ -209,7 +247,11 @@ Every numbered pitfall from the original audit, for the record:
 ## Known rough edges
 
 - The API is unauthenticated and unthrottled. The SSRF guard stops it being a
-  network proxy, but nothing stops someone burning worker CPU.
+  network proxy, but nothing stops someone burning worker CPU -- and the
+  dropzone takes several files at once, which makes that easier than it was.
+- `POST /validate` judges a URL from the string alone. It cannot resolve a
+  name (a handler must not wait on DNS), so `images.shape_error` catches only
+  the obvious cases; `_assert_public_address` in the worker is the real guard.
 - Redis runs with no `maxmemory` and no persistence. Results are base64 data
   URIs stored at ~1.33x their size; a flood of 10 MB submissions is a memory
   problem. Serving results from an object store (or the filesystem) and
@@ -222,8 +264,8 @@ Every numbered pitfall from the original audit, for the record:
   which is why the Dockerfile has separate `web` (473 MB) and `worker`
   (1.13 GB) targets. `docker compose` uses the `dev` target for both.
 - The HOG detector is CPU-only and mediocre on small or side-on faces.
-- `style.css` is hand-written from 2020 and has had no responsive testing
-  since the rewrite.
+- `style.css` was rewritten for the redesign and its responsive rules have
+  been reasoned about but not tested in a real browser at width.
 - No structured logging, no metrics, no tracing.
 - CI runs lint + tests only. Building or pushing images is deliberately not
   wired up yet.

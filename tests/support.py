@@ -10,6 +10,7 @@ REJECTS = 'tests.support.rejects'
 CRASHES = 'tests.support.crashes'
 RETURNS_NOTHING = 'tests.support.returns_nothing'
 REPORTS_PROGRESS = 'tests.support.reports_progress'
+COUNTS_FACES = 'tests.support.counts_faces'
 
 IMAGE = 'data:image/png;base64,c3VuZ2xhc3Nlcw=='
 
@@ -36,4 +37,13 @@ def reports_progress(payload: dict) -> dict:
     from src.tasks import report_progress
 
     report_progress(42, 'Halfway up the stairs')
+    return {'image': IMAGE, 'error': None}
+
+
+def counts_faces(payload: dict) -> dict:
+    """Reports the one checkpoint that carries a number worth keeping."""
+    from src.tasks import report_progress
+
+    report_progress(75, 'Drawing glasses on 8 faces')
+    report_progress(90, 'Encoding the result')
     return {'image': IMAGE, 'error': None}

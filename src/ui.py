@@ -1,28 +1,38 @@
 """The interface, in FastHTML.
 
-Submitting the form enqueues a job and swaps in a fragment that polls itself
-until the worker is done -- no page reloads, and no JavaScript of our own.
+Two pages: the app at ``/`` and the docs at ``/docs``. Submitting a picture
+enqueues a job and swaps a card into ``#queue``; the card polls itself until
+the worker is done and then turns into the result in place. No page reloads,
+and no JavaScript of our own beyond the one clipboard line on the docs page.
 """
 
 import base64
+import json
 import logging
+from dataclasses import dataclass
+from functools import cache
+from pathlib import Path
 
 from fasthtml.common import (
     H1,
     H2,
-    H4,
+    H3,
     A,
+    Article,
+    Aside,
+    B,
     Button,
     Code,
     Div,
-    Fieldset,
+    Em,
+    Figcaption,
+    Figure,
     Footer,
     Form,
     Header,
     Img,
     Input,
     Label,
-    Li,
     Link,
     Main,
     Meta,
@@ -33,19 +43,77 @@ from fasthtml.common import (
     Section,
     Span,
     Title,
-    Ul,
     UploadFile,
+    cookie,
     fast_app,
 )
 from pydantic import ValidationError
+from starlette.responses import Response
 
-from src import jobs
+from src import images, jobs
 from src.config import get_settings
-from src.models import ImageRequest, JobState
+from src.models import ImageRequest, JobResult, JobSource, JobState, SourceKind
 
 logger = logging.getLogger(__name__)
 
 POLL_INTERVAL = '1s'
+HEALTH_INTERVAL = '30s'
+REPO = 'https://github.com/ericovis/deal_with_it'
+LICENSE_URL = f'{REPO}/blob/master/LICENSE'
+IMG_DIR = Path(__file__).resolve().parent / 'static' / 'img'
+THEME_COOKIE = 'dwi_theme'
+#: A year. The cookie carries a preference, not a session.
+THEME_MAX_AGE = 60 * 60 * 24 * 365
+
+EXPIRED = 'That job has expired. Try again?'
+NOTHING_SUBMITTED = 'No image or URL was provided!'
+URL_LOOKS_FINE = 'Looks good. Press Enter or Deal with it.'
+
+KIND_LABELS = {
+    SourceKind.UPLOAD: 'Uploaded file',
+    SourceKind.URL: 'From URL',
+    SourceKind.SAMPLE: 'Sample picture',
+}
+
+CHIPS = {
+    JobState.QUEUED: ('Queued', 'chip'),
+    JobState.STARTED: ('Working', 'chip working'),
+    JobState.FINISHED: ('Done', 'chip done'),
+    JobState.FAILED: ('Failed', 'chip failed'),
+}
+
+
+@dataclass(frozen=True)
+class Sample:
+    """One of the three one-click pictures, all of them repo assets."""
+
+    filename: str
+    title: str
+    media_type: str
+    #: Line art rather than a photograph, so the tile contains it instead of
+    #: cropping it and inverts it with the theme.
+    art: bool = False
+
+
+SAMPLES = {
+    'me': Sample('me.jpg', 'One face', 'image/jpeg'),
+    'group': Sample('multiple_people.jpg', 'Eight faces', 'image/jpeg'),
+    'glasses': Sample('glasses.png', 'No faces · fails', 'image/png', art=True),
+}
+
+
+@cache
+def sample_data_uri(name: str) -> str:
+    """A sample picture as a data URI, read once per process.
+
+    Samples go through the queue as base64 rather than as a URL to
+    ``/static``: the worker's SSRF guard refuses to fetch anything that
+    resolves to a private address, and our own host is one. Safe to cache --
+    three files, fixed at build time, and the strings are immutable.
+    """
+    sample = SAMPLES[name]
+    payload = base64.b64encode((IMG_DIR / sample.filename).read_bytes()).decode()
+    return f'data:{sample.media_type};base64,{payload}'
 
 
 def _first_message(exc: ValidationError) -> str:
@@ -59,11 +127,14 @@ def _absolute(path: str) -> str:
     return f'{base}{path}' if base else path
 
 
-def head_tags() -> tuple:
+# --------------------------------------------------------------- the shell
+
+
+def head_tags(title: str) -> tuple:
     """Metadata that belongs in <head>. FastHTML hoists these out of a page."""
     card = _absolute('/static/img/deal_with_me.png')
     return (
-        Title('Deal With It | Eric Magalhães'),
+        Title(title),
         Meta(name='viewport', content='width=device-width,initial-scale=1'),
         Meta(name='author', content='Eric Magalhães'),
         Meta(name='description', content='A Python API for creating "Deal With It"-like Images'),
@@ -79,9 +150,104 @@ def head_tags() -> tuple:
         Meta(property='og:description',
              content='A Python API for creating "Deal With It"-like Images.'),
         Link(rel='icon', href='/static/img/favicon.png', type='image/png', sizes='16x16'),
+        Link(rel='preconnect', href='https://fonts.googleapis.com'),
+        Link(rel='stylesheet', href='https://fonts.googleapis.com/css2?'
+                                    'family=Manrope:wght@400;500;600;700;800&'
+                                    'family=Fira+Code:wght@400;500&display=swap'),
         Link(rel='stylesheet', href='/static/css/style.css'),
-        Link(rel='stylesheet',
-             href='https://fonts.googleapis.com/css2?family=Open+Sans:wght@400;700&display=swap'),
+    )
+
+
+def theme_state(theme: str | None) -> Span:
+    """The single element the whole palette hangs off.
+
+    ``style.css`` reads it with ``body:has(#theme-state[data-theme="dark"])``.
+    An absent attribute means nobody has chosen yet, which is the only case
+    where ``prefers-color-scheme`` gets a say. Flipping the switch swaps this
+    one span, so the page changes colour without a reload and without a line
+    of script -- and the same response sets the cookie, so the next load
+    already agrees with what is on screen.
+    """
+    return Span(id='theme-state', hidden=True, data_theme=theme)
+
+
+def theme_switch(theme: str | None) -> Span:
+    """A checkbox drawn as a switch. The visuals come from the theme tokens
+    rather than from ``:checked``, so the knob shows the theme actually in
+    force -- including a first visit on a dark desktop, where the cookie does
+    not exist and the box is therefore unchecked."""
+    return Span(
+        Input(type='checkbox', id='theme', name='theme', value='dark',
+              checked=theme == 'dark', cls='visually-hidden', role='switch',
+              aria_label='Dark theme',
+              hx_post='/theme', hx_trigger='change',
+              hx_target='#theme-state', hx_swap='outerHTML'),
+        Label(Span(cls='knob'), fr='theme', cls='switch',
+              title='Switch between light and dark'),
+        theme_state(theme),
+        cls='switch-wrap',
+    )
+
+
+def status_pill(reachable: bool) -> Span:
+    """Whether the broker is answering. Refreshes itself in place."""
+    return Span(
+        'workers ready' if reachable else 'queue unreachable',
+        id='health',
+        cls='pill' if reachable else 'pill down',
+        title='GET /api/health',
+        hx_get='/health',
+        hx_trigger=f'every {HEALTH_INTERVAL}',
+        hx_swap='outerHTML',
+    )
+
+
+def site_header(active: str, theme: str | None, reachable: bool) -> Header:
+    def nav_link(label: str, href: str, key: str = '') -> A:
+        return A(label, href=href, cls='here' if key and key == active else None)
+
+    return Header(
+        Div(
+            A(Img(src='/static/img/glasses.png', alt=''), Span('Deal With It!'),
+              href='/', cls='brand'),
+            Nav(
+                nav_link('App', '/', 'app'),
+                nav_link('Docs', '/docs', 'docs'),
+                nav_link('GitHub ↗', REPO),
+                status_pill(reachable),
+                theme_switch(theme),
+                cls='nav',
+            ),
+            cls='container',
+        ),
+        cls='band',
+    )
+
+
+def site_footer(active: str) -> Footer:
+    other = A('API docs', href='/docs') if active == 'app' else A('App', href='/')
+    return Footer(
+        Div(
+            Span('© 2018–2026 ', A('Eric Magalhães', href='https://ericovis.com')),
+            Span(A('MIT License', href=LICENSE_URL), other, A('GitHub', href=REPO),
+                 cls='links'),
+            cls='container',
+        ),
+        cls='site-footer',
+    )
+
+
+# ------------------------------------------------------------- the app page
+
+
+def url_hint(message: str = '', ok: bool = False, oob: bool = False) -> P:
+    """The line under the URL field. Empty when there is nothing to say."""
+    return P(
+        message,
+        id='url-hint',
+        cls=('ok' if ok else 'error') if message else None,
+        aria_live='polite',
+        hx_swap_oob='true' if oob else None,
     )
 
 
@@ -90,224 +256,443 @@ def upload_form(replace: bool = False) -> Form:
 
     With ``replace``, it comes back marked for an out-of-band swap: htmx
     replaces the form already on the page with this fresh, empty one. That is
-    how a finished job clears the URL and the file input without any
-    JavaScript of ours.
+    how a submitted job clears the URL, the file input and the hint without
+    any JavaScript of ours.
+
+    The file input sits *before* its label on purpose: the label is the
+    dropzone, and a file input is a native drop target, so dropping onto the
+    label counts as choosing files. Browsers also fire :hover throughout a
+    drag, which is the entire drag-over state.
     """
     return Form(
-        Fieldset(
-            Label('URL', _for='url'),
-            Input(type='text', id='url', name='url',
-                  placeholder='https://example.com/image.png'),
-            Label('or a file from your computer', _for='image', cls='file-label'),
-            Input(type='file', id='image', name='image', accept='image/*'),
+        Input(type='file', id='files', name='image', accept='image/*', multiple=True,
+              cls='visually-hidden',
+              hx_post='/submit', hx_trigger='change', hx_encoding='multipart/form-data',
+              hx_target='#queue', hx_swap='afterbegin'),
+        Label(
+            Img(src='/static/img/glasses.png', alt=''),
+            Span('Drop pictures here', cls='title'),
+            Span('or ', Em('browse your computer'), cls='sub'),
+            Span('PNG or JPEG, up to 10 MB each. Several at once is fine.', cls='limits'),
+            fr='files', cls='dropzone',
         ),
-        Div(Button('Deal with It!', type='submit'), cls='submit'),
+        Div('or a URL', cls='divider'),
+        Div(
+            Input(type='text', id='url', name='url',
+                  placeholder='https://example.com/photo.jpg',
+                  autocomplete='off', spellcheck='false',
+                  hx_post='/validate', hx_trigger='input changed delay:400ms',
+                  hx_target='#url-hint', hx_swap='outerHTML',
+                  hx_sync='closest form:abort'),
+            Button('Deal with it', type='submit', cls='btn'),
+            cls='url-row',
+        ),
+        url_hint(),
         id='form',
         hx_swap_oob='true' if replace else None,
         hx_post='/submit',
-        hx_target='#result',
-        hx_swap='innerHTML',
+        hx_target='#queue',
+        hx_swap='afterbegin',
         hx_encoding='multipart/form-data',
         hx_disabled_elt='find button',
     )
 
 
-def working(job_id: str, step: str, percent: int | None = None) -> Div:
-    """A fragment that replaces itself with the next poll's answer.
-
-    ``load delay:`` rather than ``every``: the chain ends by itself as soon as
-    a response comes back without the hx-get, so a finished job cannot leave a
-    timer running against whatever replaced it.
-
-    A queued job renders a <progress> with no value, which browsers animate
-    as indeterminate -- honest, since nothing is happening yet.
-    """
-    label = f'{step}... {percent}%' if percent is not None else f'{step}...'
-    return Div(
-        Progress(value=percent, max=100),
-        P(label, id='message'),
-        id=f'job-{job_id}',
-        cls='working',
-        hx_get=f'/jobs/{job_id}',
-        hx_trigger=f'load delay:{POLL_INTERVAL}',
-        hx_swap='outerHTML',
+def sample_tile(name: str) -> Button:
+    sample = SAMPLES[name]
+    return Button(
+        Img(src=f'/static/img/{sample.filename}', alt='', cls='art' if sample.art else None),
+        Span(B(sample.title), Span(sample.filename), cls='caption'),
+        type='button',
+        cls='sample',
+        hx_post='/submit',
+        hx_vals=json.dumps({'sample': name}),
+        hx_target='#queue',
+        hx_swap='afterbegin',
     )
 
 
-def failure(message: str, job_id: str | None = None) -> Div:
-    return Div(
-        P(message, id='message', cls='error'),
-        id=f'job-{job_id}' if job_id else 'result-error',
+def app_pane() -> Aside:
+    return Aside(
+        Div(
+            H1('Give it a picture, get it back with the meme sunglasses on '
+               'every face in it.'),
+            P('Faces are found by a background worker, so a result takes a few '
+              'seconds. ', A('How it works', href='/docs')),
+            cls='lede',
+        ),
+        upload_form(),
+        Div(
+            P('Or try a sample', cls='samples-label'),
+            Div(*(sample_tile(name) for name in SAMPLES), cls='samples'),
+        ),
+        cls='pane',
     )
 
 
-def gallery_item(job_id: str, image: str) -> Div:
-    """One finished image, inserted at the top of the gallery.
+def session_section() -> Section:
+    return Section(
+        Div(
+            H2('This session'),
+            Button('Clear', type='button', cls='clear',
+                   hx_get='/empty', hx_target='#queue', hx_swap='innerHTML'),
+            cls='session-head',
+        ),
+        P('Results live in this tab only. Reloading loses them, so download '
+          'anything you want to keep.', cls='note'),
+        Div(id='queue'),
+        # After #queue rather than before it, because the rule that reveals
+        # this is `#queue:empty + .empty` -- and an empty #queue is zero tall,
+        # so it still reads as sitting where the list will be.
+        Div('Nothing here yet. Drop a picture, paste a URL, or try a sample.', cls='empty'),
+        cls='session',
+    )
 
-    hx-swap-oob with a position and selector adds to #gallery rather than
-    replacing anything, which is what accumulates the session's results.
 
-    The outer div is a transport envelope and never reaches the page: for any
-    swap style other than outerHTML, htmx inserts the *children* of the
-    element carrying hx-swap-oob, not the element itself. Without the extra
-    level the .gallery-item wrapper would be stripped, taking its styling --
-    and the :has() rule that reveals the section -- with it.
+def page(theme: str | None, reachable: bool) -> tuple:
+    return (
+        *head_tags('Deal With It | Eric Magalhães'),
+        site_header('app', theme, reachable),
+        Main(app_pane(), session_section(), cls='container layout'),
+        site_footer('app'),
+    )
+
+
+# ------------------------------------------------------------------- cards
+
+
+def _faces(count: int | None) -> str:
+    if count is None:
+        return ''
+    return f' · {count} face' if count == 1 else f' · {count} faces'
+
+
+def _subtitle(result: JobResult, source: JobSource) -> str:
+    kind = KIND_LABELS[source.kind]
+    if result.state == JobState.STARTED:
+        step = result.step or 'Working on it'
+        return f'{step} · {result.progress}%' if result.progress is not None else step
+    if not result.state.is_terminal:
+        # queued, and RQ's deferred/scheduled, which we never create but
+        # which would otherwise fall through to the failed branch.
+        return 'In the queue'
+    if result.state == JobState.FINISHED:
+        return f'{kind}{_faces(source.faces)}'
+    return kind
+
+
+def _result_view(job_id: str, image: str, before: str | None) -> Div:
+    """The finished image, with a Before/After toggle built from two radios.
+
+    ``:has()`` does the switching, so the comparison costs no script and the
+    radios keep the control in the tab order.
     """
+    footer = [
+        Span(cls='spacer'),
+        A('Open full size', href=image, target='_blank', cls='open-full'),
+        A('Download PNG', href=image, download=f'deal-with-it-{job_id[:8]}.png',
+          cls='download'),
+    ]
+    if before is None:
+        return Div(Div(Img(src=image, alt='Result'), cls='frame'),
+                   Div(*footer, cls='card-foot'), cls='result')
+
+    name = f'view-{job_id}'
     return Div(
         Div(
-            A(Img(src=image, alt='Deal with me'), href=image, target='_blank',
-              title='Open full size'),
-            P(A('Download', href=image, download=f'deal-with-it-{job_id[:8]}.png')),
-            cls='gallery-item',
-            id=f'result-{job_id}',
+            Img(src=before, alt='The picture as submitted', cls='before'),
+            Img(src=image, alt='Result', cls='after'),
+            cls='frame',
         ),
-        hx_swap_oob='afterbegin:#gallery',
+        Div(
+            Div(
+                Input(type='radio', id=f'{name}-b', name=name, value='before'),
+                Label('Before', fr=f'{name}-b'),
+                Input(type='radio', id=f'{name}-a', name=name, value='after', checked=True),
+                Label('After', fr=f'{name}-a'),
+                cls='segmented',
+            ),
+            *footer,
+            cls='card-foot',
+        ),
+        cls='result',
     )
 
 
-def finished(job_id: str, image: str) -> tuple:
-    """Three swaps at once, and the reason the poll chain ends here.
+def card(job_id: str, result: JobResult | None, source: JobSource,
+         retryable: bool = True, dom_id: str | None = None) -> Article:
+    """One job, in whatever state it is in.
 
-    The polling fragment empties out, the image joins the gallery, and the
-    form comes back blank. The form is only reset on success: a failed job
-    leaves what was submitted in place so it can be corrected and retried.
+    Every state is the same element, so a card can replace itself with the
+    next answer: queued and started ones carry the hx-get that fetches the
+    next one, terminal ones do not, and the poll chain therefore ends by
+    itself rather than leaving a timer running against whatever replaced it.
+
+    ``result is None`` means RQ has never heard of the id -- expired, or made
+    up. There is nothing to retry in that case.
     """
-    return (
-        Div(id=f'job-{job_id}'),
-        gallery_item(job_id, image),
-        upload_form(replace=True),
-    )
+    expired = result is None
+    if result is None:
+        result = JobResult(job_id=job_id, state=JobState.FAILED, error=EXPIRED)
+        retryable = False
 
+    finished = result.state == JobState.FINISHED
+    polls = not result.state.is_terminal
+    label, chip = CHIPS.get(
+        result.state, CHIPS[JobState.QUEUED] if polls else CHIPS[JobState.FAILED])
 
-def showcase(before: str, after: str, before_label: str, after_label: str) -> Div:
-    return Div(
-        Div(P(before_label), Img(src=before, alt='Original picture'), cls='showcase-img'),
-        Div(P(after_label), Img(src=after, alt='Processed picture'), cls='showcase-img'),
-        cls='showcase',
-    )
+    # A data URI is only worth sending once the card has stopped polling: as a
+    # thumbnail on a card that refetches every second it would be the whole
+    # upload, every second. Anything cheap (a remote URL, a static path) goes
+    # on every state.
+    thumb = source.thumb or (source.original if finished else None)
 
-
-def page() -> tuple:
-    return (
-        *head_tags(),
-        Span(A('Fork me on GitHub', href='https://github.com/ericovis/deal_with_it'),
-             id='forkongithub'),
-        Header(
-            Nav(Div(Ul(
-                Li(A('How it works', href='#how')),
-                Li(A('Try it', href='#demo')),
-                Li(A('API Docs', href='#api')),
-                Li(A('License', href='#license')),
-                cls='navigation'), cls='container')),
-            H1('Deal With It!'),
-            H2('A Python API for creating "Deal With It"-like Images'),
-        ),
-        Main(
-            Section(Div(
-                H2('How it works'),
-                P('They say that "a picture is worth a thousand words". '
-                  'So well, this is what this API does:'),
-                showcase('/static/img/me.jpg', '/static/img/deal_with_me.png',
-                         'Turns this:', 'Into this:'),
-                P('It also works on pictures with multiple people:'),
-                showcase('/static/img/multiple_people.jpg',
-                         '/static/img/deal_with_multiple_people.png', 'Before:', 'After:'),
-                P('Group photo: the 2013 class of NASA astronauts, by Robert Markowitz for ',
-                  A('NASA', href='https://commons.wikimedia.org/wiki/'
-                                 'File:2013_class_of_NASA_astronauts.jpg'),
-                  '. Public domain.', cls='credit'),
-                P('Behind the scenes, this project uses the ',
-                  A('face_recognition', href='https://github.com/ageitgey/face_recognition'),
-                  ' library to identify faces in a given picture. On every identified face the '
-                  'library returns, among other stuff, the information about face landmarks '
-                  'which includes coordinates for a person\'s eyes.'),
-                P('With that information, this package then calculates the angle on which a '
-                  'person\'s head is leaned to correctly place the "deal with it" glasses on '
-                  'the person\'s eyes.'),
-                P('The image manipulation is done with ',
-                  A('Pillow', href='https://github.com/python-pillow/Pillow'),
-                  ' in a background worker managed by ',
-                  A('RQ', href='https://python-rq.org'),
-                  ', because detecting faces takes long enough that doing it inside the request '
-                  'would block everything else. The page you are looking at is ',
-                  A('FastHTML', href='https://fastht.ml'), ' and the REST API is ',
-                  A('FastAPI', href='https://fastapi.tiangolo.com'), '.'),
-                cls='container'), id='how'),
-            Section(Div(
-                H2('Try it'),
-                P('Either insert a valid image URL or choose a picture from your computer, '
-                  'then click "Deal with it!" to see the API in action.'),
-                Div(id='result'),
-                upload_form(),
-                Div(
-                    H4('This session'),
-                    P('These live in this page only. Reloading loses them, so '
-                      'download anything you want to keep.', cls='gallery-note'),
-                    Div(id='gallery'),
-                    id='gallery-section',
-                ),
-                cls='container'), id='demo'),
-            Section(Div(
-                H2('Api Docs'),
-                P('There is a REST API documented at ', A('/api/docs', href='/api/docs'), '. '
-                  'Processing happens in the background, so it takes two calls: one to submit '
-                  'the image, one to collect the result.'),
-                H4('Submit an image'),
-                P('POST to ', Code('/api/jobs'), ' with either of these bodies:'),
-                Pre(Code('{\n  "url": "https://ericovis.com/images/me.jpg"\n}', cls='json')),
-                Pre(Code('{\n  "base64": "data:image/png;base64,..."\n}', cls='json')),
-                P('The response points at the job you just created:'),
-                Pre(Code('{\n  "job_id": "9f2c...",\n  "state": "queued",\n'
-                         '  "status_url": "/api/jobs/9f2c..."\n}', cls='json')),
-                H4('Collect the result'),
-                P('GET the ', Code('status_url'), ' until ', Code('state'), ' is ',
-                  Code('finished'), ' or ', Code('failed'), ':'),
-                Pre(Code('{\n  "job_id": "9f2c...",\n  "state": "finished",\n'
-                         '  "image": "data:image/png;base64,...",\n  "error": null,\n'
-                         '  "progress": 100,\n  "step": "Done"\n}', cls='json')),
-                P('While a job is running, ', Code('progress'), ' and ', Code('step'),
-                  ' report which stage it has reached.'),
-                cls='container'), id='api'),
-            Section(Div(
-                H2('License'),
-                P(A('MIT License',
-                    href='https://github.com/ericovis/deal_with_it/blob/master/LICENSE')),
-                cls='container'), id='license'),
-        ),
-        Footer(Div('© 2018-2026 ', A('Eric Magalhães', href='https://ericovis.com'),
-                   cls='container')),
-    )
-
-
-async def _request_from_form(url: str, image: UploadFile | str | None) -> ImageRequest:
-    """Turn the two form fields into a validated request.
-
-    An empty file input arrives as ``''`` rather than None, and a URL field
-    left blank arrives as ``''`` too -- neither should count as "provided".
-    """
-    settings = get_settings()
-    data: dict[str, str | None] = {'url': None, 'base64': None}
-
-    if isinstance(image, UploadFile) and image.filename:
-        content_type = image.content_type or ''
-        if not content_type.startswith('image/'):
-            raise ValueError('That file does not look like an image.')
-        payload = await image.read()
-        if len(payload) > settings.max_image_bytes:
-            raise ValueError(
-                f'That image is bigger than the {settings.max_image_bytes // 1024 // 1024} MB '
-                'limit.'
-            )
-        if not payload:
-            raise ValueError('That file is empty.')
-        encoded = base64.b64encode(payload).decode()
-        data['base64'] = f'data:{content_type};base64,{encoded}'
-    elif url.strip():
-        data['url'] = url.strip()
+    body: list = []
+    if result.state == JobState.STARTED:
+        body.append(Progress(value=result.progress, max=100))
+    elif polls:
+        body.append(Progress(max=100))
+    elif finished and result.image:
+        # Prefer the cheap copy for "before" too: a sample's static path says
+        # the same thing as its data URI in 24 bytes instead of 300 KB.
+        body.append(_result_view(job_id, result.image, source.thumb or source.original))
     else:
-        raise ValueError('No image or URL was provided!')
+        message = result.error or 'That did not work.'
+        retry = [Button('Retry', type='button', cls='retry',
+                        hx_post=f'/jobs/{job_id}/retry',
+                        hx_target='closest article', hx_swap='outerHTML')] if retryable else []
+        body.append(Div(P(message), *retry, cls='card-error'))
 
-    return ImageRequest.model_validate(data)
+    return Article(
+        Div(
+            Img(src=thumb, alt='', cls='thumb') if thumb else Div(cls='thumb'),
+            Div(B(source.label or ('Unknown job' if expired else 'Picture')),
+                Span('' if expired else _subtitle(result, source)), cls='card-id'),
+            Span(label, cls=chip),
+            Button('×', type='button', cls='remove', title='Remove', aria_label='Remove',
+                   hx_get='/empty', hx_target='closest article', hx_swap='delete'),
+            cls='card-head',
+        ),
+        *body,
+        id=dom_id or f'job-{job_id}',
+        cls='card',
+        hx_get=f'/jobs/{job_id}' if polls else None,
+        hx_trigger=f'load delay:{POLL_INTERVAL}' if polls else None,
+        hx_swap='outerHTML' if polls else None,
+    )
+
+
+def card_for(job_id: str) -> Article:
+    """The card a job's current state calls for."""
+    described = jobs.describe(job_id)
+    if described is None:
+        return card(job_id, None, JobSource())
+    return card(job_id, *described)
+
+
+def rejected_card(label: str, kind: SourceKind, message: str) -> Article:
+    """A submission that never became a job.
+
+    It still gets a card rather than a bare sentence: a person who dropped
+    six files wants to see which one was refused, next to the five that were
+    not. There is no job behind it, so there is nothing to retry either.
+    """
+    # Not id="job-..." -- there is no job, and nothing should be able to poll
+    # or retry it by mistaking the element for one.
+    job_id = f'rejected-{abs(hash((label, message))) % 10**8:08d}'
+    return card(
+        job_id,
+        JobResult(job_id=job_id, state=JobState.FAILED, error=message),
+        JobSource(kind=kind, label=label),
+        retryable=False,
+        dom_id=job_id,
+    )
+
+
+# ------------------------------------------------------------ the docs page
+
+
+def snippet(text: str) -> Div:
+    """A code block with a Copy button.
+
+    The hx-on:click is the only script this project ships, and the ``pre``
+    keeps ``user-select: all`` so one click still selects the whole thing for
+    anyone whose browser refuses clipboard access.
+    """
+    return Div(
+        Pre(Code(text)),
+        Button('Copy', type='button', cls='copy',
+               **{'hx-on:click':
+                  'navigator.clipboard.writeText(this.previousElementSibling.innerText)'}),
+        Span('Copied', cls='copied'),
+        cls='snippet',
+    )
+
+
+def figure(src: str, alt: str, caption: str) -> Figure:
+    return Figure(Img(src=src, alt=alt), Figcaption(caption))
+
+
+def tile(name: str, description: str) -> Div:
+    return Div(B(name), Span(description), cls='tile')
+
+
+def stage(percent: str, label: str, last: bool = False) -> Div:
+    return Div(B(percent), Span(label), cls='stage last' if last else 'stage')
+
+
+def docs_page(theme: str | None, reachable: bool) -> tuple:
+    return (
+        *head_tags('How it works | Deal With It'),
+        site_header('docs', theme, reachable),
+        Main(
+            Nav(
+                Span('On this page', cls='label'),
+                A('How it works', href='#how'),
+                A('API', href='#api'),
+                A('Submit an image', href='#submit', cls='sub'),
+                A('Collect the result', href='#collect', cls='sub'),
+                A('Health', href='#health', cls='sub'),
+                A('License', href='#license'),
+                A('Try it', href='/', cls='try-it'),
+                cls='toc',
+            ),
+            Article(
+                Section(
+                    H1('How it works'),
+                    P('Give it a picture, get it back with the meme sunglasses on '
+                      'every face in it.', cls='lead'),
+                    Div(
+                        figure('/static/img/me.jpg', 'Original picture', 'Turns this'),
+                        figure('/static/img/deal_with_me.png', 'Processed picture',
+                               'Into this'),
+                        cls='figures',
+                    ),
+                    Div(
+                        figure('/static/img/multiple_people.jpg',
+                               'Original picture with several people', 'Several people, before'),
+                        figure('/static/img/deal_with_multiple_people.png',
+                               'Processed picture with several people', 'After'),
+                        cls='figures',
+                    ),
+                    P('Group photo: the 2013 class of NASA astronauts, by Robert '
+                      'Markowitz for ',
+                      A('NASA', href='https://commons.wikimedia.org/wiki/'
+                                     'File:2013_class_of_NASA_astronauts.jpg'),
+                      '. Public domain.', cls='credit'),
+                    P('Faces are found with the ',
+                      A('face_recognition', href='https://github.com/ageitgey/face_recognition'),
+                      ' library. For every face it returns landmarks, including the '
+                      'coordinates of both eyes.'),
+                    P('The angle between the eyes tells how far the head is tilted, so '
+                      'the glasses are rotated to sit straight on the face.'),
+                    P('Compositing is done with ',
+                      A('Pillow', href='https://github.com/python-pillow/Pillow'),
+                      ' in a background worker managed by ',
+                      A('RQ', href='https://python-rq.org'),
+                      ': detecting faces takes long enough that doing it inside the '
+                      'request would block everything else. The page is ',
+                      A('FastHTML', href='https://fastht.ml'), ' + htmx, the REST API is ',
+                      A('FastAPI', href='https://fastapi.tiangolo.com'), '.'),
+                    Div(
+                        tile('web', 'Serves the page and the JSON API. Never touches an image.'),
+                        tile('worker', 'Pulls jobs off the queue, fetches and decodes the '
+                                       'image, draws the glasses.'),
+                        tile('redis', 'The queue, and where results wait to be collected.'),
+                        cls='tiles',
+                    ),
+                    id='how',
+                ),
+                Section(
+                    H2('API'),
+                    P('Documented at ', A('/api/docs', href='/api/docs'), '. Processing '
+                      'happens in the background, so it takes two calls: one to submit '
+                      'the image, one to collect the result.'),
+                    H3(Span('1', cls='n'), 'Submit an image', id='submit'),
+                    P(Code('POST /api/jobs'), ' with either a ', Code('url'), ' or a ',
+                      Code('base64'), ' data URI, not both:'),
+                    Div(
+                        snippet('{\n  "url": "https://ericovis.com/images/me.jpg"\n}'),
+                        snippet('{\n  "base64": "data:image/png;base64,..."\n}'),
+                        cls='pair',
+                    ),
+                    P('Responds ', Code('202'), ' with the job to poll:'),
+                    snippet('{\n  "job_id": "9f2c...",\n  "state": "queued",\n'
+                            '  "status_url": "http://localhost:5000/api/jobs/9f2c..."\n}'),
+                    H3(Span('2', cls='n'), 'Collect the result', id='collect'),
+                    P(Code('GET'), ' the ', Code('status_url'), ' until ', Code('state'),
+                      ' is ', Code('finished'), ' or ', Code('failed'), ':'),
+                    snippet('{\n  "job_id": "9f2c...",\n  "state": "finished",\n'
+                            '  "image": "data:image/png;base64,...",\n  "error": null,\n'
+                            '  "progress": 100,\n  "step": "Done"\n}'),
+                    P(Code('state'), ' is one of ', Code('queued'), ', ', Code('started'),
+                      ', ', Code('finished'), ' or ', Code('failed'), '. A failed job '
+                      'carries a readable ', Code('error'), ': an unreachable URL, an '
+                      'undecodable image, or no faces found. An unknown or expired job id '
+                      'gives a ', Code('404'), '.'),
+                    P('While a job runs, ', Code('progress'), ' and ', Code('step'),
+                      ' report the stage it has reached. They are checkpoints rather than '
+                      'measurements: neither the detector nor Pillow reports how far '
+                      'through it is.'),
+                    Div(
+                        stage('10', 'Fetching the image'),
+                        stage('35', 'Looking for faces'),
+                        stage('75', 'Drawing glasses on 8 faces'),
+                        stage('90', 'Encoding the result'),
+                        stage('100', 'Done', last=True),
+                        cls='stages',
+                    ),
+                    H3('Health', id='health'),
+                    P(Code('GET /api/health'), ' reports whether the broker is reachable. '
+                      'The status pill in the header reads it every 30 seconds.'),
+                    snippet('{ "status": "ok", "redis": true }'),
+                    id='api',
+                ),
+                Section(
+                    H2('License'),
+                    P(A('MIT License', href=LICENSE_URL), '. Created by ',
+                      A('Eric Magalhães', href='https://ericovis.com'), '.'),
+                    id='license',
+                ),
+                cls='doc',
+            ),
+            cls='container docs',
+        ),
+        site_footer('docs'),
+    )
+
+
+# ---------------------------------------------------------------- handlers
+
+
+async def _upload_payload(upload: UploadFile) -> str:
+    """Read an upload into a data URI, or say why it cannot be used."""
+    settings = get_settings()
+    content_type = upload.content_type or ''
+    if not content_type.startswith('image/'):
+        raise ValueError('That file does not look like an image.')
+    payload = await upload.read()
+    if len(payload) > settings.max_image_bytes:
+        raise ValueError(
+            f'That image is bigger than the {settings.max_image_bytes // 1024 // 1024} MB limit.'
+        )
+    if not payload:
+        raise ValueError('That file is empty.')
+    return f'data:{content_type};base64,{base64.b64encode(payload).decode()}'
+
+
+def _enqueue(payload: dict, kind: SourceKind, label: str,
+             thumb: str | None = None) -> Article:
+    """Validate, queue, and hand back the card for whatever state it is in."""
+    try:
+        request = ImageRequest.model_validate(payload)
+    except ValidationError as exc:
+        return rejected_card(label, kind, _first_message(exc))
+    job_id, _ = jobs.enqueue(
+        request.as_payload(),
+        meta={'kind': str(kind), 'label': label, 'thumb': thumb},
+    )
+    return card_for(job_id)
 
 
 def create_ui():
@@ -328,35 +713,114 @@ def create_ui():
         route for route in app.router.routes if 'fname:path' not in getattr(route, 'path', '')
     ]
 
+    def theme_of(request) -> str | None:
+        chosen = request.cookies.get(THEME_COOKIE)
+        return chosen if chosen in ('light', 'dark') else None
+
     @rt('/')
-    def get():
-        return page()
+    def get(request):
+        return page(theme_of(request), jobs.is_broker_reachable())
+
+    @app.get('/docs')
+    def documentation(request):
+        return docs_page(theme_of(request), jobs.is_broker_reachable())
 
     @app.post('/submit')
-    async def submit(url: str = '', image: UploadFile | str | None = None):
+    async def submit(url: str = '', image: list[UploadFile] | None = None, sample: str = ''):
+        if sample:
+            return _submit_sample(sample)
+
+        # An untouched file input still posts one empty part, so the filename
+        # is what separates "chose nothing" from "chose something".
+        files = [f for f in (image or []) if isinstance(f, UploadFile) and f.filename]
+        if files:
+            cards = [await _submit_file(f) for f in files]
+            return (*cards, upload_form(replace=True))
+
+        return await _submit_url(url)
+
+    def _submit_sample(name: str):
+        if name not in SAMPLES:
+            return rejected_card(name, SourceKind.SAMPLE, NOTHING_SUBMITTED)
+        sample = SAMPLES[name]
+        # Samples do not reset the form: the buttons sit outside it, and
+        # wiping a half-typed URL because someone clicked a sample is rude.
+        return _enqueue(
+            {'url': None, 'base64': sample_data_uri(name)},
+            SourceKind.SAMPLE, sample.filename, f'/static/img/{sample.filename}',
+        )
+
+    async def _submit_file(upload: UploadFile):
+        label = upload.filename or 'Uploaded image'
         try:
-            request = await _request_from_form(url, image)
-        except ValidationError as exc:
-            # Caught before ValueError on purpose: ValidationError subclasses
-            # it, and str() on one is a multi-line report, not a sentence.
-            return failure(_first_message(exc))
+            payload = await _upload_payload(upload)
         except ValueError as exc:
-            return failure(str(exc))
+            return rejected_card(label, SourceKind.UPLOAD, str(exc))
+        return _enqueue({'url': None, 'base64': payload}, SourceKind.UPLOAD, label)
 
-        job_id, _ = jobs.enqueue(request.as_payload())
-        return working(job_id, 'In the queue')
+    async def _submit_url(url: str):
+        """A bad URL answers in the hint, not with a card.
 
-    @rt('/jobs/{job_id}')
+        There is nothing to show a card *about* -- no job was created and no
+        picture was named -- and leaving the text in the field is what lets it
+        be corrected rather than retyped.
+        """
+        text = url.strip()
+        if not text:
+            return url_hint(NOTHING_SUBMITTED, oob=True)
+        if message := images.shape_error(text):
+            return url_hint(message, oob=True)
+        try:
+            request = ImageRequest.model_validate({'url': text, 'base64': None})
+        except ValidationError as exc:
+            return url_hint(_first_message(exc), oob=True)
+
+        job_id, _ = jobs.enqueue(
+            request.as_payload(),
+            meta={'kind': str(SourceKind.URL), 'label': jobs.label_for(request.as_payload())},
+        )
+        return card_for(job_id), upload_form(replace=True)
+
+    @app.post('/validate')
+    def validate(url: str = ''):
+        """Shape only: a handler that resolved a hostname would block the
+        event loop on whatever DNS the caller chose. The real check runs in
+        the worker, against the address the name actually resolves to."""
+        text = url.strip()
+        if not text:
+            return url_hint()
+        if message := images.shape_error(text):
+            return url_hint(message)
+        return url_hint(URL_LOOKS_FINE, ok=True)
+
+    @app.get('/jobs/{job_id}')
     def job_fragment(job_id: str):
-        result = jobs.result_for(job_id)
-        if result is None:
-            return failure('That job has expired. Try again?', job_id)
-        if result.state == JobState.FINISHED:
-            return finished(job_id, result.image)
-        if result.state.is_terminal:
-            return failure(result.error or 'That did not work.', job_id)
-        if result.state == JobState.STARTED:
-            return working(job_id, result.step or 'Working on it', result.progress)
-        return working(job_id, 'In the queue')
+        return card_for(job_id)
+
+    @app.post('/jobs/{job_id}/retry')
+    def retry_job(job_id: str):
+        resubmitted = jobs.resubmit(job_id)
+        if resubmitted is None:
+            return card(job_id, None, JobSource())
+        return card_for(resubmitted[0])
+
+    @app.get('/health')
+    def health():
+        return status_pill(jobs.is_broker_reachable())
+
+    @app.post('/theme')
+    def set_theme(theme: str = ''):
+        """The switch posts here; the response is the one span the palette
+        hangs off, plus the cookie that makes the next load agree."""
+        chosen = 'dark' if theme == 'dark' else 'light'
+        return theme_state(chosen), cookie(
+            THEME_COOKIE, chosen, max_age=THEME_MAX_AGE, path='/', samesite='lax',
+        )
+
+    @app.get('/empty')
+    def empty():
+        """Nothing, on purpose: Remove and Clear are swaps that need a
+        response body to discard."""
+        return Response('', media_type='text/html')
 
     return app

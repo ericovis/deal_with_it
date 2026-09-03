@@ -73,6 +73,33 @@ class JobState(StrEnum):
         }
 
 
+class SourceKind(StrEnum):
+    """How an image reached the queue. Only the UI cares."""
+
+    UPLOAD = 'upload'
+    URL = 'url'
+    SAMPLE = 'sample'
+
+
+class JobSource(BaseModel):
+    """Where a job's image came from, so a card can label itself.
+
+    Deliberately not part of :class:`JobResult`: the JSON API's response is a
+    published contract, and none of this is any of its business.
+    """
+
+    kind: SourceKind = SourceKind.URL
+    #: File name, or ``host/path`` for a URL.
+    label: str = ''
+    #: An image cheap enough to re-send on every poll -- a remote URL or a
+    #: static path. None for an upload, whose only copy is a data URI.
+    thumb: str | None = None
+    #: What was actually submitted: the "before" half of a finished card.
+    original: str | None = None
+    #: How many faces the worker drew on, once it knows.
+    faces: int | None = None
+
+
 class JobCreated(BaseModel):
     """202 response: the work was accepted, come back for the result."""
 
