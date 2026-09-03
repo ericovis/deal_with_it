@@ -62,6 +62,14 @@ Invariants worth knowing before editing:
   `def` handlers (threadpool) or via `run_in_threadpool`. Polls read only the
   `status` and `meta` hash fields; the full job (with its image payload) is
   fetched once, when it is terminal.
+- **The dropzone posts one file per request** (`UPLOAD_ONE_BY_ONE` in
+  `src/ui.py`): a plain `hx-post` on a multiple file input sends the whole
+  selection in one body, so nothing appears until the last picture has
+  uploaded. It is one of the two lines of script in the interface — htmx has
+  no attribute that splits a file input. A file post therefore answers with
+  the card alone: the script empties the input itself, and an out-of-band
+  form swap would tear out the element the rest of the batch posts from.
+  `/submit` still takes a list, because the submit button can post one.
 - **A polling card must not carry a data URI.** `JobSource.thumb` is a
   remote URL or a `/static` path; an upload has neither until it finishes.
 - **Progress is stage markers** written to `job.meta` by the worker. The face

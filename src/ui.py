@@ -2,7 +2,9 @@
 
 Two pages: the app at ``/`` and the docs at ``/docs``. Submitting a picture
 swaps a card into ``#queue``; the card polls itself until the worker is done
-and then turns into the result in place.
+and then turns into the result in place. Two lines of script in the whole
+interface: the clipboard call on the docs page, and ``UPLOAD_ONE_BY_ONE``,
+which htmx has no attribute for.
 """
 
 import base64
@@ -270,6 +272,28 @@ def url_hint(message: str = '', ok: bool = False, oob: bool = False) -> P:
     )
 
 
+#: Posting a file input the ordinary way sends every file in one body, so
+#: nothing appears until the last byte of the last picture has arrived. This
+#: sends one request per file instead, in order, so each card lands as its own
+#: upload finishes. htmx has no attribute that splits a file input, which is
+#: why this is script rather than markup.
+#:
+#: ``etc.values`` *replaces* the ``image`` htmx collected from the form
+#: (``overrideFormData`` deletes the key before appending), so each request
+#: carries exactly one file. The input is emptied up front anyway: the files
+#: are already in hand, and an empty input stops the form's own submit button
+#: from re-sending the ones still waiting.
+UPLOAD_ONE_BY_ONE = (
+    "const input = this, files = [...input.files]; input.value = '';"
+    'void (async () => { for (const file of files) {'
+    " await htmx.ajax('POST', '/submit', {source: input, target: '#queue',"
+    " swap: 'afterbegin', values: {image: file}})"
+    # A dropped connection rejects, and one bad file must not swallow the
+    # rest of the batch -- nor raise, which htmx has already reported.
+    '  .catch(() => {}); } })();'
+)
+
+
 def upload_form(replace: bool = False) -> Form:
     """The submit form. With ``replace`` it swaps out of band over the one
     on the page, which is how a submission clears the fields.
@@ -279,9 +303,8 @@ def upload_form(replace: bool = False) -> Form:
     """
     return Form(
         Input(type='file', id='files', name='image', accept='image/*', multiple=True,
-              cls='visually-hidden',
-              hx_post='/submit', hx_trigger='change', hx_encoding='multipart/form-data',
-              hx_target='#queue', hx_swap='afterbegin'),
+              cls='visually-hidden', hx_encoding='multipart/form-data',
+              **{'hx-on:change': UPLOAD_ONE_BY_ONE}),
         Label(
             Img(src='/static/img/glasses.svg', alt=''),
             Span('Drop pictures here', cls='title'),
@@ -779,11 +802,16 @@ def create_ui():
         if sample:
             return await run_in_threadpool(_submit_sample, sample, client)
 
-        # An untouched file input still posts one empty part.
+        # An untouched file input still posts one empty part. The dropzone
+        # sends one file per request (see UPLOAD_ONE_BY_ONE), so this is
+        # normally a list of one -- but it stays a list, because the form's
+        # own submit button would post whatever the input still holds.
         files = [f for f in (image or []) if isinstance(f, UploadFile) and f.filename]
         if files:
-            cards = [await _submit_file(f, client) for f in files]
-            return (*cards, upload_form(replace=True))
+            # No replacement form: the script empties the input itself, and
+            # swapping the form mid-batch would tear out the element the
+            # remaining requests are posting from.
+            return tuple([await _submit_file(f, client) for f in files])
 
         return await run_in_threadpool(_submit_url, url, client)
 

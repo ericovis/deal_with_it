@@ -81,6 +81,15 @@ class TestPage:
     def test_the_file_input_takes_several_files(self, client):
         assert re.search(r'<input type="file"[^>]*multiple', client.get('/').text)
 
+    def test_the_dropzone_posts_one_file_per_request(self, client):
+        """A plain hx-post would send the whole selection in one body, and
+        nothing would appear until the last picture had finished uploading."""
+        body = client.get('/').text
+        field = re.search(r'<input type="file"[^>]*>', body).group()
+        assert 'hx-on:change=' in field
+        assert 'hx-post' not in field, 'the batch post is what we are replacing'
+        assert 'values: {image: file}' in field, 'one file per request'
+
     def test_the_url_field_validates_as_it_is_typed(self, client):
         body = client.get('/').text
         assert 'hx-post="/validate"' in body
@@ -155,6 +164,8 @@ class TestSubmit:
         assert 'me.png' in response.text
 
     def test_several_files_become_several_jobs(self, client, hx):
+        """The dropzone sends one at a time, but the form's submit button can
+        still post a whole selection, so the handler keeps taking a list."""
         response = submit(client, hx, files=[
             ('image', ('one.png', make_png(), 'image/png')),
             ('image', ('two.png', make_png(), 'image/png')),
@@ -163,6 +174,15 @@ class TestSubmit:
         assert len(ids) == 2
         assert all(jobs.result_for(job_id) is not None for job_id in ids)
         assert 'one.png' in response.text and 'two.png' in response.text
+
+    def test_an_upload_answers_with_its_card_and_nothing_else(self, client, hx):
+        """No replacement form: the script empties the input itself, and an
+        out-of-band swap would tear out the element the rest of the batch is
+        still posting from."""
+        body = submit(client, hx,
+                      files=[('image', ('me.png', make_png(), 'image/png'))]).text
+        assert 'hx-swap-oob' not in body
+        assert 'id="form"' not in body
 
     def test_a_submission_clears_the_form(self, client, hx):
         body = submit(client, hx, url='https://example.test/a.png').text
