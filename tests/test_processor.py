@@ -272,3 +272,34 @@ def test_the_captions_say_what_the_counts_are():
     assert shipped.keys() == SAMPLE_FACES.keys(), 'a sample was added or removed'
     for filename, faces in SAMPLE_FACES.items():
         assert shipped[filename] == IN_WORDS[faces], filename
+
+
+@pytest.mark.faces
+class TestThreadSafety:
+    """The worker runs jobs in threads. dlib's detector object is not safe to
+    share between them: a shared one segfaults, or hands back a wrong box."""
+
+    def test_concurrent_detection_matches_sequential(self):
+        import threading
+
+        from src.processors.deal_with_it import eye_corners, find_faces
+        from tests.conftest import STATIC_IMG
+
+        names = ['me.jpg', 'multiple_people.jpg', 'apollo_11_crew.jpg', 'american_gothic.jpg']
+        arrays = {name: as_array(STATIC_IMG / name) for name in names}
+        expected = {
+            name: [(face, eye_corners(array, face)) for face in find_faces(array)]
+            for name, array in arrays.items()
+        }
+        seen = {}
+
+        def detect(name):
+            array = arrays[name]
+            seen[name] = [(face, eye_corners(array, face)) for face in find_faces(array)]
+
+        threads = [threading.Thread(target=detect, args=(name,)) for name in names]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join()
+        assert seen == expected

@@ -21,9 +21,9 @@ class Settings(BaseSettings):
     result_ttl: int = 900
     #: How long a failed job stays readable. RQ's own default is a year.
     failure_ttl: int = 900
-    #: Worker processes per container. Detection is single-threaded, so this
-    #: wants to be the core count.
-    worker_processes: int = 1
+    #: Threads in the one worker process. dlib releases the GIL, so this
+    #: scales like processes; go a little over the core count.
+    worker_threads: int = 5
 
     #: Refuse new submissions while more than this many jobs are waiting.
     max_queue_depth: int = 50
@@ -40,6 +40,10 @@ class Settings(BaseSettings):
     max_detection_size: int = 1600
     #: Connect/read timeout for fetching a remote image.
     http_timeout: float = 10.0
+    #: Wall-clock ceiling on the whole download, redirects included. The
+    #: read timeout alone lets a server that drips a byte every few seconds
+    #: hold a worker until the job timeout.
+    fetch_deadline: float = 30.0
     #: Redirects we are willing to follow, re-validating the target each hop.
     max_redirects: int = 3
     #: Allow fetching from loopback/private/link-local addresses. Off by

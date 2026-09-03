@@ -9,9 +9,10 @@ A web app + JSON API that pastes "Deal With It" sunglasses onto every face in
 a picture. Submitting an image enqueues a background job; the page polls until
 the worker is done.
 
-Face detection is `face_recognition` (a wrapper over `dlib`), compositing is
-Pillow. The glasses angle comes from the vector between the outer left-eye
-landmark and an inner right-eye landmark.
+Face detection is dlib's HOG detector and 68-point shape predictor (the
+models `face_recognition` ships), called directly; compositing is Pillow.
+The glasses angle comes from the vector between the outer left-eye landmark
+and the inner right-eye landmark.
 
 ## Architecture
 
@@ -63,6 +64,9 @@ Invariants worth knowing before editing:
   `prefers-color-scheme` decide. Do not drive it from `:checked`.
 - **`glasses.svg` is the only copy of the artwork.** The worker rasterises it
   per face, in memory, at the width that face needs.
+- **The dlib detector is thread-local** (`_detector` in
+  `src/processors/deal_with_it.py`). A shared one segfaults under concurrent
+  calls; the shape predictor is safe to share and is loaded once.
 - **The samples are base64 through the queue**, not `/static` URLs: the
   worker's SSRF guard refuses our own (non-public) host. Same reason the API
   example on `/docs` points at Wikimedia unless `DWI_PUBLIC_URL` is set.
@@ -93,9 +97,12 @@ docker compose up -d redis && uv run python -m src.worker &
 uv run uvicorn src.app:app --reload --port 5000
 ```
 
-`DWI_WORKER_PROCESSES=N` runs N forking workers in one container. Detection
-is single-threaded, so N wants to be the core count; see `docs/LOAD.md` for
-the measured numbers.
+The worker is one process with `DWI_WORKER_THREADS` threads (default 5).
+dlib releases the GIL, so threads scale like processes at a fraction of the
+memory. `src/worker.py:ThreadWorker` is a `SimpleWorker` with the signal
+handlers removed and the timeout enforced by a timer, because both are
+main-thread-only. A segfault in dlib takes the whole process down; let the
+container restart. Measured numbers are in `docs/LOAD.md`.
 
 ## Dependencies
 
@@ -132,9 +139,8 @@ uv run pytest tests/e2e
 uv run pytest -m "not e2e"
 ```
 
-RQ enforces `job_timeout` with SIGALRM and only the main thread may install
-a signal handler, so `tests/e2e/conftest.py` stubs the handlers and
-`death_penalty_class`. Every e2e test also asserts the console stayed quiet.
+The worker thread runs the real `ThreadWorker` in bursts. Every e2e test
+also asserts the console stayed quiet.
 
 Load and abuse testing lives in `tests/load` and runs against a real stack;
 see `docs/LOAD.md`.

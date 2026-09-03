@@ -9,6 +9,7 @@ import binascii
 import ipaddress
 import re
 import socket
+import time
 from io import BytesIO
 from urllib.parse import urljoin, urlparse, urlunparse
 
@@ -157,9 +158,12 @@ def _validated_target(url: str, settings: Settings, adapter: PinnedAdapter) -> s
     return urlunparse(parts)
 
 
-def _read_capped(response: requests.Response, limit: int) -> bytes:
-    """Read a body, refusing to buffer more than ``limit`` bytes. The declared
-    length is only a hint, so the stream is counted too."""
+TOO_SLOW = 'The URL took too long to download.'
+
+
+def _read_capped(response: requests.Response, limit: int, deadline: float) -> bytes:
+    """Read a body, refusing to buffer more than ``limit`` bytes or to keep
+    reading past ``deadline`` (a ``time.monotonic`` value)."""
     declared = response.headers.get('content-length')
     if declared and declared.isdigit() and int(declared) > limit:
         raise ImageSourceError(f'The image is larger than the {limit} byte limit.')
@@ -167,6 +171,8 @@ def _read_capped(response: requests.Response, limit: int) -> bytes:
     chunks: list[bytes] = []
     total = 0
     for chunk in response.iter_content(64 * 1024):
+        if time.monotonic() > deadline:
+            raise ImageSourceError(TOO_SLOW)
         total += len(chunk)
         if total > limit:
             raise ImageSourceError(f'The image is larger than the {limit} byte limit.')
@@ -183,9 +189,12 @@ def fetch_url(url: str, settings: Settings | None = None) -> bytes:
     session.mount('http://', adapter)
     session.mount('https://', adapter)
     target = _validated_target(url, settings, adapter)
+    deadline = time.monotonic() + settings.fetch_deadline
 
     with session:
         for _ in range(settings.max_redirects + 1):
+            if time.monotonic() > deadline:
+                raise ImageSourceError(TOO_SLOW)
             try:
                 response = session.get(
                     target,
@@ -213,7 +222,7 @@ def fetch_url(url: str, settings: Settings | None = None) -> bytes:
                 content_type = response.headers.get('content-type', '')
                 if not content_type.startswith('image/'):
                     raise ImageSourceError('The URL is not an image.')
-                return _read_capped(response, settings.max_image_bytes)
+                return _read_capped(response, settings.max_image_bytes, deadline)
 
     raise ImageSourceError('The URL redirected too many times.')
 

@@ -2,13 +2,13 @@
 
 Measured 2026-09-03 on a 4-core laptop (15 GB RAM) against a production-like
 stack: Redis 7 in a container, one `uvicorn` process with a single worker,
-and `python -m src.worker` with `DWI_WORKER_PROCESSES` set as noted. The
-load generator ran on the same machine, so the numbers are conservative.
+and one `python -m src.worker` process with `DWI_WORKER_THREADS` as noted.
+The load generator ran on the same machine, so the numbers are conservative.
 
 ```
 uv run uvicorn src.app:app --port 5001 --workers 1
-DWI_WORKER_PROCESSES=2 uv run python -m src.worker
-uv run python tests/load/stress.py throughput --jobs 40 --concurrency 8
+DWI_WORKER_THREADS=5 uv run python -m src.worker
+uv run python tests/load/stress.py throughput --jobs 32 --concurrency 16
 uv run python tests/load/stress.py big --pixels 36 --quality 75
 uv run python tests/load/stress.py abuse
 uv run python tests/load/stress.py slowloris --sockets 300
@@ -18,49 +18,55 @@ uv run python tests/load/stress.py slowloris --sockets 300
 for the throughput runs or the generator throttles itself; leave the
 defaults on for `abuse`.
 
-## Worker parallelism
+## Worker threads
 
-Sample mix (one face, eight faces, twenty-nine faces, a painting), 24 jobs,
-8 concurrent clients. Detection is single-threaded, so processes scale it:
+Sample mix (one face, eight faces, twenty-nine faces, a painting), 32 jobs,
+16 concurrent clients, one worker process:
 
-| workers | finished jobs/min | end-to-end p50 |
-|---------|-------------------|----------------|
-| 1       | 20.1              | 23.8 s         |
-| 2       | 39.8              | 11.7 s         |
-| 3       | 52.8              |  8.7 s         |
-| 4       | 64.4              |  6.8 s         |
+| threads | finished jobs/min | end-to-end p50 | worker peak RSS |
+|---------|-------------------|----------------|-----------------|
+| 2       | 113               | 7.2 s          | 389 MB          |
+| 5       | 151               | 5.2 s          | 646 MB          |
+| 8       | 140               | 5.3 s          | 923 MB          |
+| 16      | 125               | 9.8 s          | 1370 MB         |
 
-Linear to two, then the web process and the generator start competing for
-cores. Set `DWI_WORKER_PROCESSES` to the core count of the worker host;
-`docker-compose.yml` runs two per container, and `--scale worker=N` adds
-containers.
+dlib releases the GIL, so threads run detection in parallel. Core count plus
+one is the sweet spot; beyond it threads contend for cores and every extra
+one costs ~60 MB idle plus a full job's working set when busy.
 
-The web tier is never the bottleneck: with 40 jobs in flight, `GET
-/api/jobs/{id}` answered in 3 ms (p50) and `/api/health` in 2 ms. Submit
-latency for a sample-sized upload is 36 ms at p50.
+For comparison, the forking worker this replaced did 20 jobs/min per
+process (40 with two). Its work horse resolved the task by name after the
+fork, so every job re-imported the face stack and paid about two seconds
+loading models before doing any work. Threads load them once.
+
+The web tier is never the bottleneck: with 32 jobs in flight, `GET
+/api/jobs/{id}` answered in 3 ms (p50) and `/api/health` in 2 to 4 ms. It
+runs one event loop; the Redis-touching handlers use Starlette's threadpool,
+which idles at zero threads and is capped at 40. Those threads only wait on
+Redis, so the cap does not need to match the worker's.
 
 ## Large images
 
-`multiple_people.jpg` upscaled, two workers, all concurrent:
+`multiple_people.jpg` upscaled, five threads, all jobs concurrent:
 
-| input      | on the wire | end-to-end p50 | result  |
-|------------|-------------|----------------|---------|
-| 12 MP JPEG | 0.9 MB      |  7.8 s         | 1.6 MB  |
-| 36 MP JPEG | 1.7 MB      | 10.0 s         | 3.1 MB  |
+| input      | on the wire | jobs | end-to-end p50 | result | worker peak RSS |
+|------------|-------------|------|----------------|--------|-----------------|
+| 12 MP JPEG | 0.9 MB      | 10   | 4.0 s          | 1.6 MB | —               |
+| 36 MP JPEG | 1.7 MB      | 5    | 9.0 s          | 3.1 MB | 2.0 GB          |
 
-Before results matched the input format, the same 36 MP job took 15 s on
-*four* workers and returned a 22.5 MB PNG data URI: at that size the PNG
-encode alone was 7.3 s, longer than detection, and Redis peaked at 455 MB
-holding ten of them. A JPEG at quality 90 encodes in 0.16 s.
+A job's working set is about 400 MB at 12 MP and 800 MB at the 36 MP
+ceiling, so the worker's peak is roughly `threads × 800 MB` under a flood of
+maximum-size images. Budget 4 GB for five threads, or lower
+`DWI_MAX_IMAGE_PIXELS`.
 
-Peak resident memory for one job, measured in-process: 234 MB at 1.3 MP,
-394 MB at 12 MP, 795 MB at the 36 MP ceiling. Budget ~1 GB per worker
-process for a worst-case image; the forked work horse frees it after each
-job.
+Before results matched the input format, a 36 MP job returned a 22.5 MB PNG
+data URI and the encode alone took 7.3 s, longer than detection. A JPEG at
+quality 90 encodes in 0.16 s.
 
 ## What the abuse run checks
 
-All of these pass against the live stack:
+All of these pass against the live stack, with zero tracebacks in the worker
+log:
 
 - A declared body over `max_request_bytes` is a 413 before anything is read.
 - A **chunked** body with no Content-Length is cut off at the same limit
@@ -71,8 +77,10 @@ All of these pass against the live stack:
   `[::1]`, IPv4-mapped IPv6, decimal and hex IP literals, `127.1`, the
   cloud metadata address, NAT64-embedded loopback, RFC 1918, and compose
   service names. A resolver error that was not `gaierror` used to crash the
-  job. The address that is checked is now the address that is dialled
+  job. The address that is checked is the address that is dialled
   (`images.PinnedAdapter`), which closes the DNS-rebinding window.
+- A server that drips bytes cannot hold a worker thread past
+  `DWI_FETCH_DEADLINE` (30 s), redirects included.
 - 40 URL submissions from one address in a minute: 20 accepted, 20 refused
   with 429 and `Retry-After`. The queue cap answers 503 the same way.
 - 300 half-open connections (slowloris) left `/api/health` at 6 ms. uvicorn
@@ -83,11 +91,13 @@ All of these pass against the live stack:
 
 | setting                | default | what it bounds                              |
 |------------------------|---------|---------------------------------------------|
+| `DWI_WORKER_THREADS`   | 5       | concurrent jobs in the worker process       |
 | `DWI_MAX_IMAGE_BYTES`  | 10 MB   | any upload or download                      |
 | `DWI_MAX_IMAGE_PIXELS` | 40 MP   | decoded size, checked from the header       |
 | `DWI_RATE_LIMIT`       | 30/min  | submissions per client address (0 disables) |
 | `DWI_MAX_QUEUE_DEPTH`  | 50      | waiting jobs before submissions get 503     |
 | `DWI_JOB_TIMEOUT`      | 120 s   | one job's runtime                           |
+| `DWI_FETCH_DEADLINE`   | 30 s    | one URL download, redirects included        |
 | `DWI_RESULT_TTL`       | 900 s   | how long a result waits to be collected     |
 | Redis `maxmemory`      | 1 GB    | set in compose, `noeviction`                |
 
@@ -100,3 +110,8 @@ rather than losing queued jobs silently. Lower `DWI_RESULT_TTL` or raise
 The rate limit keys on `request.client.host`. Behind a proxy, run uvicorn
 with `--proxy-headers --forwarded-allow-ips <proxy>` (the `web` image
 target already does) or every client shares one budget.
+
+A crash inside dlib takes the whole worker process down, threads and all.
+Run it under a restart policy; queued jobs survive in Redis, and the ones
+that were running land in the failed registry once their heartbeat expires,
+where the page offers a Retry.

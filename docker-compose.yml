@@ -39,8 +39,7 @@ services:
     command: python -m src.worker
     environment:
       DWI_REDIS_URL: redis://redis:6379/0
-      # Detection is single-threaded; one process per core. See docs/LOAD.md.
-      DWI_WORKER_PROCESSES: 2
+      # One process, DWI_WORKER_THREADS threads (default 5). See docs/LOAD.md.
     volumes:
       - .:/app
     depends_on:

@@ -1,11 +1,13 @@
 """Paste "Deal With It" glasses onto every face in an image."""
 
 import functools
+import threading
 from io import BytesIO
 from math import atan2, degrees
 from pathlib import Path
 
-import face_recognition as fr
+import dlib
+import face_recognition_models
 import numpy as np
 import resvg_py
 from numpy.typing import NDArray
@@ -27,6 +29,49 @@ MAX_RENDER = 4096
 
 class NoFacesFound(DealWithItError):
     """Nothing to draw on. The message is shown to the caller."""
+
+
+#: 68-point landmark indices: outer corner of the left eye, inner corner of
+#: the right eye. The line between them gives the head's tilt.
+LEFT_EYE_OUTER = 36
+RIGHT_EYE_INNER = 45
+#: What face_recognition passes for its default detection.
+UPSAMPLE = 1
+
+_thread = threading.local()
+
+
+def _detector() -> dlib.fhog_object_detector:
+    """One HOG detector per thread. The object keeps mutable scratch state,
+    and calling a shared one from two threads segfaults."""
+    detector = getattr(_thread, 'detector', None)
+    if detector is None:
+        detector = _thread.detector = dlib.get_frontal_face_detector()
+    return detector
+
+
+@functools.cache
+def _predictor() -> dlib.shape_predictor:
+    """The 68-point shape predictor: ~100 MB, safe to share across threads."""
+    return dlib.shape_predictor(face_recognition_models.pose_predictor_model_location())
+
+
+def find_faces(image: NDArray[np.uint8]) -> list[tuple[int, int, int, int]]:
+    """Face boxes as ``(top, right, bottom, left)``, clipped to the image --
+    the same answer ``face_recognition.face_locations`` gives."""
+    height, width = image.shape[:2]
+    return [
+        (max(box.top(), 0), min(box.right(), width), min(box.bottom(), height), max(box.left(), 0))
+        for box in _detector()(image, UPSAMPLE)
+    ]
+
+
+def eye_corners(image: NDArray[np.uint8],
+                face: tuple[int, int, int, int]) -> tuple[tuple[int, int], tuple[int, int]]:
+    top, right, bottom, left = face
+    shape = _predictor()(image, dlib.rectangle(left, top, right, bottom))
+    outer, inner = shape.part(LEFT_EYE_OUTER), shape.part(RIGHT_EYE_INNER)
+    return (outer.x, outer.y), (inner.x, inner.y)
 
 
 @functools.cache
@@ -109,19 +154,17 @@ class DealWithItProcessor(BaseProcessor):
     def call(self) -> None:
         self.progress(35, 'Looking for faces')
         detection_image, upscale = self._detection_input()
-        face_locations = fr.face_locations(detection_image)
+        face_locations = find_faces(detection_image)
         if not face_locations:
             raise NoFacesFound('No faces were found in this image.')
-
-        # One batched call: per face, the library re-runs detection each time.
-        all_landmarks = fr.face_landmarks(detection_image, face_locations=face_locations)
 
         self.progress(75, f'Drawing glasses on {len(face_locations)} '
                           f'{"face" if len(face_locations) == 1 else "faces"}')
         self.output = Image.fromarray(self.image)
-        for face, landmarks in zip(face_locations, all_landmarks, strict=True):
-            left_eye = _scaled(landmarks['left_eye'][0], upscale)
-            right_eye = _scaled(landmarks['right_eye'][3], upscale)
+        for face in face_locations:
+            outer, inner = eye_corners(detection_image, face)
+            left_eye = _scaled(outer, upscale)
+            right_eye = _scaled(inner, upscale)
             angle = self._get_angle(left_eye, right_eye)
             _, right, _, left = (round(edge * upscale) for edge in face)
             glasses = self._get_glasses(right - left, angle=angle)

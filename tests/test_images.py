@@ -385,3 +385,32 @@ class TestDecode:
         _, source_format = images.load(base64_data=data_uri(buffer.getvalue(), 'image/jpeg'),
                                        settings=settings)
         assert source_format == 'JPEG'
+
+
+class TestFetchDeadline:
+    """A server that drips bytes slowly must not hold a worker until the job
+    timeout: the whole download has a wall-clock ceiling."""
+
+    @responses.activate
+    def test_a_slow_body_is_abandoned(self, png_bytes, settings, monkeypatch):
+        import itertools
+
+        responses.add(responses.GET, 'https://example.test/a.png',
+                      body=png_bytes * 50, content_type='image/png')
+        # Every look at the clock is another 20 seconds later.
+        clock = itertools.count(0, 20)
+        monkeypatch.setattr(images.time, 'monotonic', lambda: next(clock))
+        slow = settings.model_copy(update={'fetch_deadline': 30, 'max_image_bytes': 10**9})
+        with pytest.raises(ImageSourceError, match='took too long'):
+            images.fetch_url('https://example.test/a.png', slow)
+
+    @responses.activate
+    def test_a_redirect_chain_counts_too(self, settings, monkeypatch):
+        import itertools
+
+        responses.add(responses.GET, 'https://example.test/a.png', status=302,
+                      headers={'location': 'https://example.test/b.png'})
+        clock = itertools.count(0, 40)
+        monkeypatch.setattr(images.time, 'monotonic', lambda: next(clock))
+        with pytest.raises(ImageSourceError, match='took too long'):
+            images.fetch_url('https://example.test/a.png', settings)
