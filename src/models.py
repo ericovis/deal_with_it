@@ -1,68 +1,101 @@
-import re
-import base64
-import requests
-import image_to_numpy
+"""Request and response schemas.
 
-from io import BytesIO
-from typing import Any
-from pydantic import (
-    BaseModel,
-    validator,
-    PrivateAttr,
-    root_validator,
-    AnyHttpUrl
-)
+These validate *shape* only. Fetching and decoding the image is the worker's
+job (see :mod:`src.images`) -- doing network I/O inside a validator, as this
+model used to, blocks the event loop and turns every slow host into a stuck
+web process.
+"""
 
+from enum import StrEnum
+from typing import Self
 
-class ApiResponseModel(BaseModel):
-    image: str
+from pydantic import AnyHttpUrl, BaseModel, ConfigDict, Field, field_validator, model_validator
+
+from src.images import is_data_uri
 
 
-class ImageModel(BaseModel):
-    url: AnyHttpUrl | None = None
-    base64: str | None = None
-    _data: Any = PrivateAttr(None)  
+class ImageRequest(BaseModel):
+    """Either a URL or a base64 data URI -- exactly one of them."""
 
-    def __init__(self, **data: Any):
-        super().__init__(**data)
-        self._load_image_data()
-    
-    @property
-    def data(self):
-        return self._data
+    model_config = ConfigDict(extra='forbid')
 
-    @root_validator(pre=True)
-    def a_single_parameter_must_be_passed(cls, values):
-        if 'base64' in values and 'url' in values:
+    url: AnyHttpUrl | None = Field(
+        default=None,
+        description='Public http(s) URL of the image to process.',
+        examples=['https://ericovis.com/images/me.jpg'],
+    )
+    base64: str | None = Field(
+        default=None,
+        description='The image as a data URI, e.g. "data:image/png;base64,iVBOR...".',
+    )
+
+    @field_validator('base64')
+    @classmethod
+    def base64_must_have_a_header(cls, value: str | None) -> str | None:
+        if value is not None and not is_data_uri(value):
+            raise ValueError('The base64 image must have a data URI header.')
+        return value
+
+    @model_validator(mode='after')
+    def a_single_parameter_must_be_passed(self) -> Self:
+        # Checks values, not key presence: clients routinely send both keys
+        # with one of them null, and rejecting that was a long-standing bug.
+        if self.url is not None and self.base64 is not None:
             raise ValueError('An url OR a base64 string must be passed, not both.')
-        if 'base64' not in values and 'url' not in values:
-            raise ValueError('An url or a base64 string must be passed.')       
-        return values
+        if self.url is None and self.base64 is None:
+            raise ValueError('An url or a base64 string must be passed.')
+        return self
 
-    @validator('base64')
-    def base64_must_have_a_header(cls, v):    
-        if v is not None:
-            pattern = re.compile('^data:image/.+;base64,')            
-            if not pattern.match(v):
-                raise ValueError('The base64 image must have a format header.')        
-        return v
+    def as_payload(self) -> dict[str, str | None]:
+        """Plain, pickle-friendly form to hand to the queue."""
+        return {'url': str(self.url) if self.url else None, 'base64': self.base64}
 
-    @validator('url')
-    def url_must_be_an_existing_image(cls, v):
-        if v is not None:
-            req = requests.head(v)
-            if req.status_code != 200:
-                raise ValueError(f'The URL is not acessible. HTTP status: {req.status_code}.')
-            if not req.headers['content-type'].startswith('image/'):
-                raise ValueError('The URL is not an image.')
-        return v
 
-    def _load_image_data(self):
-        if self.base64 is not None:
-            base64_data = re.sub('^data:image/.+;base64,', '', self.base64)
-            byte_data = base64.b64decode(base64_data)
-            image_data = BytesIO(byte_data) 
-            self._data = image_to_numpy.load_image_file(image_data)
-        else:
-            req = requests.get(self.url)
-            self._data = image_to_numpy.load_image_file(BytesIO(req.content))
+class JobState(StrEnum):
+    """The subset of RQ states we expose, plus ``not_found``."""
+
+    QUEUED = 'queued'
+    STARTED = 'started'
+    FINISHED = 'finished'
+    FAILED = 'failed'
+    STOPPED = 'stopped'
+    CANCELED = 'canceled'
+    DEFERRED = 'deferred'
+    SCHEDULED = 'scheduled'
+
+    @property
+    def is_terminal(self) -> bool:
+        return self in {
+            JobState.FINISHED,
+            JobState.FAILED,
+            JobState.STOPPED,
+            JobState.CANCELED,
+        }
+
+
+class JobCreated(BaseModel):
+    """202 response: the work was accepted, come back for the result."""
+
+    job_id: str
+    state: JobState
+    status_url: str
+
+
+class JobResult(BaseModel):
+    """Poll response. ``image`` is set once state is ``finished``."""
+
+    job_id: str
+    state: JobState
+    image: str | None = Field(
+        default=None, description='The processed image as a data URI, once finished.'
+    )
+    error: str | None = Field(
+        default=None, description='Why the job failed, if it did.'
+    )
+    progress: int | None = Field(
+        default=None, ge=0, le=100,
+        description='How far along the job is. A stage checkpoint, not a measurement.',
+    )
+    step: str | None = Field(
+        default=None, description='What the worker is doing right now.'
+    )

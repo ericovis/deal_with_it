@@ -1,30 +1,52 @@
-import base64
-import functools
+"""Processor scaffolding: take pixels in, produce a PIL image out."""
 
-from src.models import ImageModel
+import base64
+from collections.abc import Callable
 from io import BytesIO
 
-class BaseProcessor(object):
+import numpy as np
+from numpy.typing import NDArray
+from PIL import Image
+
+
+class BaseProcessor:
     img_format = 'PNG'
 
-    def __init__(self, image: ImageModel) -> None:
+    def __init__(self, image: NDArray[np.uint8],
+                 on_progress: Callable[[int, str], None] | None = None) -> None:
         self.image = image
-        self.output = None
+        self.output: Image.Image | None = None
+        self._encoded: str | None = None
+        self._on_progress = on_progress
 
-    def call(self) -> None:  
-        pass
+    def progress(self, percent: int, step: str) -> None:
+        """Announce a checkpoint, if anyone is listening.
+
+        These are checkpoints, not measurements: neither dlib nor Pillow
+        reports how far through it is, so the percentages mark which stage
+        has been reached rather than pretending to smooth progress.
+        """
+        if self._on_progress is not None:
+            self._on_progress(percent, step)
+
+    def call(self) -> None:
+        raise NotImplementedError
 
     @property
-    def base64_output(self) -> str:            
+    def base64_output(self) -> str | None:
+        """The result as a data URI, or None if nothing was produced."""
         if self.output is None:
             return None
-        
-        return self._base64_output()
+        # Encoded lazily and memoised on the instance. This used to be a
+        # functools.cache on the method, which keyed on `self` in a global
+        # dict and so pinned every processor -- and its decoded image -- in
+        # memory for the lifetime of the process.
+        if self._encoded is None:
+            self._encoded = self._encode()
+        return self._encoded
 
-    @functools.cache
-    def _base64_output(self) -> str:
-        arr = BytesIO()
-        self.output.save(arr, format=self.img_format)
-        arr = arr.getvalue()
-        img = base64.b64encode(arr).decode('utf8').replace("'", '')
-        return f'data:image/{self.img_format.lower()};base64,{img}'
+    def _encode(self) -> str:
+        buffer = BytesIO()
+        self.output.save(buffer, format=self.img_format)
+        payload = base64.b64encode(buffer.getvalue()).decode('utf8')
+        return f'data:image/{self.img_format.lower()};base64,{payload}'

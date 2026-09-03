@@ -186,7 +186,7 @@ input {
     width: 100%;
 }
 
-input[type=button] {
+input[type=button], button[type=submit] {
     color: white;
     background-color: #19647E;
     width: 150px;
@@ -198,55 +198,155 @@ input[type=button] {
     text-transform: uppercase;
 }
 
-input[type=button]:hover {
+input[type=button]:hover, button[type=submit]:hover {
     background-color: #28AFB0;
+}
+
+button[type=submit] {
+    font-family: inherit;
+    font-size: 1rem;
+}
+
+/* HTMX disables the button for the duration of the request. */
+button[type=submit]:disabled {
+    background-color: #9bb7c0;
+    cursor: progress;
+}
+
+fieldset {
+    border: none;
+    padding: 0;
+    margin: 0;
+}
+
+label {
+    display: block;
+    font-weight: bold;
+}
+
+label.file-label {
+    margin-top: 1rem;
+    font-weight: normal;
 }
 
 .submit {
     text-align: center;
 }
 
-@-webkit-keyframes spin {
-    to {
-        stroke-dashoffset: -264;
+/* The progress bar htmx swaps in while a job runs. */
+progress {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 100%;
+    max-width: 420px;
+    height: 12px;
+    border: none;
+    border-radius: 6px;
+    background-color: #e6ecee;
+}
+
+progress::-webkit-progress-bar {
+    background-color: #e6ecee;
+    border-radius: 6px;
+}
+
+progress::-webkit-progress-value {
+    background-color: #19647E;
+    border-radius: 6px;
+}
+
+progress::-moz-progress-bar {
+    background-color: #19647E;
+    border-radius: 6px;
+}
+
+/* A queued job has no percentage to show, so the bar sweeps instead of
+   sitting at zero looking broken. Stripping the native appearance also
+   strips the browser's own indeterminate animation. */
+progress:indeterminate {
+    background-image: linear-gradient(90deg, #e6ecee 0%, #19647E 50%, #e6ecee 100%);
+    background-size: 200% 100%;
+    animation: sweep 1.2s infinite linear;
+}
+
+progress:indeterminate::-webkit-progress-bar {
+    background-color: transparent;
+}
+
+@keyframes sweep {
+    from {
+        background-position: 100% 0;
     }
-}
 
-@keyframes spin {
     to {
-        stroke-dashoffset: -264;
+        background-position: -100% 0;
     }
-}
-
-.spinner circle {
-    fill: none;
-    stroke: slategray;
-    stroke-width: 16;
-    stroke-linecap: round;
-    stroke-dasharray: 0, 0, 70, 194;
-    stroke-dashoffset: 0;
-    animation: spin 1s infinite linear;
-    -webkit-animation: spin 1s infinite linear;
-}
-
-#loading {
-    text-align: center;
-    display: none;
-    margin: 2rem 0;
 }
 
 #result {
     text-align: center;
-    display: none;
+}
+
+/* The self-polling fragment htmx swaps in while a job is running. */
+.working {
+    margin: 2rem 0;
 }
 
 #message {
     font-weight: bold;
 }
 
+#message.error {
+    color: #b3261e;
+}
+
 #result-img {
-    display: none;
     margin: 2rem 0;
+    border-radius: 4px;
+}
+
+/* Everything made this session, newest first. Nothing is stored server
+   side, so this is the only copy until someone downloads one. */
+#gallery-section {
+    margin-top: 3rem;
+}
+
+#gallery-section:not(:has(.gallery-item)) {
+    display: none;
+}
+
+#gallery {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 1.5rem;
+    justify-content: center;
+}
+
+.gallery-item {
+    width: 200px;
+}
+
+.gallery-item img {
+    display: block;
+    width: 100%;
+    border-radius: 4px;
+}
+
+.gallery-item p {
+    margin: 0.5rem 0 0;
+    text-align: center;
+    font-size: 0.9rem;
+}
+
+.credit {
+    font-size: 0.8rem;
+    color: #5b6b70;
+    text-align: center;
+}
+
+.gallery-note {
+    font-size: 0.9rem;
+    color: #5b6b70;
 }
 
 @media screen and (max-width: 640px) {

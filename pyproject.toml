@@ -1,24 +1,87 @@
-[tool.poetry]
-name = "deal_with_it"
-version = "0.1.0"
-description = ""
-authors = ["Eric Magalhães <eric@emagalha.es>"]
+[project]
+name = "deal-with-it"
+version = "1.0.0"
+description = 'A Python API for creating "Deal With It"-like images'
+readme = "README.md"
 license = "MIT"
+authors = [{ name = "Eric Magalhães", email = "eric@plytz.com" }]
+requires-python = ">=3.12"
 
-[tool.poetry.dependencies]
-python = "^3.9"
-uvicorn = "^0.17.6"
-fastapi = "^0.75.1"
-dlib = "19.19.0"
-image-to-numpy = "^1.0.0"
-face-recognition = "^1.3.0"
-Jinja2 = "^3.1.1"
-requests = "^2.27.1"
+dependencies = [
+    "fastapi>=0.118",
+    "python-fasthtml>=0.14",
+    "uvicorn[standard]>=0.38",
+    "pydantic>=2.11",
+    "pydantic-settings>=2.7",
+    "rq>=2.6",
+    "redis>=5.2,!=6.*",
+    "requests>=2.32",
+    "pillow>=11",
+    "numpy>=2",
+    # face_recognition_models reaches for pkg_resources at import time, and a
+    # modern venv has no setuptools unless asked. The upper bound is not
+    # cosmetic: setuptools 82 removed pkg_resources, and face_recognition then
+    # fails with a misleading "please install face_recognition_models".
+    "setuptools>=80,<82",
+]
 
-[tool.poetry.dev-dependencies]
-pytest = "^7.1.1"
-coverage = "^6.3.2"
+[project.optional-dependencies]
+# The face stack is the worker's business only -- the web tier enqueues jobs
+# by name and never imports it.
+worker = [
+    "face-recognition==1.3.0",
+    # Prebuilt dlib: a wheel that installs in about a second, against five
+    # minutes of compiling, and verified to produce identical landmarks. Swap
+    # it for "dlib==20.0.1" (and drop the override below) to build from source.
+    "dlib-bin==20.0.1",
+]
 
-[build-system]
-requires = ["poetry-core>=1.0.0"]
-build-backend = "poetry.core.masonry.api"
+[project.urls]
+Homepage = "https://github.com/ericovis/deal_with_it"
+
+[dependency-groups]
+dev = [
+    "pytest>=8.3",
+    "pytest-cov>=6",
+    "responses>=0.25",
+    "fakeredis>=2.26",
+    "ruff>=0.9",
+]
+
+[tool.uv]
+# Not a distributable package -- it is a service, run from the source tree.
+package = false
+# face-recognition hard-depends on `dlib`, and dlib-bin installs the very same
+# files. Without this both get installed and one silently clobbers the other.
+override-dependencies = ["dlib; sys_platform == 'nonexistent'"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "--strict-markers"
+markers = [
+    "faces: needs the optional face_recognition stack (install the 'worker' extra)",
+]
+filterwarnings = [
+    "error::DeprecationWarning:src.*",
+    # face_recognition_models is unmaintained and calls pkg_resources on import.
+    "ignore:pkg_resources is deprecated:UserWarning",
+]
+
+[tool.coverage.run]
+source = ["src"]
+omit = ["src/worker.py"]
+
+[tool.coverage.report]
+show_missing = true
+exclude_also = ["if __name__ == .__main__.:", "raise NotImplementedError"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B", "SIM", "C4"]
+
+[tool.ruff.lint.per-file-ignores]
+# The FastHTML component vocabulary is a wall of capitalised imports.
+"src/ui.py" = ["N802"]
