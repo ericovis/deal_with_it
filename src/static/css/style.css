@@ -648,9 +648,13 @@ body:has(#queue article) .clear {
     gap: 14px;
 }
 
-/* The empty state sits after #queue in the DOM so :empty + can reach it, and
-   an empty #queue takes no vertical space, so it still reads as being in the
-   list's place. */
+/* The empty state sits after #queue in the DOM so the sibling combinator can
+   reach it; an empty #queue takes no vertical space, so it still reads as
+   being in the list's place.
+
+   :not(:has(article)) rather than :empty, which counts text nodes: htmx
+   leaves the whitespace around a swapped-in card behind when the card is
+   removed, and the empty state would then never come back. */
 .empty {
     display: none;
     border: 1.5px dashed var(--border);
@@ -661,7 +665,7 @@ body:has(#queue article) .clear {
     font-size: 14px;
 }
 
-#queue:empty + .empty {
+#queue:not(:has(article)) + .empty {
     display: block;
 }
 

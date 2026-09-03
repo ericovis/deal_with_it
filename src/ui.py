@@ -295,6 +295,10 @@ def upload_form(replace: bool = False) -> Form:
         hx_swap='afterbegin',
         hx_encoding='multipart/form-data',
         hx_disabled_elt='find button',
+        # Without this the URL field inherits hx-disabled-elt and htmx logs
+        # `The selector "find button" ... returned no matches!` on every
+        # keystroke, because an <input> has no descendants to find.
+        hx_disinherit='hx-disabled-elt',
     )
 
 
@@ -342,8 +346,8 @@ def session_section() -> Section:
           'anything you want to keep.', cls='note'),
         Div(id='queue'),
         # After #queue rather than before it, because the rule that reveals
-        # this is `#queue:empty + .empty` -- and an empty #queue is zero tall,
-        # so it still reads as sitting where the list will be.
+        # this is a sibling combinator -- and an empty #queue is zero tall, so
+        # it still reads as sitting where the list will be.
         Div('Nothing here yet. Drop a picture, paste a URL, or try a sample.', cls='empty'),
         cls='session',
     )
