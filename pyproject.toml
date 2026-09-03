@@ -4,7 +4,7 @@ version = "1.0.0"
 description = 'A Python API for creating "Deal With It"-like images'
 readme = "README.md"
 license = "MIT"
-authors = [{ name = "Eric Magalhães", email = "eric@ericovis.com" }]
+authors = [{ name = "Eric Magalhães", email = "eric@plytz.com" }]
 requires-python = ">=3.12"
 
 dependencies = [
