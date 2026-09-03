@@ -9,7 +9,7 @@ import pytest
 from PIL import Image, ImageOps
 
 from src.processors.base import BaseProcessor
-from src.processors.deal_with_it import DealWithItProcessor, NoFacesFound
+from src.processors.deal_with_it import DealWithItProcessor, Face, NoFacesFound, find_faces
 
 
 def as_array(path) -> np.ndarray:
@@ -88,10 +88,7 @@ class TestDealWithItProcessor:
 
         changed_rows = np.any(np.asarray(processor.output.convert('RGB')) != original, axis=(1, 2))
         assert changed_rows.sum() > 0
-        # Independent count from the detector itself, so the assertion below
-        # does not just restate the implementation.
-        import face_recognition as fr
-        assert len(fr.face_locations(original)) > 1
+        assert len(find_faces(original)) > 1
 
     def test_raises_when_there_are_no_faces(self, faceless_image):
         processor = DealWithItProcessor(as_array(faceless_image))
@@ -149,22 +146,6 @@ class TestDealWithItProcessor:
             processor.call()
 
 
-class TestAngle:
-    @pytest.mark.parametrize('left,right,expected', [
-        ((0, 0), (100, 0), 0),
-        ((0, 100), (100, 0), 45),
-        ((0, 0), (100, 100), -45),
-    ])
-    def test_angle_between_eyes(self, left, right, expected):
-        processor = DealWithItProcessor(np.zeros((2, 2, 3), dtype=np.uint8))
-        assert processor._get_angle(left, right) == expected
-
-    def test_glasses_are_wider_than_the_face(self):
-        processor = DealWithItProcessor(np.zeros((2, 2, 3), dtype=np.uint8))
-        glasses = processor._get_glasses(100)
-        assert glasses.size[0] == 130
-
-
 class TestDetectionDownscaling:
     """Detection runs on a shrunken copy; the glasses go on the original."""
 
@@ -220,10 +201,12 @@ SAMPLE_FACES = {
     'girl_with_a_pearl_earring.jpg': 1,
     'american_gothic.jpg': 2,
     'the_syndics.jpg': 6,
-    'the_night_watch.jpg': 8,
+    'the_night_watch.jpg': 19,
     'dog_handler.jpg': 1,
-    'princess_mary_and_nelson.jpg': 1,
-    'dogs_playing_poker.jpg': 1,
+    # Nelson is a dog, and so are the poker players. The detector cannot
+    # tell, and the captions say what it draws on.
+    'princess_mary_and_nelson.jpg': 2,
+    'dogs_playing_poker.jpg': 3,
     'cat_nap.jpg': 0,
     'van_gogh_self_portrait.jpg': 0,
     'the_scream.jpg': 0,
@@ -233,7 +216,7 @@ SAMPLE_FACES = {
 #: The words the tiles use, so the two cannot drift apart.
 IN_WORDS = {
     0: 'No faces', 1: 'One face', 2: 'Two faces', 3: 'Three faces',
-    6: 'Six faces', 8: 'Eight faces', 29: 'Twenty-nine faces',
+    6: 'Six faces', 8: 'Eight faces', 19: 'Nineteen faces', 29: 'Twenty-nine faces',
 }
 
 
@@ -246,11 +229,11 @@ def test_every_sample_has_the_faces_its_caption_claims(filename, claimed):
     would quietly start lying. Anyone who changes a picture has to change the
     number in src/ui.py:SAMPLES to match.
     """
-    import face_recognition as fr
-
     from tests.conftest import STATIC_IMG
 
-    assert len(fr.face_locations(as_array(STATIC_IMG / filename))) == claimed
+    array = as_array(STATIC_IMG / filename)
+    small, _ = DealWithItProcessor(array, max_detection_size=1600)._detection_input()
+    assert len(find_faces(small)) == claimed
 
 
 def test_every_sample_is_credited():
@@ -276,26 +259,21 @@ def test_the_captions_say_what_the_counts_are():
 
 @pytest.mark.faces
 class TestThreadSafety:
-    """The worker runs jobs in threads. dlib's detector object is not safe to
-    share between them: a shared one segfaults, or hands back a wrong box."""
+    """The worker runs jobs in threads, and a detector instance is not safe
+    to share between them: ``setInputSize`` mutates it."""
 
     def test_concurrent_detection_matches_sequential(self):
         import threading
 
-        from src.processors.deal_with_it import eye_corners, find_faces
         from tests.conftest import STATIC_IMG
 
         names = ['me.jpg', 'multiple_people.jpg', 'apollo_11_crew.jpg', 'american_gothic.jpg']
         arrays = {name: as_array(STATIC_IMG / name) for name in names}
-        expected = {
-            name: [(face, eye_corners(array, face)) for face in find_faces(array)]
-            for name, array in arrays.items()
-        }
+        expected = {name: find_faces(array) for name, array in arrays.items()}
         seen = {}
 
         def detect(name):
-            array = arrays[name]
-            seen[name] = [(face, eye_corners(array, face)) for face in find_faces(array)]
+            seen[name] = find_faces(arrays[name])
 
         threads = [threading.Thread(target=detect, args=(name,)) for name in names]
         for thread in threads:
@@ -303,3 +281,58 @@ class TestThreadSafety:
         for thread in threads:
             thread.join()
         assert seen == expected
+
+
+class TestPlacement:
+    """Where the frame lands, from the landmarks alone. No detector needed."""
+
+    @staticmethod
+    def processor():
+        return DealWithItProcessor(np.zeros((400, 400, 3), dtype=np.uint8))
+
+    @staticmethod
+    def face(left=(150.0, 200.0), right=(250.0, 200.0), nose=(200.0, 240.0)):
+        return Face(box=(150, 300, 300, 100), left_eye=left, right_eye=right,
+                    nose=nose, score=0.9)
+
+    def test_the_bridge_sits_on_the_midpoint_between_the_eyes(self):
+        proc = self.processor()
+        img, (x, y) = proc._place(self.face())
+        bridge = (x + proc.bridge_x * img.width, y + proc.lens_y * img.height)
+        assert abs(bridge[0] - 200) <= 1 and abs(bridge[1] - 200) <= 1
+
+    def test_the_width_follows_the_eye_distance(self):
+        proc = self.processor()
+        wide, _ = proc._place(self.face(left=(100, 200), right=(300, 200), nose=(200, 250)))
+        narrow, _ = proc._place(self.face(left=(175, 200), right=(225, 200), nose=(200, 212)))
+        assert wide.width == pytest.approx(200 * proc.width_per_eye_distance, abs=2)
+        assert narrow.width == pytest.approx(50 * proc.width_per_eye_distance, abs=2)
+
+    def test_a_tilted_head_gets_a_rotated_frame(self):
+        proc = self.processor()
+        level, _ = proc._place(self.face())
+        tilted, _ = proc._place(self.face(left=(150, 180), right=(250, 220), nose=(200, 240)))
+        assert tilted.height > level.height, 'rotate(expand=True) grows the canvas'
+
+    def test_a_turned_head_tapers_the_far_side(self):
+        proc = self.processor()
+        frontal, _ = proc._place(self.face())
+        # The nose tip well off the eye line, towards the left of the picture.
+        turned, _ = proc._place(self.face(nose=(160, 240)))
+        alpha = np.asarray(turned)[:, :, 3]
+        left_span = np.flatnonzero(alpha[:, 2] > 0)
+        right_span = np.flatnonzero(alpha[:, -3] > 0)
+        assert turned.height > frontal.height
+        assert left_span.size < right_span.size, 'the far (left) edge is the short one'
+
+    def test_a_frontal_face_is_not_tapered(self):
+        proc = self.processor()
+        img, _ = proc._place(self.face())
+        rendered = proc._rendered(img.width)
+        assert img.height == pytest.approx(rendered.height * img.width / rendered.width, abs=1)
+
+    def test_scaling_a_face_scales_every_landmark(self):
+        face = self.face().scaled(2.0)
+        assert face.left_eye == (300.0, 400.0)
+        assert face.nose == (400.0, 480.0)
+        assert face.box == (300, 600, 600, 200)

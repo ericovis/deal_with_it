@@ -21,9 +21,10 @@ class Settings(BaseSettings):
     result_ttl: int = 900
     #: How long a failed job stays readable. RQ's own default is a year.
     failure_ttl: int = 900
-    #: Threads in the one worker process. dlib releases the GIL, so this
-    #: scales like processes; go a little over the core count.
-    worker_threads: int = 5
+    #: Threads in the one worker process. Detection releases the GIL, so
+    #: this scales like processes. Two is plenty for a small deployment;
+    #: docs/LOAD.md has the numbers for more.
+    worker_threads: int = 2
 
     #: Refuse new submissions while more than this many jobs are waiting.
     max_queue_depth: int = 50

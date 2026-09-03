@@ -104,12 +104,12 @@ SAMPLES = {
         'girl_with_a_pearl_earring.jpg', 'One face', 'image/jpeg'),
     'american_gothic': Sample('american_gothic.jpg', 'Two faces', 'image/jpeg'),
     'syndics': Sample('the_syndics.jpg', 'Six faces', 'image/jpeg'),
-    'night_watch': Sample('the_night_watch.jpg', 'Eight faces', 'image/jpeg'),
+    'night_watch': Sample('the_night_watch.jpg', 'Nineteen faces', 'image/jpeg'),
 
     'dog_handler': Sample('dog_handler.jpg', 'One face', 'image/jpeg'),
     'princess_mary': Sample(
-        'princess_mary_and_nelson.jpg', 'One face', 'image/jpeg'),
-    'poker': Sample('dogs_playing_poker.jpg', 'One face', 'image/jpeg'),
+        'princess_mary_and_nelson.jpg', 'Two faces', 'image/jpeg'),
+    'poker': Sample('dogs_playing_poker.jpg', 'Three faces', 'image/jpeg'),
     'cat_nap': Sample('cat_nap.jpg', 'No faces', 'image/jpeg'),
     'socks': Sample('socks_the_cat.jpg', 'No faces', 'image/jpeg'),
 
@@ -585,12 +585,16 @@ def docs_page(theme: str | None, reachable: bool) -> tuple:
                       A('NASA', href='https://commons.wikimedia.org/wiki/'
                                      'File:2013_class_of_NASA_astronauts.jpg'),
                       '. Public domain.', cls='credit'),
-                    P('Faces are found with the ',
-                      A('face_recognition', href='https://github.com/ageitgey/face_recognition'),
-                      ' library. For every face it returns landmarks, including the '
-                      'coordinates of both eyes.'),
-                    P('The angle between the eyes tells how far the head is tilted, so '
-                      'the glasses are rotated to sit straight on the face.'),
+                    P('Faces are found with ',
+                      A('YuNet', href='https://github.com/opencv/opencv_zoo/tree/main/'
+                                      'models/face_detection_yunet'),
+                      ', a small ONNX detector run through OpenCV. For every face it '
+                      'returns five landmarks: both eyes, the tip of the nose and the '
+                      'corners of the mouth.'),
+                    P('The line between the eyes gives the tilt of the head and the '
+                      'size of the frame; how far the nose sits off that line gives the '
+                      'turn, so the glasses narrow and taper on a face seen from the '
+                      'side. It also finds dogs now and then; cats, never.'),
                     P('Compositing is done with ',
                       A('Pillow', href='https://github.com/python-pillow/Pillow'),
                       ' in a background worker managed by ',

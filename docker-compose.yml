@@ -39,7 +39,7 @@ services:
     command: python -m src.worker
     environment:
       DWI_REDIS_URL: redis://redis:6379/0
-      # One process, DWI_WORKER_THREADS threads (default 5). See docs/LOAD.md.
+      # One process, DWI_WORKER_THREADS threads (default 2). See docs/LOAD.md.
     volumes:
       - .:/app
     depends_on:

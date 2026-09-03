@@ -1,10 +1,10 @@
 """Worker entry point: ``python -m src.worker``.
 
-One process, ``DWI_WORKER_THREADS`` threads. dlib releases the GIL, so
+One process, ``DWI_WORKER_THREADS`` threads. OpenCV releases the GIL, so
 threads give the throughput of as many processes for a fraction of the
-memory: the interpreter and the model data are loaded once. The trade is
-isolation -- a segfault in dlib takes every thread down, and the container
-restarts.
+memory: the interpreter and the model are loaded once. The trade is
+isolation -- a crash in native code takes every thread down, and the
+container restarts.
 """
 
 import faulthandler
@@ -32,7 +32,7 @@ class ThreadWorker(SimpleWorker):
     ``work()`` normally installs signal handlers and enforces ``job_timeout``
     with SIGALRM; both are main-thread-only. The timer penalty raises the
     timeout into the thread instead. It cannot interrupt a native call, so a
-    job stuck inside dlib ends when that call returns.
+    job stuck inside native code ends when that call returns.
     """
 
     death_penalty_class = TimerDeathPenalty

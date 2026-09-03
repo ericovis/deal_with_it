@@ -20,24 +20,29 @@ defaults on for `abuse`.
 
 ## Worker threads
 
-Sample mix (one face, eight faces, twenty-nine faces, a painting), 32 jobs,
-16 concurrent clients, one worker process:
+Sample mix (one face, eight faces, twenty-nine faces, a painting), 60 jobs,
+16 concurrent clients, one worker process, YuNet detector:
 
 | threads | finished jobs/min | end-to-end p50 | worker peak RSS |
 |---------|-------------------|----------------|-----------------|
-| 2       | 113               | 7.2 s          | 389 MB          |
-| 5       | 151               | 5.2 s          | 646 MB          |
-| 8       | 140               | 5.3 s          | 923 MB          |
-| 16      | 125               | 9.8 s          | 1370 MB         |
+| 2       | 282               | 3.1 s          | 466 MB          |
+| 5       | 375               | 2.3 s          | 1090 MB         |
+| 8       | 369               | 2.3 s          | 1477 MB         |
 
-dlib releases the GIL, so threads run detection in parallel. Core count plus
-one is the sweet spot; beyond it threads contend for cores and every extra
-one costs ~60 MB idle plus a full job's working set when busy.
+OpenCV releases the GIL, so threads run detection in parallel, and its own
+thread pool is pinned to one thread so it does not fight the worker's. Core
+count plus one is the throughput sweet spot; beyond it threads contend for
+cores and every extra one costs a full job's working set when busy. The
+default is two: 280 jobs/min in under half a gigabyte is more than a small
+deployment needs, and it leaves the cores to the web tier and Redis. End-to-end here
+is dominated by queueing, since 16 clients feed 5 threads: a single job is
+under a second.
 
-For comparison, the forking worker this replaced did 20 jobs/min per
-process (40 with two). Its work horse resolved the task by name after the
-fork, so every job re-imported the face stack and paid about two seconds
-loading models before doing any work. Threads load them once.
+For the record, two earlier configurations on the same mix: the forking RQ
+worker with dlib did 20 jobs/min per process, because its work horse
+resolved the task by name after the fork and re-imported the models on
+every job; the threaded worker with dlib did 151 jobs/min on five threads.
+YuNet detects in a third of dlib's time, hence 375.
 
 The web tier is never the bottleneck: with 32 jobs in flight, `GET
 /api/jobs/{id}` answered in 3 ms (p50) and `/api/health` in 2 to 4 ms. It
@@ -51,8 +56,8 @@ Redis, so the cap does not need to match the worker's.
 
 | input      | on the wire | jobs | end-to-end p50 | result | worker peak RSS |
 |------------|-------------|------|----------------|--------|-----------------|
-| 12 MP JPEG | 0.9 MB      | 10   | 4.0 s          | 1.6 MB | —               |
-| 36 MP JPEG | 1.7 MB      | 5    | 9.0 s          | 3.1 MB | 2.0 GB          |
+| 12 MP JPEG | 0.9 MB      | 10   | 2.9 s          | 1.6 MB | —               |
+| 36 MP JPEG | 1.7 MB      | 5    | 5.0 s          | 3.1 MB | 2.1 GB          |
 
 A job's working set is about 400 MB at 12 MP and 800 MB at the 36 MP
 ceiling, so the worker's peak is roughly `threads × 800 MB` under a flood of
@@ -91,7 +96,7 @@ log:
 
 | setting                | default | what it bounds                              |
 |------------------------|---------|---------------------------------------------|
-| `DWI_WORKER_THREADS`   | 5       | concurrent jobs in the worker process       |
+| `DWI_WORKER_THREADS`   | 2       | concurrent jobs in the worker process       |
 | `DWI_MAX_IMAGE_BYTES`  | 10 MB   | any upload or download                      |
 | `DWI_MAX_IMAGE_PIXELS` | 40 MP   | decoded size, checked from the header       |
 | `DWI_RATE_LIMIT`       | 30/min  | submissions per client address (0 disables) |
@@ -111,7 +116,8 @@ The rate limit keys on `request.client.host`. Behind a proxy, run uvicorn
 with `--proxy-headers --forwarded-allow-ips <proxy>` (the `web` image
 target already does) or every client shares one budget.
 
-A crash inside dlib takes the whole worker process down, threads and all.
+A crash inside native code takes the whole worker process down, threads
+and all.
 Run it under a restart policy; queued jobs survive in Redis, and the ones
 that were running land in the failed registry once their heartbeat expires,
 where the page offers a Retry.

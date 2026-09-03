@@ -23,7 +23,7 @@ page then polls until the result is ready. There are two pages: the app at
 [FastAPI](https://fastapi.tiangolo.com), the queue is
 [RQ](https://python-rq.org), and the glasses are pasted on with
 [Pillow](https://python-pillow.org) using landmarks from
-[face_recognition](https://github.com/ageitgey/face_recognition). The glasses
+[YuNet](https://github.com/opencv/opencv_zoo/tree/main/models/face_detection_yunet), run through OpenCV. The glasses
 themselves are an SVG, rasterised at the size each face needs.
 
 ## Prerequisites
@@ -123,7 +123,7 @@ or no faces found. An unknown or expired job id gives a `404`.
 
 While a job runs, `progress` and `step` report the stage it has reached
 ("Looking for faces", "Drawing glasses on 8 faces", "Encoding the result").
-They are checkpoints rather than measurements -- neither dlib nor Pillow
+They are checkpoints rather than measurements -- neither OpenCV nor Pillow
 reports how far through it is.
 
 The page uses the same fields. Each submission becomes a card in the session

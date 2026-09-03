@@ -9,10 +9,12 @@ A web app + JSON API that pastes "Deal With It" sunglasses onto every face in
 a picture. Submitting an image enqueues a background job; the page polls until
 the worker is done.
 
-Face detection is dlib's HOG detector and 68-point shape predictor (the
-models `face_recognition` ships), called directly; compositing is Pillow.
-The glasses angle comes from the vector between the outer left-eye landmark
-and the inner right-eye landmark.
+Face detection is YuNet, a 230 KB ONNX model (`src/models/`, MIT) run
+through OpenCV's DNN module; compositing is Pillow. YuNet returns five
+landmarks per face. The line between the eyes gives the frame's tilt and
+width, and the nose tip's offset along that line gives the turn (yaw),
+which narrows and tapers the frame. See `_place` in
+`src/processors/deal_with_it.py`.
 
 ## Architecture
 
@@ -26,7 +28,7 @@ browser ───────────────► web (FastAPI+FastHTML) 
 
 The web tier never touches an image: it validates the request shape, puts a
 payload on the queue and reads job state back. The task is enqueued **by
-name** (`src/jobs.py:TASK`) so the web process never imports dlib.
+name** (`src/jobs.py:TASK`) so the web process never imports OpenCV.
 
 ```
 src/app.py          Composition root: FastAPI outer app, FastHTML mounted at /
@@ -64,12 +66,16 @@ Invariants worth knowing before editing:
   `prefers-color-scheme` decide. Do not drive it from `:checked`.
 - **`glasses.svg` is the only copy of the artwork.** The worker rasterises it
   per face, in memory, at the width that face needs.
-- **The dlib detector is thread-local** (`_detector` in
-  `src/processors/deal_with_it.py`). A shared one segfaults under concurrent
-  calls; the shape predictor is safe to share and is loaded once.
+- **The detector is thread-local** (`_detector` in
+  `src/processors/deal_with_it.py`): `setInputSize` mutates it. OpenCV's own
+  thread pool is pinned to one thread so it does not fight the worker's.
 - **The samples are base64 through the queue**, not `/static` URLs: the
   worker's SSRF guard refuses our own (non-public) host. Same reason the API
   example on `/docs` points at Wikimedia unless `DWI_PUBLIC_URL` is set.
+- **Sample captions are pinned** by `SAMPLE_FACES` in
+  `tests/test_processor.py`. YuNet finds every human face in the samples at
+  `SCORE_THRESHOLD` and never a cat, but it does find dogs (three poker
+  players, Nelson), and the captions say so.
 - The session list is DOM-only. Reloading loses it, on purpose.
 
 ## Running it
@@ -97,23 +103,20 @@ docker compose up -d redis && uv run python -m src.worker &
 uv run uvicorn src.app:app --reload --port 5000
 ```
 
-The worker is one process with `DWI_WORKER_THREADS` threads (default 5).
-dlib releases the GIL, so threads scale like processes at a fraction of the
-memory. `src/worker.py:ThreadWorker` is a `SimpleWorker` with the signal
-handlers removed and the timeout enforced by a timer, because both are
-main-thread-only. A segfault in dlib takes the whole process down; let the
-container restart. Measured numbers are in `docs/LOAD.md`.
+The worker is one process with `DWI_WORKER_THREADS` threads (default 2).
+Detection releases the GIL, so threads scale like processes at a fraction
+of the memory. `src/worker.py:ThreadWorker` is a `SimpleWorker` with the
+signal handlers removed and the timeout enforced by a timer, because both
+are main-thread-only. A crash in native code takes the whole process down;
+let the container restart. Measured numbers are in `docs/LOAD.md`.
 
 ## Dependencies
 
-- `setuptools>=80,<82`: `face_recognition_models` imports `pkg_resources`,
-  which setuptools 82 removed. Without the bound `import face_recognition`
-  fails with a misleading "please install face_recognition_models".
-- `dlib-bin==20.0.1` instead of `dlib`: the same code as a prebuilt wheel.
-  `face-recognition` hard-depends on `dlib`, so `[tool.uv]
-  override-dependencies` neutralises that or both get installed.
-- No apt packages: dlib-bin and `resvg-py` need only what `python:3.12-slim`
-  ships. `cairosvg` would need libcairo; don't swap it in.
+- `opencv-python-headless` for the detector. Headless on purpose: the GUI
+  build drags in X libraries the slim image does not have.
+- `resvg-py` rasterises the glasses. Statically linked, so no apt layer.
+  `cairosvg` would need libcairo; don't swap it in.
+- The model file is vendored in `src/models/` from opencv_zoo (MIT).
 
 ## Testing
 
@@ -151,7 +154,8 @@ see `docs/LOAD.md`.
   `src/throttle.py` bound abuse per client; they are not access control.
 - Redis holds payloads and results as base64 with no persistence. Give it a
   `maxmemory` in production; `docker-compose.yml` sets one.
-- The HOG detector is CPU-only and mediocre on small or side-on faces.
+- The detector runs on CPU only. It finds dogs sometimes; the score does
+  not separate them from people, so there is no threshold that would.
 - No structured logging, metrics or tracing. CI runs lint + tests only.
 
 ## Conventions

@@ -61,9 +61,7 @@ def _serve_queue(connection, stop: threading.Event) -> None:
 
 @pytest.fixture(scope='session', autouse=True)
 def _needs_the_face_stack():
-    pytest.importorskip(
-        'face_recognition', reason="the real worker runs here: install the 'worker' extra"
-    )
+    pytest.importorskip('cv2', reason="the real worker runs here: install the 'worker' extra")
 
 
 @pytest.fixture(scope='session', autouse=True)
