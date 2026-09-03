@@ -14,7 +14,6 @@ project's own.
 | `apollo_11_crew.jpg` | The Apollo 11 crew — Neil Armstrong, Michael Collins, Buzz Aldrin — photographed for NASA, 1969. A work of the US federal government. | [Commons](https://commons.wikimedia.org/wiki/File:Apollo_11_Crew.jpg) |
 | `multiple_people.jpg` | The 2013 class of NASA astronauts, by Robert Markowitz for NASA. A work of the US federal government. | [Commons](https://commons.wikimedia.org/wiki/File:2013_class_of_NASA_astronauts.jpg) |
 | `solvay_1927.jpg` | The fifth Solvay Conference, Brussels, October 1927, by Benjamin Couprie. Published 1927 and long out of copyright. | [Commons](https://commons.wikimedia.org/wiki/File:Solvay_conference_1927.jpg) |
-| `blue_marble.jpg` | "The Blue Marble", the Earth from Apollo 17, 7 December 1972. A work of the US federal government. | [Commons](https://commons.wikimedia.org/wiki/File:The_Blue_Marble_(remastered).jpg) |
 | `dog_handler.jpg` | A military working dog and his handler, by Staff Sgt. Anna Pongo, 3 February 2023. A work of the US federal government. | [Commons](https://commons.wikimedia.org/wiki/File:Military_working_dog_and_his_handler_pose_for_photo_(7642320).jpg) |
 | `socks_the_cat.jpg` | Socks, the White House cat, by Barbara Kinney, 13 July 1994. A work of the US federal government. | [Commons](https://commons.wikimedia.org/wiki/File:Socks_the_Cat_(cropped1).jpg) |
 

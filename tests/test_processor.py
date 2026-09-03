@@ -221,7 +221,6 @@ SAMPLE_FACES = {
     'van_gogh_self_portrait.jpg': 0,
     'the_scream.jpg': 0,
     'socks_the_cat.jpg': 0,
-    'blue_marble.jpg': 0,
 }
 
 #: The words the tiles use, so the two cannot drift apart.

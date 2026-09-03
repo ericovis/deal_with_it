@@ -120,11 +120,10 @@ SAMPLES = {
     'cat_nap': Sample('cat_nap.jpg', 'No faces', 'image/jpeg'),
     'socks': Sample('socks_the_cat.jpg', 'No faces', 'image/jpeg'),
 
-    # Three ways of finding nothing: a painted face too loosely made, a face
-    # that is barely one, and something with no face in it at all.
+    # Two painted faces the detector cannot see: one made too loosely, one
+    # that is barely a face to begin with.
     'van_gogh': Sample('van_gogh_self_portrait.jpg', 'No faces', 'image/jpeg'),
     'scream': Sample('the_scream.jpg', 'No faces', 'image/jpeg'),
-    'earth': Sample('blue_marble.jpg', 'No faces', 'image/jpeg'),
 }
 
 #: Which sample the API example points at, and where that picture came from.

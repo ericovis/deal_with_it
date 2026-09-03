@@ -50,13 +50,13 @@ class TestSubmitting:
         expect(card).not_to_have_attribute('hx-get', '.', timeout=1000)
 
     def test_a_picture_with_no_faces_fails_with_a_reason(self, page: Page):
-        card = run(page, 'earth', outcome='failed')
+        card = run(page, 'socks', outcome='failed')
         expect(card.locator('.card-error p')).to_have_text(
             'No faces were found in this image.'
         )
 
     def test_retry_queues_the_picture_again(self, page: Page):
-        card = run(page, 'earth', outcome='failed')
+        card = run(page, 'socks', outcome='failed')
         was = card.get_attribute('id')
         card.locator('.retry').click()
         expect(first_card(page)).not_to_have_attribute('id', was, timeout=TIMEOUT)
@@ -174,7 +174,7 @@ class TestClearingUp:
     def test_clear_empties_the_whole_list(self, page: Page):
         page.goto('/')
         try_sample(page, 'me')
-        try_sample(page, 'earth')
+        try_sample(page, 'socks')
         expect(page.locator('#queue article')).to_have_count(2)
 
         page.locator('.clear').click()

@@ -206,7 +206,7 @@ class TestPayloadAndRetry:
 
     def test_resubmit_queues_the_same_payload_as_a_new_job(self, sync_queue, stub_task):
         stub_task(support.REJECTS)
-        job_id, _ = jobs.enqueue(PAYLOAD, meta={'kind': 'sample', 'label': 'blue_marble.jpg'})
+        job_id, _ = jobs.enqueue(PAYLOAD, meta={'kind': 'sample', 'label': 'socks_the_cat.jpg'})
 
         stub_task(support.SUCCESS)
         new_id, _ = jobs.resubmit(job_id)
@@ -218,10 +218,10 @@ class TestPayloadAndRetry:
     def test_resubmit_keeps_the_label_but_not_the_old_progress(self, sync_queue, stub_task):
         stub_task(support.SUCCESS)
         job_id, _ = jobs.enqueue(
-            PAYLOAD, meta={'kind': 'sample', 'label': 'blue_marble.jpg', 'faces': 3})
+            PAYLOAD, meta={'kind': 'sample', 'label': 'socks_the_cat.jpg', 'faces': 3})
         new_id, _ = jobs.resubmit(job_id)
         _, source = jobs.describe(new_id)
-        assert source.label == 'blue_marble.jpg'
+        assert source.label == 'socks_the_cat.jpg'
         assert source.kind == 'sample'
 
     def test_resubmit_is_none_for_an_unknown_id(self, sync_queue):

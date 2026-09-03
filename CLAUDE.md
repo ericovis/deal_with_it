@@ -140,7 +140,7 @@ anchors on `lens_offset`. Only where the pixels come from changed.
 
 ### The samples
 
-Seventeen pictures, all public domain, all credited. They are there to answer
+Sixteen pictures, all public domain, all credited. They are there to answer
 the questions people actually ask -- does it work on a crowd, on a painting,
 on my cat -- and the answers are worth knowing: a crowd yes (29 physicists at
 the 1927 Solvay conference), a painting usually (the Mona Lisa, Vermeer,
@@ -231,7 +231,7 @@ ONNX-exported detector. `image_to_numpy` was already dropped — it only did
 
 ## Testing
 
-`uv run pytest` — 273 tests, ~26s (the real detector accounts for nearly all
+`uv run pytest` — 272 tests, ~26s (the real detector accounts for nearly all
 of it). Everything is hermetic:
 
 - `stub_dns` (autouse) replaces `socket.getaddrinfo`, so no test resolves a
@@ -245,7 +245,7 @@ of it). Everything is hermetic:
   against fakeredis — never use it in a test.
 - `stub_task` repoints `jobs.TASK` at a fake in `tests/support.py`. Job
   functions must be importable, so they cannot be defined in a test body.
-- Real detection runs against the seventeen sample images. `SAMPLE_FACES` in
+- Real detection runs against the sixteen sample images. `SAMPLE_FACES` in
   `tests/test_processor.py` is the pinned count for each, and there are three
   guards around them: every count is checked against the detector, every
   caption is checked against its count, and every sample is checked for a
@@ -259,7 +259,7 @@ of it). Everything is hermetic:
 CSS doing what scripts usually do -- `:has()` switches Before/After, opens the
 full-screen view and flips the palette -- and a test client sees the markup
 that implies all of it and none of the behaviour. Both htmx bugs fixed during
-the redesign were found by writing these, not by the 273 tests above.
+the redesign were found by writing these, not by the 272 tests above.
 
 ```
 uv sync --group e2e && uv run playwright install chromium
