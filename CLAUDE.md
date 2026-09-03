@@ -123,7 +123,7 @@ ONNX-exported detector. `image_to_numpy` was already dropped — it only did
 
 ## Testing
 
-`uv run pytest` — 144 tests, ~30s (the real detector accounts for nearly all
+`uv run pytest` — 148 tests, ~30s (the real detector accounts for nearly all
 of it). Everything is hermetic:
 
 - `stub_dns` (autouse) replaces `socket.getaddrinfo`, so no test resolves a
