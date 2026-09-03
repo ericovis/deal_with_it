@@ -2,6 +2,7 @@
 
 import base64
 from io import BytesIO
+from pathlib import Path
 
 import numpy as np
 import pytest
@@ -92,26 +93,50 @@ class TestDealWithItProcessor:
         assert processor.output is None
 
     def test_reads_the_glasses_asset_once_per_process(self, single_face_image, monkeypatch):
-        """The template used to be re-opened from disk for every face."""
+        """The artwork used to be re-opened from disk for every face."""
         from src.processors import deal_with_it
 
-        deal_with_it._glasses_template.cache_clear()
-        opened = []
-        real_open = Image.open
+        deal_with_it._glasses_source.cache_clear()
+        read = []
+        real_read = Path.read_text
 
-        def counting_open(path, *args, **kwargs):
-            if str(path).endswith('glasses.png'):
-                opened.append(path)
-            return real_open(path, *args, **kwargs)
+        def counting_read(path, *args, **kwargs):
+            read.append(path)
+            return real_read(path, *args, **kwargs)
 
-        monkeypatch.setattr(Image, 'open', counting_open)
+        monkeypatch.setattr(Path, 'read_text', counting_read)
         processor = DealWithItProcessor(as_array(single_face_image))
         processor.call()
-        assert len(opened) == 1
+        assert len(read) == 1
+
+    def test_the_glasses_are_drawn_at_the_size_the_face_needs(
+            self, multiple_faces_image, monkeypatch):
+        """The point of a vector: no 3000px raster scaled down per face.
+
+        Eight faces of similar size should also share renders rather than ask
+        for one apiece -- widths are rounded to a step for exactly that.
+        """
+        from src.processors import deal_with_it
+
+        deal_with_it._render_glasses.cache_clear()
+        widths = []
+        real_render = deal_with_it._render_glasses.__wrapped__
+
+        def recording_render(source, width):
+            widths.append(width)
+            return real_render(source, width)
+
+        monkeypatch.setattr(deal_with_it, '_render_glasses', recording_render)
+        DealWithItProcessor(as_array(multiple_faces_image)).call()
+
+        assert widths, 'nothing was drawn'
+        assert all(w <= deal_with_it.MAX_RENDER for w in widths)
+        assert all(w % deal_with_it.RENDER_STEP == 0 for w in widths)
+        assert max(widths) < 3000, 'the old raster was 3000px wide for every face'
 
     def test_missing_glasses_asset_is_an_error(self, single_face_image, tmp_path):
         processor = DealWithItProcessor(
-            as_array(single_face_image), glasses_path=tmp_path / 'nope.png'
+            as_array(single_face_image), glasses_path=tmp_path / 'nope.svg'
         )
         with pytest.raises(OSError):
             processor.call()

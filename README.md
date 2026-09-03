@@ -23,7 +23,8 @@ page then polls until the result is ready. There are two pages: the app at
 [FastAPI](https://fastapi.tiangolo.com), the queue is
 [RQ](https://python-rq.org), and the glasses are pasted on with
 [Pillow](https://python-pillow.org) using landmarks from
-[face_recognition](https://github.com/ageitgey/face_recognition).
+[face_recognition](https://github.com/ageitgey/face_recognition). The glasses
+themselves are an SVG, rasterised at the size each face needs.
 
 ## Prerequisites
 

@@ -38,15 +38,13 @@ so it inherits the same status.
 
 ## The project's own
 
-`glasses.png`, `glasses.svg`, `favicon.png`, `me.jpg` and `deal_with_me.png`.
+`glasses.svg`, `favicon.png`, `me.jpg` and `deal_with_me.png`.
 
-The sample that is meant to fail is a photograph now, not this project's
-own logo.
-
-`glasses.svg` is `glasses.png` traced with potrace -- the same artwork as
-paths rather than pixels. It is used for the interface's decoration, where it
-stays sharp at any size; the compositor still pastes the PNG, because Pillow
-cannot rasterise SVG without a native dependency the worker does not need.
+`glasses.svg` is the only copy of the sunglasses and the only one to edit. It
+was traced from the original 3000x487 PNG with potrace; that PNG is gone,
+because nothing needs it any more. The interface shows the SVG directly, and
+the worker rasterises it with resvg at whatever width each face turns out to
+need.
 
 The sunglasses themselves are the ones from the
 [Deal With It](https://knowyourmeme.com/memes/deal-with-it) meme.

@@ -1,18 +1,30 @@
 """Paste "Deal With It" glasses onto every face in an image."""
 
 import functools
+from io import BytesIO
 from math import atan2, degrees
 from pathlib import Path
 
 import face_recognition as fr
 import numpy as np
+import resvg_py
 from numpy.typing import NDArray
 from PIL import Image
 
 from src.errors import DealWithItError
 from src.processors.base import BaseProcessor
 
-GLASSES_PATH = Path(__file__).resolve().parents[1] / 'static' / 'img' / 'glasses.png'
+GLASSES_PATH = Path(__file__).resolve().parents[1] / 'static' / 'img' / 'glasses.svg'
+
+#: Rendered at twice the width it will end up. Rotating a bitmap resamples it,
+#: and doing that with pixels to spare is what keeps the edges clean; the
+#: resize afterwards throws the surplus away.
+SUPERSAMPLE = 2
+#: Render widths are rounded up to a multiple of this, so a photo full of
+#: similarly sized faces asks for one render rather than one per face.
+RENDER_STEP = 32
+#: A ceiling, so a pathologically large face cannot ask for a huge canvas.
+MAX_RENDER = 4096
 
 
 class NoFacesFound(DealWithItError):
@@ -20,13 +32,28 @@ class NoFacesFound(DealWithItError):
 
 
 @functools.cache
-def _glasses_template(path: Path) -> Image.Image:
-    """The glasses PNG, read from disk once per process.
+def _glasses_source(path: Path) -> str:
+    """The SVG, read from disk once per process."""
+    return path.read_text()
 
-    Safe to cache: it is keyed on the path, the file is small, and every
-    caller copies it via rotate/resize rather than mutating it.
+
+@functools.lru_cache(maxsize=16)
+def _render_glasses(source: str, width: int) -> Image.Image:
+    """The glasses drawn at ``width`` pixels across.
+
+    The artwork is vector, so this draws it at the size the face actually
+    needs instead of shipping a 3000px raster and throwing most of it away.
+    resvg is a static Rust build -- no cairo, and no apt layer in the worker
+    image.
+
+    Keyed on the source text and the width, both immutable. Not on the
+    processor: a cache keyed on ``self`` pins every instance and its decoded
+    image for the life of the process, which is the bug ``base64_output``
+    used to have. Callers only rotate or resize what comes back, and both
+    return a new image, so handing out the same one is safe.
     """
-    return Image.open(path).convert('RGBA')
+    png = bytes(resvg_py.svg_to_bytes(svg_string=source, width=width))
+    return Image.open(BytesIO(png)).convert('RGBA')
 
 
 def _scaled(point: tuple[int, int], factor: float) -> tuple[int, int]:
@@ -69,11 +96,17 @@ class DealWithItProcessor(BaseProcessor):
         return np.asarray(smaller, dtype=np.uint8), 1 / ratio
 
     def _get_glasses(self, new_width: int, angle: float = 0) -> Image.Image:
-        img = _glasses_template(self._glasses_path)
+        # The width the *rotated* result must end up at, which is what the
+        # placement below is measured against.
+        new_width = new_width + int(new_width * self.width_increase)
+        rendered = -(-new_width * SUPERSAMPLE // RENDER_STEP) * RENDER_STEP
+        img = _render_glasses(
+            _glasses_source(self._glasses_path),
+            min(max(rendered, RENDER_STEP), MAX_RENDER),
+        )
         if angle != 0:
             img = img.rotate(angle, expand=True, resample=self.resample)
         width, height = img.size
-        new_width = new_width + int(new_width * self.width_increase)
         new_height = int(height * (new_width / width))
         return img.resize((new_width, new_height))
 

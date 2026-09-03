@@ -34,6 +34,11 @@ worker = [
     # minutes of compiling, and verified to produce identical landmarks. Swap
     # it for "dlib==20.0.1" (and drop the override below) to build from source.
     "dlib-bin==20.0.1",
+    # Rasterises glasses.svg at the size each face actually needs. A Rust
+    # static build: `ldd` shows only libgcc/libpthread/libm/libc, the same set
+    # dlib needs, so it costs the image no apt layer. cairosvg would have --
+    # libcairo.so.2 is not in python:3.12-slim.
+    "resvg-py>=0.5",
 ]
 
 [project.urls]

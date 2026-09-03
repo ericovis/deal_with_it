@@ -35,7 +35,7 @@ web process and its container never load dlib. Keep that boundary.
 ```
 src/app.py          Composition root. FastAPI outer app, FastHTML mounted at /
 src/api.py          The JSON API router, mounted under /api
-src/ui.py           The FastHTML interface: page, form handler, poll fragment
+src/ui.py           The FastHTML interface: both pages, fragments, routes
 src/jobs.py         The queue seam: enqueue / describe / resubmit / health
 src/worker.py       `python -m src.worker` — the RQ worker entry point
 src/tasks.py        process_image(): what the worker actually runs
@@ -44,7 +44,7 @@ src/models.py       Pydantic v2 request/response schemas. Validates shape only
 src/config.py       Settings, all DWI_-prefixed env vars
 src/errors.py       DealWithItError: failures whose message is safe to show
 src/processors/     BaseProcessor + DealWithItProcessor
-src/static/         style.css and the showcase/glasses images
+src/static/         style.css, the showcase photos, glasses.svg
 tests/              Hermetic: no network, no Redis server, no fixtures on disk
 ```
 
@@ -121,6 +121,23 @@ always show the theme actually in force. The one seam left: on a dark desktop
 with no cookie the page is dark while the checkbox is unchecked, so the first
 click is a no-op. Fixing that needs `Sec-CH-Prefers-Color-Scheme`.
 
+### The glasses are vector
+
+`glasses.svg` is the only copy of the artwork and the only file to edit. It
+was traced from the original 3000x487 PNG with potrace; that PNG is gone.
+
+The page loads the SVG directly. The worker rasterises it **per face, in
+memory, at the width that face needs** (`_render_glasses` in
+`src/processors/deal_with_it.py`) -- roughly 3ms at 520px, against ~4s of
+detection, so it does not register. It renders at `SUPERSAMPLE` times the
+final width because the rotate that follows resamples, and widths are rounded
+up to `RENDER_STEP` so a photo full of similarly sized faces asks for one
+render rather than one per face.
+
+The geometry is unchanged from the raster version: `_get_glasses` still sizes
+the *rotated bounding box* to the face width and `_get_final_position` still
+anchors on `lens_offset`. Only where the pixels come from changed.
+
 ### Why RQ
 
 Considered and rejected: Celery (far more machinery than a one-queue app
@@ -181,9 +198,16 @@ the fragile part of the tree and there are three load-bearing details:
    drop the override, and note modern dlib pulls cmake in as a PEP 517 build
    dep (no system cmake needed).
 3. **No apt packages are required.** Verified with `ldd`: the dlib extension
-   needs only libstdc++/libm/libgcc/libc, all present in `python:3.12-slim`.
-   It is built without BLAS, LAPACK, CUDA or image codecs; Pillow does the
-   image I/O. Don't add an apt layer "just in case".
+   needs only libstdc++/libm/libgcc/libc, and `resvg_py.abi3.so` only
+   libgcc/libpthread/libm/libc -- all present in `python:3.12-slim`. dlib is
+   built without BLAS, LAPACK, CUDA or image codecs; Pillow does the image
+   I/O. Don't add an apt layer "just in case".
+4. **`resvg-py` is what rasterises the glasses**, and it was chosen for that
+   `ldd` output. It is a static Rust build. The obvious alternative,
+   `cairosvg`, needs `libcairo.so.2`, which `python:3.12-slim` does not have
+   (checked) -- it would cost the apt layer point 3 is about. `skia-python`
+   wants libEGL. If resvg ever has to go, the fallbacks are an apt layer for
+   cairo or going back to a committed PNG.
 
 Replacement candidates when the time comes: mediapipe, InsightFace, or an
 ONNX-exported detector. `image_to_numpy` was already dropped — it only did
@@ -191,7 +215,7 @@ ONNX-exported detector. `image_to_numpy` was already dropped — it only did
 
 ## Testing
 
-`uv run pytest` — 166 tests, ~11s (the real detector accounts for nearly all
+`uv run pytest` — 256 tests, ~16s (the real detector accounts for nearly all
 of it). Everything is hermetic:
 
 - `stub_dns` (autouse) replaces `socket.getaddrinfo`, so no test resolves a
@@ -217,7 +241,7 @@ of it). Everything is hermetic:
 CSS doing what scripts usually do -- `:has()` switches Before/After, opens the
 full-screen view and flips the palette -- and a test client sees the markup
 that implies all of it and none of the behaviour. Both htmx bugs fixed during
-the redesign were found by writing these, not by the 255 tests above.
+the redesign were found by writing these, not by the 256 tests above.
 
 ```
 uv sync --group e2e && uv run playwright install chromium

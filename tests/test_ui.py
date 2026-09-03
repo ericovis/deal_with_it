@@ -98,7 +98,7 @@ class TestPage:
         assert 'content="https://example.test/static/img/deal_with_me.png"' in body
 
     def test_static_assets_are_served(self, client):
-        for path in ('/static/css/style.css', '/static/img/glasses.png'):
+        for path in ('/static/css/style.css', '/static/img/glasses.svg'):
             assert client.get(path).status_code == 200
 
     @pytest.mark.parametrize('path', [
