@@ -2,7 +2,9 @@
 
 Two pages: the app at ``/`` and the docs at ``/docs``. Submitting a picture
 swaps a card into ``#queue``; the card polls itself until the worker is done
-and then turns into the result in place.
+and then turns into the result in place. Two lines of script in the whole
+interface: the clipboard call on the docs page, and ``UPLOAD_ONE_BY_ONE``,
+which htmx has no attribute for.
 """
 
 import base64
@@ -270,6 +272,28 @@ def url_hint(message: str = '', ok: bool = False, oob: bool = False) -> P:
     )
 
 
+#: Posting a file input the ordinary way sends every file in one body, so
+#: nothing appears until the last byte of the last picture has arrived. This
+#: sends one request per file instead, in order, so each card lands as its own
+#: upload finishes. htmx has no attribute that splits a file input, which is
+#: why this is script rather than markup.
+#:
+#: ``etc.values`` *replaces* the ``image`` htmx collected from the form
+#: (``overrideFormData`` deletes the key before appending), so each request
+#: carries exactly one file. The input is emptied up front anyway: the files
+#: are already in hand, and an empty input stops the form's own submit button
+#: from re-sending the ones still waiting.
+UPLOAD_ONE_BY_ONE = (
+    "const input = this, files = [...input.files]; input.value = '';"
+    'void (async () => { for (const file of files) {'
+    " await htmx.ajax('POST', '/submit', {source: input, target: '#queue',"
+    " swap: 'afterbegin', values: {image: file}})"
+    # A dropped connection rejects, and one bad file must not swallow the
+    # rest of the batch -- nor raise, which htmx has already reported.
+    '  .catch(() => {}); } })();'
+)
+
+
 def upload_form(replace: bool = False) -> Form:
     """The submit form. With ``replace`` it swaps out of band over the one
     on the page, which is how a submission clears the fields.
@@ -279,9 +303,8 @@ def upload_form(replace: bool = False) -> Form:
     """
     return Form(
         Input(type='file', id='files', name='image', accept='image/*', multiple=True,
-              cls='visually-hidden',
-              hx_post='/submit', hx_trigger='change', hx_encoding='multipart/form-data',
-              hx_target='#queue', hx_swap='afterbegin'),
+              cls='visually-hidden', hx_encoding='multipart/form-data',
+              **{'hx-on:change': UPLOAD_ONE_BY_ONE}),
         Label(
             Img(src='/static/img/glasses.svg', alt=''),
             Span('Drop pictures here', cls='title'),
@@ -381,13 +404,27 @@ def _faces(count: int | None) -> str:
     return f' · {count} face' if count == 1 else f' · {count} faces'
 
 
+def _wait(ahead: int | None) -> str:
+    """How much queue is in front of a card, in words.
+
+    None means the id is not in the queue list: either a worker already has
+    it, or this is one of RQ's deferred/scheduled states, which we never
+    create. Both read the same to someone waiting.
+    """
+    if ahead is None:
+        return 'In the queue'
+    if ahead == 0:
+        return 'Next up'
+    return '1 job ahead' if ahead == 1 else f'{ahead} jobs ahead'
+
+
 def _subtitle(result: JobResult, source: JobSource) -> str:
     kind = KIND_LABELS[source.kind]
     if result.state == JobState.STARTED:
         step = result.step or 'Working on it'
         return f'{step} · {result.progress}%' if result.progress is not None else step
     if not result.state.is_terminal:
-        return 'In the queue'
+        return _wait(result.ahead)
     if result.state == JobState.FINISHED:
         return f'{kind}{_faces(source.faces)}'
     return kind
@@ -652,6 +689,10 @@ def docs_page(theme: str | None, reachable: bool) -> tuple:
                     P('Submissions are limited per client and refused with ', Code('429'),
                       ' (too many in a minute) or ', Code('503'), ' (the queue is full); '
                       'both carry a ', Code('Retry-After'), ' header.'),
+                    P('A ', Code('queued'), ' job also carries ', Code('ahead'), ': how '
+                      'many jobs are in front of it, with ', Code('0'), ' meaning it is '
+                      'next. It goes null once a worker picks the job up, which is when ',
+                      Code('progress'), ' and ', Code('step'), ' take over.'),
                     P('While a job runs, ', Code('progress'), ' and ', Code('step'),
                       ' report the stage it has reached. They are checkpoints rather than '
                       'measurements: neither the detector nor Pillow reports how far '
@@ -761,11 +802,16 @@ def create_ui():
         if sample:
             return await run_in_threadpool(_submit_sample, sample, client)
 
-        # An untouched file input still posts one empty part.
+        # An untouched file input still posts one empty part. The dropzone
+        # sends one file per request (see UPLOAD_ONE_BY_ONE), so this is
+        # normally a list of one -- but it stays a list, because the form's
+        # own submit button would post whatever the input still holds.
         files = [f for f in (image or []) if isinstance(f, UploadFile) and f.filename]
         if files:
-            cards = [await _submit_file(f, client) for f in files]
-            return (*cards, upload_form(replace=True))
+            # No replacement form: the script empties the input itself, and
+            # swapping the form mid-batch would tear out the element the
+            # remaining requests are posting from.
+            return tuple([await _submit_file(f, client) for f in files])
 
         return await run_in_threadpool(_submit_url, url, client)
 

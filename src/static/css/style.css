@@ -416,6 +416,15 @@ button {
     box-shadow: 0 0 0 3px var(--focus);
 }
 
+/* htmx puts .htmx-request on the element a request came from, and a batch of
+   files is sent one at a time from this input -- so this stays on for the
+   whole batch, and says that more cards are still on their way. */
+#files.htmx-request + .dropzone {
+    border-color: var(--accent);
+    background: var(--accent-soft);
+    cursor: progress;
+}
+
 .dropzone img {
     width: 72px;
     height: auto;

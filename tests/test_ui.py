@@ -81,6 +81,15 @@ class TestPage:
     def test_the_file_input_takes_several_files(self, client):
         assert re.search(r'<input type="file"[^>]*multiple', client.get('/').text)
 
+    def test_the_dropzone_posts_one_file_per_request(self, client):
+        """A plain hx-post would send the whole selection in one body, and
+        nothing would appear until the last picture had finished uploading."""
+        body = client.get('/').text
+        field = re.search(r'<input type="file"[^>]*>', body).group()
+        assert 'hx-on:change=' in field
+        assert 'hx-post' not in field, 'the batch post is what we are replacing'
+        assert 'values: {image: file}' in field, 'one file per request'
+
     def test_the_url_field_validates_as_it_is_typed(self, client):
         body = client.get('/').text
         assert 'hx-post="/validate"' in body
@@ -155,6 +164,8 @@ class TestSubmit:
         assert 'me.png' in response.text
 
     def test_several_files_become_several_jobs(self, client, hx):
+        """The dropzone sends one at a time, but the form's submit button can
+        still post a whole selection, so the handler keeps taking a list."""
         response = submit(client, hx, files=[
             ('image', ('one.png', make_png(), 'image/png')),
             ('image', ('two.png', make_png(), 'image/png')),
@@ -163,6 +174,15 @@ class TestSubmit:
         assert len(ids) == 2
         assert all(jobs.result_for(job_id) is not None for job_id in ids)
         assert 'one.png' in response.text and 'two.png' in response.text
+
+    def test_an_upload_answers_with_its_card_and_nothing_else(self, client, hx):
+        """No replacement form: the script empties the input itself, and an
+        out-of-band swap would tear out the element the rest of the batch is
+        still posting from."""
+        body = submit(client, hx,
+                      files=[('image', ('me.png', make_png(), 'image/png'))]).text
+        assert 'hx-swap-oob' not in body
+        assert 'id="form"' not in body
 
     def test_a_submission_clears_the_form(self, client, hx):
         body = submit(client, hx, url='https://example.test/a.png').text
@@ -350,7 +370,7 @@ class TestCards:
         body = client.get(f'/jobs/{job_id}', headers=hx).text
         assert f'hx-get="/jobs/{job_id}"' in body
         assert 'hx-trigger="load delay:1s"' in body
-        assert 'In the queue' in body
+        assert 'Next up' in body
 
     def test_a_queued_job_becomes_a_result_after_the_worker_runs(
             self, client, hx, async_queue, stub_task, drain):
@@ -422,6 +442,52 @@ class TestPollingPayloads:
         assert 'src="https://example.test/a.png" alt="" class="thumb"' in body
 
 
+class TestTheWait:
+    """A queued card says how much queue is in front of it."""
+
+    def start(self, client, hx):
+        return job_ids(submit(client, hx, url='https://example.test/a.png').text)[0]
+
+    def poll(self, client, hx, job_id):
+        return client.get(f'/jobs/{job_id}', headers=hx).text
+
+    def test_the_first_job_is_next_up(self, client, hx, async_queue, stub_task):
+        stub_task(support.SUCCESS)
+        assert 'Next up' in self.poll(client, hx, self.start(client, hx))
+
+    def test_one_job_ahead_is_singular(self, client, hx, async_queue, stub_task):
+        stub_task(support.SUCCESS)
+        self.start(client, hx)
+        assert '1 job ahead' in self.poll(client, hx, self.start(client, hx))
+
+    def test_more_than_one_is_counted(self, client, hx, async_queue, stub_task):
+        stub_task(support.SUCCESS)
+        self.start(client, hx)
+        self.start(client, hx)
+        assert '2 jobs ahead' in self.poll(client, hx, self.start(client, hx))
+
+    def test_the_count_falls_as_the_worker_works(
+            self, client, hx, async_queue, stub_task, drain):
+        stub_task(support.SUCCESS)
+        self.start(client, hx)
+        mine = self.start(client, hx)
+        assert '1 job ahead' in self.poll(client, hx, mine)
+        drain(max_jobs=1)
+        assert 'Next up' in self.poll(client, hx, mine)
+
+    def test_a_job_the_worker_has_taken_says_nothing_about_the_queue(self, client, hx,
+                                                                     monkeypatch):
+        """Once a job is out of the list there is no position, and the step
+        it is on is the better news anyway."""
+        monkeypatch.setattr(jobs, 'describe', lambda job_id: (
+            JobResult(job_id=job_id, state='queued'),
+            JobSource(kind=SourceKind.URL, label='example.test/a.png'),
+        ))
+        body = client.get('/jobs/whatever', headers=hx).text
+        assert 'In the queue' in body
+        assert 'ahead' not in body
+
+
 class TestProgress:
     """A progress bar fed by checkpoints the worker records on the job."""
 
@@ -433,7 +499,7 @@ class TestProgress:
         job_id = self.start(client, hx)
         body = client.get(f'/jobs/{job_id}', headers=hx).text
         assert '<progress max="100">' in body, 'no value attribute means indeterminate'
-        assert 'In the queue' in body
+        assert 'Next up' in body
         assert '%' not in body, 'there is no honest percentage for a queued job'
 
     def test_a_running_job_shows_its_step_and_percentage(self, client, hx, monkeypatch):

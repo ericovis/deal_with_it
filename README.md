@@ -128,6 +128,10 @@ submitted image: the detector's box (top, right, bottom, left) and five
 points, and the 68 landmarks the placement used. `detection` says which
 pass found them: `plain`, `upscaled` or `equalised`.
 
+While the job is still `queued`, `ahead` says how many jobs are in front of
+it — `0` means it is next. It goes null the moment a worker picks the job
+up, which is when `progress` and `step` start reporting stages.
+
 The result is a JPEG when the input was a JPEG and a PNG otherwise. A
 submission may be refused with `429` (too many from one client in a minute)
 or `503` (the queue is full); both carry `Retry-After`. Load figures and

@@ -126,9 +126,9 @@ def browser_context_args(browser_context_args):
 def quiet_console(page):
     """No test may leave the browser complaining.
 
-    The whole point of this interface is that it ships no JavaScript of its
-    own, so anything in the console is either htmx failing or markup we got
-    wrong.
+    This interface ships two lines of script, so anything in the console is
+    almost always htmx failing or markup we got wrong -- and when it is one of
+    those two lines, this is what says so.
     """
     problems: list[str] = []
     page.on('console', lambda m: problems.append(m.text) if m.type == 'error' else None)

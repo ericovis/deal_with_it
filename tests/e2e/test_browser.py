@@ -80,6 +80,47 @@ class TestSubmitting:
         page.goto('/')
         page.locator('#files').set_input_files(paths)
         expect(page.locator('#queue article')).to_have_count(3, timeout=TIMEOUT)
+        names = page.locator('#queue .card-id b').all_text_contents()
+        # Newest on top, the same rule every other submission follows.
+        assert names == ['three.png', 'two.png', 'one.png']
+
+    def test_each_file_is_posted_on_its_own(self, page: Page, tmp_path):
+        """One request per picture, so a card lands as each upload finishes
+        rather than all of them after the last byte of the batch."""
+        posted = []
+        page.on('request', lambda request: posted.append(request.url)
+                if request.method == 'POST' and request.url.endswith('/submit') else None)
+        paths = []
+        for name in ('one.png', 'two.png', 'three.png'):
+            path = tmp_path / name
+            path.write_bytes(make_png())
+            paths.append(path)
+        page.goto('/')
+        page.locator('#files').set_input_files(paths)
+        expect(page.locator('#queue article')).to_have_count(3, timeout=TIMEOUT)
+        assert len(posted) == 3
+
+    def test_the_dropzone_is_emptied_so_the_same_file_can_be_sent_twice(
+            self, page: Page, tmp_path):
+        picture = tmp_path / 'again.png'
+        picture.write_bytes(make_png())
+        page.goto('/')
+        page.locator('#files').set_input_files(picture)
+        expect(page.locator('#queue article')).to_have_count(1, timeout=TIMEOUT)
+        expect(page.locator('#files')).to_have_js_property('value', '')
+        page.locator('#files').set_input_files(picture)
+        expect(page.locator('#queue article')).to_have_count(2, timeout=TIMEOUT)
+
+    def test_a_typed_url_survives_an_upload(self, page: Page, tmp_path):
+        """The form is no longer swapped out from under a file post, so
+        whatever is in the URL field stays there."""
+        picture = tmp_path / 'holiday.png'
+        picture.write_bytes(make_png())
+        page.goto('/')
+        page.locator('#url').fill('https://example.test/later.png')
+        page.locator('#files').set_input_files(picture)
+        expect(page.locator('#queue article')).to_have_count(1, timeout=TIMEOUT)
+        expect(page.locator('#url')).to_have_value('https://example.test/later.png')
 
 
 class TestTheUrlField:

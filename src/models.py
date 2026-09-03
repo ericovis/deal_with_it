@@ -131,6 +131,11 @@ class JobResult(BaseModel):
     step: str | None = Field(
         default=None, description='What the worker is doing right now.'
     )
+    ahead: int | None = Field(
+        default=None, ge=0,
+        description='How many jobs are queued in front of this one; 0 means it '
+                    'is next up. Null once the job has been picked up.',
+    )
     faces: list[FaceRecord] | None = Field(
         default=None, description='Every face the glasses went on, once finished.'
     )
