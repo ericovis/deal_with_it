@@ -47,6 +47,16 @@ class Settings(BaseSettings):
     allow_private_addresses: bool = False
 
 
+    @property
+    def max_request_bytes(self) -> int:
+        """Ceiling on a request body, derived from the image limit.
+
+        Base64 inflates by 4/3 and both JSON and multipart add an envelope,
+        so this is the image limit plus that overhead and a little slack.
+        """
+        return self.max_image_bytes * 4 // 3 + 64 * 1024
+
+
 @lru_cache
 def get_settings() -> Settings:
     return Settings()

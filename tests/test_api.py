@@ -125,3 +125,30 @@ class TestDocs:
         the mount order had regressed.
         """
         assert client.get(path).status_code == 404
+
+
+class TestBodySizeLimit:
+    """The image limits only bite in the worker, by which point the web tier
+    has already buffered the upload and put it in Redis."""
+
+    def test_an_oversized_body_is_refused(self, client):
+        settings = jobs.get_settings()
+        payload = 'x' * (settings.max_request_bytes + 1)
+        response = client.post('/api/jobs', content=payload,
+                               headers={'content-type': 'application/json'})
+        assert response.status_code == 413
+        assert 'must be under' in response.json()['detail']
+
+    def test_a_normal_body_is_unaffected(self, client, base64_image):
+        assert client.post('/api/jobs', json={'base64': base64_image}).status_code == 202
+
+    def test_the_limit_leaves_room_for_base64_and_the_envelope(self):
+        settings = jobs.get_settings()
+        assert settings.max_request_bytes > settings.max_image_bytes * 4 / 3
+
+    def test_the_page_is_protected_too(self, client, hx):
+        """The middleware wraps the mounted FastHTML app as well."""
+        response = client.post('/submit', content='x' * (jobs.get_settings().max_request_bytes + 1),
+                               headers={'content-type': 'application/x-www-form-urlencoded',
+                                        **hx})
+        assert response.status_code == 413
