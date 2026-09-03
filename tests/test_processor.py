@@ -181,7 +181,7 @@ class TestDetectionDownscaling:
     ('apollo_11_crew.jpg', 3),
     ('multiple_people.jpg', 8),
     ('solvay_1927.jpg', 29),
-    ('glasses.png', 0),
+    ('blue_marble.jpg', 0),
 ])
 def test_every_sample_has_the_faces_its_caption_claims(filename, claimed):
     """The tiles say "Three faces", "Twenty-nine faces" and so on.

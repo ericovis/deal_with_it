@@ -91,9 +91,6 @@ class Sample:
     filename: str
     title: str
     media_type: str
-    #: Line art rather than a photograph, so the tile contains it instead of
-    #: cropping it and inverts it with the theme.
-    art: bool = False
 
 
 #: Ordered easiest to hardest, ending with the one that is meant to fail.
@@ -103,7 +100,7 @@ SAMPLES = {
     'apollo': Sample('apollo_11_crew.jpg', 'Three faces', 'image/jpeg'),
     'group': Sample('multiple_people.jpg', 'Eight faces', 'image/jpeg'),
     'solvay': Sample('solvay_1927.jpg', 'Twenty-nine faces', 'image/jpeg'),
-    'glasses': Sample('glasses.png', 'No faces · fails', 'image/png', art=True),
+    'earth': Sample('blue_marble.jpg', 'No faces · fails', 'image/jpeg'),
 }
 
 
@@ -311,7 +308,7 @@ def upload_form(replace: bool = False) -> Form:
 def sample_tile(name: str) -> Button:
     sample = SAMPLES[name]
     return Button(
-        Img(src=f'/static/img/{sample.filename}', alt='', cls='art' if sample.art else None),
+        Img(src=f'/static/img/{sample.filename}', alt=''),
         Span(B(sample.title), Span(sample.filename), cls='caption'),
         type='button',
         cls='sample',

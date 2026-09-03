@@ -26,12 +26,22 @@ and long out of copyright.
 - Source: https://commons.wikimedia.org/wiki/File:Solvay_conference_1927.jpg
 - Resized to 1600px wide.
 
+`blue_marble.jpg` — "The Blue Marble", the Earth seen from Apollo 17 on its
+way to the Moon, 7 December 1972. A work of the United States federal
+government.
+
+- Source: https://commons.wikimedia.org/wiki/File:The_Blue_Marble_(remastered).jpg
+- Resized to 1280px wide.
+
 `deal_with_multiple_people.png` is `multiple_people.jpg` run through this app,
 so it inherits the same status.
 
 ## The project's own
 
 `glasses.png`, `glasses.svg`, `favicon.png`, `me.jpg` and `deal_with_me.png`.
+
+The sample that is meant to fail is a photograph now, not this project's
+own logo.
 
 `glasses.svg` is `glasses.png` traced with potrace -- the same artwork as
 paths rather than pixels. It is used for the interface's decoration, where it

@@ -450,7 +450,7 @@ class TestProgress:
 class TestRetry:
     def start_failing(self, client, hx, stub_task):
         stub_task(support.REJECTS)
-        return job_ids(submit(client, hx, sample='glasses').text)[0]
+        return job_ids(submit(client, hx, sample='earth').text)[0]
 
     def test_a_retry_queues_the_same_picture_again(self, client, hx, stub_task):
         job_id = self.start_failing(client, hx, stub_task)
@@ -462,7 +462,7 @@ class TestRetry:
 
         assert new_id != job_id, 'a retry is a new job, not a resurrected one'
         assert jobs.payload_for(new_id) == original
-        assert 'glasses.png' in response.text, 'and it remembers what it was called'
+        assert 'blue_marble.jpg' in response.text, 'and it remembers what it was called'
 
     def test_retrying_an_expired_job_says_so(self, client, hx):
         body = client.post('/jobs/long-gone/retry', headers=hx).text

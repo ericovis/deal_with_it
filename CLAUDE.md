@@ -207,7 +207,7 @@ of it). Everything is hermetic:
   functions must be importable, so they cannot be defined in a test body.
 - Real detection runs against the repo's own images: `me.jpg` (1 face),
   `apollo_11_crew.jpg` (3), `multiple_people.jpg` (8), `solvay_1927.jpg` (29),
-  `glasses.png` (none). The sample tiles state those counts in words, so
+  `blue_marble.jpg` (none). The sample tiles state those counts in words, so
   `test_every_sample_has_the_faces_its_caption_claims` pins every one --
   change a picture and the page would otherwise start lying about it.
 

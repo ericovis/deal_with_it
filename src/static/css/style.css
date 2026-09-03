@@ -565,14 +565,6 @@ input[type="text"]:focus {
     display: block;
 }
 
-/* The glasses are line art, not a photo: contain them rather than cropping. */
-.sample img.art {
-    object-fit: contain;
-    padding: 16px;
-    background: var(--surface-2);
-    filter: var(--invert);
-}
-
 .sample .caption {
     display: block;
     padding: 8px 10px 9px;
