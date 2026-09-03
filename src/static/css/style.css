@@ -338,6 +338,12 @@ progress:indeterminate::-webkit-progress-bar {
     font-size: 0.9rem;
 }
 
+.credit {
+    font-size: 0.8rem;
+    color: #5b6b70;
+    text-align: center;
+}
+
 .gallery-note {
     font-size: 0.9rem;
     color: #5b6b70;

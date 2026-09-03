@@ -156,7 +156,7 @@ ONNX-exported detector. `image_to_numpy` was already dropped — it only did
 
 ## Testing
 
-`uv run pytest` — 165 tests, ~30s (the real detector accounts for nearly all
+`uv run pytest` — 166 tests, ~11s (the real detector accounts for nearly all
 of it). Everything is hermetic:
 
 - `stub_dns` (autouse) replaces `socket.getaddrinfo`, so no test resolves a
@@ -171,7 +171,7 @@ of it). Everything is hermetic:
 - `stub_task` repoints `jobs.TASK` at a fake in `tests/support.py`. Job
   functions must be importable, so they cannot be defined in a test body.
 - Real detection runs against the repo's own images: `me.jpg` (1 face),
-  `multiple_people.jpg` (5 faces), `glasses.png` (none).
+  `multiple_people.jpg` (8 faces), `glasses.png` (none).
 
 ## What the revival changed
 
@@ -196,10 +196,11 @@ Every numbered pitfall from the original audit, for the record:
 - **No size limits** → `DWI_MAX_IMAGE_BYTES` (10 MB) and `DWI_MAX_IMAGE_PIXELS`
   (40 MP, checked from the header before decoding).
 - **Per-face `face_landmarks` calls** re-ran detection on the whole image for
-  every person: 11.4s vs 0.02s on the group photo. One batched call now.
+  every person, which cost seconds per extra face. One batched call now.
 - Detection also runs on a copy downscaled to `DWI_MAX_DETECTION_SIZE` (1600px
-  longest side): 12.5s → 2.6s on the group photo, same 5 faces, glasses
-  centroid drifting 0.8% of image width. Compositing stays full-resolution.
+  longest side). On `multiple_people.jpg` upscaled to a phone-sized 3840x3072,
+  that is 17.2s against 4.3s, with the same 8 faces found. Compositing stays
+  full-resolution, and the glasses centroid moves under 1% of image width.
 - **Stale everything** → the packaging and deployment leftovers of three
   earlier hosting arrangements, the wrong framework named in the page copy,
   `Dockerfile-base`, the Docker Hub push workflow and the dead CodeClimate

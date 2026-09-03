@@ -174,3 +174,14 @@ class TestDetectionDownscaling:
         drift = np.hypot(*(full_centre - small_centre))
         assert drift < longest * 0.03, f'glasses moved {drift:.0f}px'
         assert small_area == pytest.approx(full_area, rel=0.25)
+
+
+def test_the_showcase_group_photo_still_has_faces_to_draw_on(multiple_faces_image):
+    """The page's before/after is only convincing if the detector agrees.
+
+    Pinned because the image is replaceable: swap it for one the detector
+    struggles with and the showcase quietly stops demonstrating anything.
+    """
+    import face_recognition as fr
+
+    assert len(fr.face_locations(as_array(multiple_faces_image))) >= 5

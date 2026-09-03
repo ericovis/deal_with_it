@@ -137,6 +137,12 @@ on for local fixtures.
 - Add APIs for Slack integration
 - Nonsense stuff ;D
 
+## Credits
+
+The group photo in the showcase is the 2013 class of NASA astronauts by
+Robert Markowitz, a work of the US federal government and therefore public
+domain. See [`src/static/img/CREDITS.md`](/src/static/img/CREDITS.md).
+
 ## License
 
 Created by [Eric Magalhães](https://ericovis.com) under the [MIT License](/LICENSE)

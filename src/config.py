@@ -35,8 +35,9 @@ class Settings(BaseSettings):
     #: Decompression-bomb guard: refuse images with more pixels than this.
     max_image_pixels: int = 40_000_000
     #: Longest side, in pixels, of the copy the detector actually looks at.
-    #: Detection cost scales with area -- a 4641x3589 photo takes ~11s at full
-    #: size -- while the glasses are still drawn on the original. 0 disables.
+    #: Detection cost scales with area -- a phone-sized photo takes ~17s at
+    #: full size against ~4s at 1600px, finding the same faces -- while the
+    #: glasses are still drawn on the original. 0 disables.
     max_detection_size: int = 1600
     #: Connect/read timeout for fetching a remote image.
     http_timeout: float = 10.0

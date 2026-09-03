@@ -212,6 +212,10 @@ def page() -> tuple:
                 P('It also works on pictures with multiple people:'),
                 showcase('/static/img/multiple_people.jpg',
                          '/static/img/deal_with_multiple_people.png', 'Before:', 'After:'),
+                P('Group photo: the 2013 class of NASA astronauts, by Robert Markowitz for ',
+                  A('NASA', href='https://commons.wikimedia.org/wiki/'
+                                 'File:2013_class_of_NASA_astronauts.jpg'),
+                  '. Public domain.', cls='credit'),
                 P('Behind the scenes, this project uses the ',
                   A('face_recognition', href='https://github.com/ageitgey/face_recognition'),
                   ' library to identify faces in a given picture. On every identified face the '
