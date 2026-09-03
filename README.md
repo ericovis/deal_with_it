@@ -159,12 +159,17 @@ The only thing the page stores about a person is a `dwi_theme` cookie holding
 
 ## Credits
 
+Every sample picture is public domain and credited in
+[`src/static/img/CREDITS.md`](/src/static/img/CREDITS.md) — NASA photographs,
+the 1927 Solvay conference, and paintings by Leonardo, Vermeer, Rembrandt,
+Grant Wood, van Gogh, Munch, Landseer, Ronner-Knip and Coolidge.
+
 The sunglasses are the ones from the
 [Deal With It](https://knowyourmeme.com/memes/deal-with-it) meme.
 
 The group photo in the showcase is the 2013 class of NASA astronauts by
 Robert Markowitz, a work of the US federal government and therefore public
-domain. See [`src/static/img/CREDITS.md`](/src/static/img/CREDITS.md).
+domain.
 
 ## License
 

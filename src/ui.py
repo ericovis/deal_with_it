@@ -89,18 +89,42 @@ class Sample:
     """One of the three one-click pictures, all of them repo assets."""
 
     filename: str
+    #: What the detector finds, in words. Pinned by a test -- see
+    #: tests/test_processor.py -- because these are written by hand.
     title: str
     media_type: str
 
 
-#: Ordered easiest to hardest, ending with the one that is meant to fail.
-#: Counts are what the detector actually finds -- see tests/test_processor.py.
+#: Every sample is public domain and credited in src/static/img/CREDITS.md.
+#: Between them they answer the questions people actually ask: does it work on
+#: a crowd, does it work on a painting, does it work on my cat. (A crowd yes,
+#: a painting usually, a cat never -- the detector only knows human faces.)
+#: Declared roughly easiest to strangest, which is the order they are shown in.
 SAMPLES = {
     'me': Sample('me.jpg', 'One face', 'image/jpeg'),
     'apollo': Sample('apollo_11_crew.jpg', 'Three faces', 'image/jpeg'),
     'group': Sample('multiple_people.jpg', 'Eight faces', 'image/jpeg'),
     'solvay': Sample('solvay_1927.jpg', 'Twenty-nine faces', 'image/jpeg'),
-    'earth': Sample('blue_marble.jpg', 'No faces · fails', 'image/jpeg'),
+
+    'mona_lisa': Sample('mona_lisa.jpg', 'One face', 'image/jpeg'),
+    'pearl_earring': Sample(
+        'girl_with_a_pearl_earring.jpg', 'One face', 'image/jpeg'),
+    'american_gothic': Sample('american_gothic.jpg', 'Two faces', 'image/jpeg'),
+    'syndics': Sample('the_syndics.jpg', 'Six faces', 'image/jpeg'),
+    'night_watch': Sample('the_night_watch.jpg', 'Eight faces', 'image/jpeg'),
+
+    'dog_handler': Sample('dog_handler.jpg', 'One face', 'image/jpeg'),
+    'princess_mary': Sample(
+        'princess_mary_and_nelson.jpg', 'One face', 'image/jpeg'),
+    'poker': Sample('dogs_playing_poker.jpg', 'One face', 'image/jpeg'),
+    'cat_nap': Sample('cat_nap.jpg', 'No faces', 'image/jpeg'),
+    'socks': Sample('socks_the_cat.jpg', 'No faces', 'image/jpeg'),
+
+    # Three ways of finding nothing: a painted face too loosely made, a face
+    # that is barely one, and something with no face in it at all.
+    'van_gogh': Sample('van_gogh_self_portrait.jpg', 'No faces', 'image/jpeg'),
+    'scream': Sample('the_scream.jpg', 'No faces', 'image/jpeg'),
+    'earth': Sample('blue_marble.jpg', 'No faces', 'image/jpeg'),
 }
 
 

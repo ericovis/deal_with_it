@@ -201,13 +201,37 @@ class TestDetectionDownscaling:
         assert small_area == pytest.approx(full_area, rel=0.25)
 
 
-@pytest.mark.parametrize('filename,claimed', [
-    ('me.jpg', 1),
-    ('apollo_11_crew.jpg', 3),
-    ('multiple_people.jpg', 8),
-    ('solvay_1927.jpg', 29),
-    ('blue_marble.jpg', 0),
-])
+#: What the detector finds in each sample, at the size the repo ships it.
+#: Counts are resolution-dependent -- the Night Watch gives nine at 1600px and
+#: eight at 1280 -- so these are the numbers for the files as committed.
+SAMPLE_FACES = {
+    'me.jpg': 1,
+    'apollo_11_crew.jpg': 3,
+    'multiple_people.jpg': 8,
+    'solvay_1927.jpg': 29,
+    'mona_lisa.jpg': 1,
+    'girl_with_a_pearl_earring.jpg': 1,
+    'american_gothic.jpg': 2,
+    'the_syndics.jpg': 6,
+    'the_night_watch.jpg': 8,
+    'dog_handler.jpg': 1,
+    'princess_mary_and_nelson.jpg': 1,
+    'dogs_playing_poker.jpg': 1,
+    'cat_nap.jpg': 0,
+    'van_gogh_self_portrait.jpg': 0,
+    'the_scream.jpg': 0,
+    'socks_the_cat.jpg': 0,
+    'blue_marble.jpg': 0,
+}
+
+#: The words the tiles use, so the two cannot drift apart.
+IN_WORDS = {
+    0: 'No faces', 1: 'One face', 2: 'Two faces', 3: 'Three faces',
+    6: 'Six faces', 8: 'Eight faces', 29: 'Twenty-nine faces',
+}
+
+
+@pytest.mark.parametrize('filename,claimed', sorted(SAMPLE_FACES.items()))
 def test_every_sample_has_the_faces_its_caption_claims(filename, claimed):
     """The tiles say "Three faces", "Twenty-nine faces" and so on.
 
@@ -221,3 +245,24 @@ def test_every_sample_has_the_faces_its_caption_claims(filename, claimed):
     from tests.conftest import STATIC_IMG
 
     assert len(fr.face_locations(as_array(STATIC_IMG / filename))) == claimed
+
+
+def test_every_sample_is_credited():
+    """These are other people's pictures. Shipping one without an attribution
+    line is the kind of omission nobody notices until it matters."""
+    from src.ui import SAMPLES
+    from tests.conftest import STATIC_IMG
+
+    credits = (STATIC_IMG / 'CREDITS.md').read_text()
+    uncredited = [s.filename for s in SAMPLES.values() if s.filename not in credits]
+    assert not uncredited, f'no credit for {uncredited}'
+
+
+def test_the_captions_say_what_the_counts_are():
+    """The count is written out in words on the tile; this is the join."""
+    from src.ui import SAMPLES
+
+    shipped = {sample.filename: sample.title for sample in SAMPLES.values()}
+    assert shipped.keys() == SAMPLE_FACES.keys(), 'a sample was added or removed'
+    for filename, faces in SAMPLE_FACES.items():
+        assert shipped[filename] == IN_WORDS[faces], filename

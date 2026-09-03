@@ -138,6 +138,16 @@ The geometry is unchanged from the raster version: `_get_glasses` still sizes
 the *rotated bounding box* to the face width and `_get_final_position` still
 anchors on `lens_offset`. Only where the pixels come from changed.
 
+### The samples
+
+Seventeen pictures, all public domain, all credited. They are there to answer
+the questions people actually ask -- does it work on a crowd, on a painting,
+on my cat -- and the answers are worth knowing: a crowd yes (29 physicists at
+the 1927 Solvay conference), a painting usually (the Mona Lisa, Vermeer,
+Rembrandt), an impressionist painting no (van Gogh's brushwork and Munch's
+Scream both come back empty), and a cat never. The detector only knows human
+faces; the picture of a handler and his dog finds the handler.
+
 ### Why RQ
 
 Considered and rejected: Celery (far more machinery than a one-queue app
@@ -215,7 +225,7 @@ ONNX-exported detector. `image_to_numpy` was already dropped — it only did
 
 ## Testing
 
-`uv run pytest` — 256 tests, ~16s (the real detector accounts for nearly all
+`uv run pytest` — 270 tests, ~26s (the real detector accounts for nearly all
 of it). Everything is hermetic:
 
 - `stub_dns` (autouse) replaces `socket.getaddrinfo`, so no test resolves a
@@ -229,11 +239,13 @@ of it). Everything is hermetic:
   against fakeredis — never use it in a test.
 - `stub_task` repoints `jobs.TASK` at a fake in `tests/support.py`. Job
   functions must be importable, so they cannot be defined in a test body.
-- Real detection runs against the repo's own images: `me.jpg` (1 face),
-  `apollo_11_crew.jpg` (3), `multiple_people.jpg` (8), `solvay_1927.jpg` (29),
-  `blue_marble.jpg` (none). The sample tiles state those counts in words, so
-  `test_every_sample_has_the_faces_its_caption_claims` pins every one --
-  change a picture and the page would otherwise start lying about it.
+- Real detection runs against the seventeen sample images. `SAMPLE_FACES` in
+  `tests/test_processor.py` is the pinned count for each, and there are three
+  guards around them: every count is checked against the detector, every
+  caption is checked against its count, and every sample is checked for a
+  line in `CREDITS.md`. Counts are resolution-dependent -- the Night Watch
+  gives nine faces at 1600px and eight at 1280 -- so they are the numbers for
+  the files **as committed**. Resize one and the test will tell you.
 
 ### The browser suite
 
@@ -241,7 +253,7 @@ of it). Everything is hermetic:
 CSS doing what scripts usually do -- `:has()` switches Before/After, opens the
 full-screen view and flips the palette -- and a test client sees the markup
 that implies all of it and none of the behaviour. Both htmx bugs fixed during
-the redesign were found by writing these, not by the 256 tests above.
+the redesign were found by writing these, not by the 270 tests above.
 
 ```
 uv sync --group e2e && uv run playwright install chromium

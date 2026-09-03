@@ -9,14 +9,13 @@ from tests.e2e.conftest import TIMEOUT
 
 pytestmark = [pytest.mark.e2e, pytest.mark.faces]
 
-#: A tile is pointed at by its position in the grid, and the grid is rendered
-#: in the order SAMPLES is declared -- read from there rather than written out
-#: here, so adding a sample cannot silently make these click the wrong one.
-POSITION = {name: index for index, name in enumerate(SAMPLES, start=1)}
-
-
 def try_sample(page: Page, name: str) -> None:
-    page.locator(f'.samples button:nth-child({POSITION[name]})').click()
+    """Click a tile, found by the file name printed on it.
+
+    Not by position: with seventeen of them an index is unreadable, and
+    adding a sample used to silently repoint these at the wrong picture.
+    """
+    page.locator('.sample', has_text=SAMPLES[name].filename).click()
 
 
 def first_card(page: Page):

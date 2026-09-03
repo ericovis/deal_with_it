@@ -353,14 +353,15 @@ button {
     padding-bottom: 72px;
 }
 
+/* Not sticky. It was, until the sample list grew past the height of a
+   window: a sticky element taller than the viewport pins its top and puts its
+   own bottom permanently out of reach. */
 .pane {
     flex: 1 1 320px;
     max-width: 400px;
     display: flex;
     flex-direction: column;
     gap: 18px;
-    position: sticky;
-    top: 24px;
 }
 
 .lede h1 {
@@ -539,7 +540,9 @@ input[type="text"]:focus {
 
 .samples {
     display: grid;
-    grid-template-columns: repeat(3, 1fr);
+    /* Packs three across a narrow column and four across a wide one, rather
+       than stretching three tiles to whatever width is going. */
+    grid-template-columns: repeat(auto-fill, minmax(88px, 1fr));
     gap: 10px;
 }
 
@@ -567,19 +570,19 @@ input[type="text"]:focus {
 
 .sample .caption {
     display: block;
-    padding: 8px 10px 9px;
+    padding: 6px 8px 7px;
     min-width: 0;
 }
 
 .sample .caption b {
     display: block;
-    font-size: 13px;
+    font-size: 12px;
     font-weight: 700;
 }
 
 .sample .caption span {
     display: block;
-    font-size: 11px;
+    font-size: 10px;
     color: var(--muted);
     font-family: 'Fira Code', ui-monospace, monospace;
     white-space: nowrap;
@@ -1409,10 +1412,7 @@ code {
 }
 
 @media (max-width: 760px) {
-    /* The columns stack on their own once flex-wrap kicks in; a sticky
-       element in a stacked column just pins itself over the content below. */
     .pane {
-        position: static;
         max-width: none;
     }
 
