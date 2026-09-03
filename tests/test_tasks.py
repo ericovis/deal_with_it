@@ -12,11 +12,11 @@ from src.processors.deal_with_it import NoFacesFound
 def stub_load(monkeypatch):
     """Replace image loading so these tests need neither network nor pixels."""
 
-    def install(result):
+    def install(result, source_format='PNG'):
         def fake_load(url=None, base64_data=None, settings=None):
             if isinstance(result, Exception):
                 raise result
-            return result
+            return result, source_format
 
         monkeypatch.setattr(images, 'load', fake_load)
 
@@ -25,10 +25,15 @@ def stub_load(monkeypatch):
 
 @pytest.fixture
 def stub_processor(monkeypatch):
+    seen = {}
+
     def install(outcome):
         class FakeProcessor:
+            img_format = 'PNG'
+
             def __init__(self, array, **kwargs):
                 self.base64_output = None
+                seen['processor'] = self
 
             def call(self):
                 if isinstance(outcome, Exception):
@@ -36,8 +41,21 @@ def stub_processor(monkeypatch):
                 self.base64_output = outcome
 
         monkeypatch.setattr(tasks, 'DealWithItProcessor', FakeProcessor)
+        return seen
 
     return install
+
+
+class TestOutputFormat:
+    @pytest.mark.parametrize('source_format, expected', [
+        ('JPEG', 'JPEG'), ('PNG', 'PNG'), ('WEBP', 'PNG'), ('GIF', 'PNG'), ('', 'PNG'),
+    ])
+    def test_a_jpeg_comes_back_as_a_jpeg_and_everything_else_as_png(
+            self, stub_load, stub_processor, source_format, expected):
+        stub_load(np.zeros((2, 2, 3), dtype=np.uint8), source_format)
+        seen = stub_processor('data:image/png;base64,AAAA')
+        tasks.process_image({'url': 'https://example.test/a', 'base64': None})
+        assert seen['processor'].img_format == expected
 
 
 def test_returns_the_processed_image(stub_load, stub_processor):

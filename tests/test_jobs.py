@@ -226,3 +226,56 @@ class TestPayloadAndRetry:
 
     def test_resubmit_is_none_for_an_unknown_id(self, sync_queue):
         assert jobs.resubmit('long-gone') is None
+
+
+class TestLightPolling:
+    """A pending job is polled once a second per card, and its hash holds the
+    whole image. Polls must read only status and meta."""
+
+    BIG = {'url': None, 'base64': 'data:image/png;base64,' + 'A' * 100_000}
+
+    @pytest.fixture
+    def no_full_fetch(self, monkeypatch):
+        def refuse(*args, **kwargs):
+            raise AssertionError('Job.fetch reads the whole payload')
+
+        monkeypatch.setattr(jobs.Job, 'fetch', refuse)
+
+    def test_a_queued_job_is_described_without_its_payload(
+            self, async_queue, stub_task, no_full_fetch):
+        stub_task(support.SUCCESS)
+        job_id, _ = jobs.enqueue(self.BIG, meta={'kind': 'upload', 'label': 'a.png'})
+        result, source = jobs.describe(job_id)
+        assert result.state == JobState.QUEUED
+        assert source.label == 'a.png'
+        assert source.original is None
+
+    def test_a_queued_job_is_read_without_its_payload(
+            self, async_queue, stub_task, no_full_fetch):
+        stub_task(support.SUCCESS)
+        job_id, _ = jobs.enqueue(self.BIG)
+        assert jobs.result_for(job_id).state == JobState.QUEUED
+
+    def test_progress_still_comes_through(self, async_queue, stub_task, no_full_fetch):
+        stub_task(support.SUCCESS)
+        job_id, _ = jobs.enqueue(self.BIG)
+        connection = async_queue.connection
+        # Write progress the way the worker does, without a worker.
+        job = jobs.Job(job_id, connection=connection)
+        job.refresh = lambda: None
+        job.meta = {'progress': 42, 'step': 'Halfway'}
+        job.save_meta()
+        result = jobs.result_for(job_id)
+        assert (result.progress, result.step) == (42, 'Halfway')
+
+    def test_a_finished_job_still_loads_everything(self, sync_queue, stub_task):
+        stub_task(support.SUCCESS)
+        job_id, _ = jobs.enqueue(self.BIG, meta={'kind': 'upload', 'label': 'a.png'})
+        result, source = jobs.describe(job_id)
+        assert result.state == JobState.FINISHED
+        assert result.image == support.IMAGE
+        assert source.original == self.BIG['base64']
+
+    def test_an_unknown_id_is_none(self, async_queue, no_full_fetch):
+        assert jobs.describe('nope') is None
+        assert jobs.result_for('nope') is None

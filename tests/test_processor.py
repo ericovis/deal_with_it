@@ -67,6 +67,13 @@ class TestDealWithItProcessor:
         assert result.shape == original.shape, 'the output keeps the original dimensions'
         assert not np.array_equal(result, original), 'something must have been drawn'
 
+    def test_a_jpeg_output_is_a_jpeg_data_uri(self, single_face_image):
+        processor = DealWithItProcessor(as_array(single_face_image))
+        processor.img_format = 'JPEG'
+        processor.call()
+        assert processor.base64_output.startswith('data:image/jpeg;base64,')
+        assert decode_output(processor.base64_output).format == 'JPEG'
+
     def test_output_is_a_png_data_uri(self, single_face_image):
         processor = DealWithItProcessor(as_array(single_face_image))
         processor.call()

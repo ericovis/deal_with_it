@@ -2,7 +2,7 @@
 
 import pytest
 
-from src import jobs
+from src import api, jobs
 from tests import support
 
 URL_BODY = {'url': 'https://example.test/a.png'}
@@ -152,3 +152,72 @@ class TestBodySizeLimit:
                                headers={'content-type': 'application/x-www-form-urlencoded',
                                         **hx})
         assert response.status_code == 413
+
+
+class TestChunkedBodies:
+    """A body with no Content-Length skips the cheap check, so the bytes are
+    counted as they arrive instead."""
+
+    @staticmethod
+    def chunks(total: int, size: int = 64 * 1024):
+        sent = 0
+        while sent < total:
+            piece = min(size, total - sent)
+            yield b'x' * piece
+            sent += piece
+
+    def test_an_oversized_chunked_body_is_refused(self, client):
+        limit = jobs.get_settings().max_request_bytes
+        response = client.post('/api/jobs', content=self.chunks(limit + 1),
+                               headers={'content-type': 'application/json'})
+        assert response.status_code == 413
+        assert response.headers['connection'] == 'close'
+
+    def test_the_page_is_protected_too(self, client, hx):
+        limit = jobs.get_settings().max_request_bytes
+        response = client.post('/submit', content=self.chunks(limit + 1),
+                               headers={'content-type': 'application/x-www-form-urlencoded',
+                                        **hx})
+        assert response.status_code == 413
+
+    def test_a_chunked_body_under_the_limit_is_fine(self, client, base64_image):
+        body = f'{{"base64": "{base64_image}"}}'.encode()
+        response = client.post('/api/jobs', content=iter([body[:100], body[100:]]),
+                               headers={'content-type': 'application/json'})
+        assert response.status_code == 202
+
+
+class TestSecurityHeaders:
+    @pytest.mark.parametrize('path', ['/api/health', '/', '/docs', '/static/css/style.css'])
+    def test_every_response_carries_them(self, client, path):
+        response = client.get(path)
+        assert response.headers['x-content-type-options'] == 'nosniff'
+        assert response.headers['x-frame-options'] == 'DENY'
+        assert response.headers['referrer-policy'] == 'strict-origin-when-cross-origin'
+
+    def test_even_a_refused_body(self, client):
+        too_big = 'x' * (jobs.get_settings().max_request_bytes + 1)
+        response = client.post('/api/jobs', content=too_big,
+                               headers={'content-type': 'application/json'})
+        assert response.status_code == 413
+        assert response.headers['x-content-type-options'] == 'nosniff'
+
+
+class TestHandlersDoNotBlockTheLoop:
+    """Every handler talks to Redis. FastAPI runs a sync ``def`` in its
+    threadpool; an ``async def`` would run the round trip on the loop."""
+
+    @pytest.mark.parametrize('handler', [api.create_job, api.read_job, api.health])
+    def test_api_handlers_are_sync(self, handler):
+        import inspect
+
+        assert not inspect.iscoroutinefunction(handler)
+
+
+class TestJobMetadata:
+    def test_an_api_job_is_labelled_for_the_page(self, client, hx, async_queue):
+        """A job created through the API still renders a sensible card."""
+        job_id = client.post('/api/jobs', json={'url': 'https://example.test/a.png'}).json()['job_id']
+        body = client.get(f'/jobs/{job_id}', headers=hx).text
+        assert 'example.test/a.png' in body
+        assert 'src="https://example.test/a.png" alt="" class="thumb"' in body

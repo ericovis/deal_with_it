@@ -18,18 +18,20 @@ from src.models import JobResult, JobSource, JobState, SourceKind
 
 logger = logging.getLogger(__name__)
 
-#: Bound lazily rather than at import: a ConnectionPool is not fork-safe, and
-#: uvicorn/rq both fork after importing the app.
+#: Bound lazily: a ConnectionPool is not fork-safe, and uvicorn and rq both
+#: fork after importing the app.
 _queue: Queue | None = None
 
 GENERIC_FAILURE = 'Something went wrong while processing this image.'
 
-#: Resolved by the worker at execution time.
+#: Resolved by the worker at execution time. Referenced by name so the web
+#: tier never imports the face stack.
 TASK = 'src.tasks.process_image'
 
-#: RQ reports a job as "created" in the instant between being built and being
-#: pushed. From the caller's point of view that is indistinguishable from queued.
+#: RQ reports "created" in the instant between building and pushing a job.
 _STATE_MAP = {JobStatus.CREATED: JobState.QUEUED}
+
+_TERMINAL = {JobStatus.FINISHED, JobStatus.FAILED, JobStatus.STOPPED, JobStatus.CANCELED}
 
 
 def configure(connection: Redis | None = None, is_async: bool = True) -> Queue:
@@ -42,7 +44,7 @@ def configure(connection: Redis | None = None, is_async: bool = True) -> Queue:
     settings = get_settings()
     connection = connection or Redis.from_url(
         settings.redis_url,
-        decode_responses=False,  # RQ stores pickles; decoding them corrupts jobs.
+        decode_responses=False,  # RQ stores pickles.
         socket_connect_timeout=5,
         socket_timeout=15,
         socket_keepalive=True,
@@ -71,31 +73,23 @@ def get_queue() -> Queue:
 def enqueue(payload: dict, meta: dict | None = None) -> tuple[str, JobState]:
     """Hand an image payload to the workers.
 
-    ``meta`` rides along on the job and comes back through :func:`describe`.
-    The UI uses it to label a card with the file name the person recognises,
-    which the payload itself does not carry -- a base64 upload is anonymous
-    once it is a data URI. The worker writes progress into the same dict, and
-    ``save_meta`` rewrites it whole, so both survive.
+    ``meta`` rides along on the job and comes back through :func:`describe`;
+    the UI uses it to label a card. The worker writes progress into the same
+    dict.
 
     Returns the job id and the state it went in as -- normally ``queued``,
     but a synchronous queue (as used in tests) has already run it.
     """
     settings = get_settings()
     job = get_queue().enqueue(
-        # Referenced by name, not imported: the web tier has no business
-        # importing dlib, and this keeps that boundary honest.
         TASK,
         payload,
         meta=dict(meta or {}),
         job_timeout=settings.job_timeout,
-        # Defaults would bite us both ways: results expire after 8 minutes
-        # (before a slow client polls) while failures are kept for a year.
         result_ttl=settings.result_ttl,
         failure_ttl=settings.failure_ttl,
     )
     logger.info('queued job %s', job.id)
-    # refresh=False: the status is already on the job we just created, and
-    # there is no reason to pay a round trip to re-read it.
     status = job.get_status(refresh=False)
     return job.id, _STATE_MAP.get(status, JobState(status.value))
 
@@ -107,20 +101,54 @@ def _fetch(job_id: str) -> Job | None:
         return None
 
 
+def _peek(job_id: str) -> tuple[JobStatus, dict] | None:
+    """Status and meta only, without the payload.
+
+    ``Job.fetch`` reads the whole hash, and for an upload that includes the
+    image itself -- megabytes per poll, once a second per card. The two
+    fields a pending job is polled for are tiny.
+    """
+    queue = get_queue()
+    raw_status, raw_meta = queue.connection.hmget(Job.key_for(job_id), ['status', 'meta'])
+    if raw_status is None:
+        return None
+    meta = queue.serializer.loads(raw_meta) if raw_meta else {}
+    return JobStatus(raw_status.decode()), meta
+
+
+def _pending(job_id: str, status: JobStatus, meta: dict) -> JobResult:
+    return JobResult(
+        job_id=job_id,
+        state=_STATE_MAP.get(status, JobState(status.value)),
+        progress=meta.get('progress'),
+        step=meta.get('step'),
+    )
+
+
 def result_for(job_id: str) -> JobResult | None:
     """Read a job's state, or None if the id is unknown or has expired."""
+    peeked = _peek(job_id)
+    if peeked is None:
+        return None
+    status, meta = peeked
+    if status not in _TERMINAL:
+        return _pending(job_id, status, meta)
     job = _fetch(job_id)
     return None if job is None else _state_of(job)
 
 
 def describe(job_id: str) -> tuple[JobResult, JobSource] | None:
-    """State *and* provenance, from a single fetch.
-
-    The UI needs both on every poll, and ``Job.fetch`` already deserialises
-    the whole job -- asking twice would double the round trips for nothing.
-    """
+    """State *and* provenance. The payload is only read once the job is done."""
+    peeked = _peek(job_id)
+    if peeked is None:
+        return None
+    status, meta = peeked
+    if status not in _TERMINAL:
+        return _pending(job_id, status, meta), _source_of(meta, None)
     job = _fetch(job_id)
-    return None if job is None else (_state_of(job), _source_of(job))
+    if job is None:
+        return None
+    return _state_of(job), _source_of(job.meta or {}, job.args[0] if job.args else {})
 
 
 def payload_for(job_id: str) -> dict | None:
@@ -132,9 +160,8 @@ def payload_for(job_id: str) -> dict | None:
 def resubmit(job_id: str) -> tuple[str, JobState] | None:
     """Queue a failed job's payload again, as a new job.
 
-    A retry is a fresh job rather than RQ's own requeue: the failures worth
-    retrying are the ones the task *returned* (an unreachable host, say), and
-    those are finished jobs as far as the queue is concerned.
+    A fresh job rather than RQ's requeue: the failures worth retrying are the
+    ones the task *returned*, which are finished jobs to the queue.
     """
     job = _fetch(job_id)
     if job is None or not job.args:
@@ -153,19 +180,18 @@ def label_for(payload: dict) -> str:
     return 'Uploaded image'
 
 
-def _source_of(job: Job) -> JobSource:
+def _source_of(meta: dict, payload: dict | None) -> JobSource:
     """Where the image came from, preferring what the UI recorded.
 
-    Jobs submitted through the JSON API carry no meta at all, so everything
-    falls back to what can be read off the payload.
+    Jobs submitted through the JSON API carry no meta, so everything falls
+    back to the payload -- which a pending job does not have loaded.
     """
-    meta = job.meta or {}
-    payload = job.args[0] if job.args else {}
+    payload = payload or {}
     url = payload.get('url')
     kind = meta.get('kind') or (SourceKind.URL if url else SourceKind.UPLOAD)
     return JobSource(
         kind=kind,
-        label=meta.get('label') or label_for(payload),
+        label=meta.get('label') or (label_for(payload) if payload else ''),
         thumb=meta.get('thumb') or url,
         original=url or payload.get('base64'),
         faces=meta.get('faces'),
@@ -177,29 +203,17 @@ def _state_of(job: Job) -> JobResult:
     if status == JobStatus.FINISHED:
         return _finished_result(job)
     if status == JobStatus.FAILED:
-        # An exception escaped the task, which means a bug rather than bad
-        # input -- the traceback is for our logs, not for the caller.
+        # An exception escaped the task: a bug, so the traceback is for our
+        # logs and the caller gets a generic message.
         result = job.latest_result()
         logger.error('job %s crashed: %s', job.id, result.exc_string if result else 'unknown')
         return JobResult(job_id=job.id, state=JobState.FAILED, error=GENERIC_FAILURE)
-
-    # meta was already loaded by Job.fetch, so this costs no extra round trip.
-    meta = job.meta or {}
-    return JobResult(
-        job_id=job.id,
-        state=_STATE_MAP.get(status, JobState(status.value)),
-        progress=meta.get('progress'),
-        step=meta.get('step'),
-    )
+    return _pending(job.id, status, job.meta or {})
 
 
 def _finished_result(job: Job) -> JobResult:
-    """Unpack what :func:`src.tasks.process_image` returned.
-
-    A finished job carrying an ``error`` is a rejected *input*, so it is
-    reported as failed with that message -- the work completed, the image did
-    not.
-    """
+    """A finished job carrying an ``error`` is a rejected *input*: reported as
+    failed with that message."""
     value = job.return_value() or {}
     if error := value.get('error'):
         return JobResult(job_id=job.id, state=JobState.FAILED, error=error)

@@ -1,9 +1,8 @@
 """The interface, in FastHTML.
 
 Two pages: the app at ``/`` and the docs at ``/docs``. Submitting a picture
-enqueues a job and swaps a card into ``#queue``; the card polls itself until
-the worker is done and then turns into the result in place. No page reloads,
-and no JavaScript of our own beyond the one clipboard line on the docs page.
+swaps a card into ``#queue``; the card polls itself until the worker is done
+and then turns into the result in place.
 """
 
 import base64
@@ -48,9 +47,10 @@ from fasthtml.common import (
     fast_app,
 )
 from pydantic import ValidationError
+from starlette.concurrency import run_in_threadpool
 from starlette.responses import Response
 
-from src import images, jobs
+from src import images, jobs, throttle
 from src.config import get_settings
 from src.models import ImageRequest, JobResult, JobSource, JobState, SourceKind
 
@@ -86,20 +86,13 @@ CHIPS = {
 
 @dataclass(frozen=True)
 class Sample:
-    """One of the three one-click pictures, all of them repo assets."""
-
     filename: str
-    #: What the detector finds, in words. Pinned by a test -- see
-    #: tests/test_processor.py -- because these are written by hand.
+    #: What the detector finds, in words. Pinned by tests/test_processor.py.
     title: str
     media_type: str
 
 
-#: Every sample is public domain and credited in src/static/img/CREDITS.md.
-#: Between them they answer the questions people actually ask: does it work on
-#: a crowd, does it work on a painting, does it work on my cat. (A crowd yes,
-#: a painting usually, a cat never -- the detector only knows human faces.)
-#: Declared roughly easiest to strangest, which is the order they are shown in.
+#: Public domain, credited in src/static/img/CREDITS.md, shown in this order.
 SAMPLES = {
     'me': Sample('me.jpg', 'One face', 'image/jpeg'),
     'apollo': Sample('apollo_11_crew.jpg', 'Three faces', 'image/jpeg'),
@@ -120,15 +113,11 @@ SAMPLES = {
     'cat_nap': Sample('cat_nap.jpg', 'No faces', 'image/jpeg'),
     'socks': Sample('socks_the_cat.jpg', 'No faces', 'image/jpeg'),
 
-    # Two painted faces the detector cannot see: one made too loosely, one
-    # that is barely a face to begin with.
     'van_gogh': Sample('van_gogh_self_portrait.jpg', 'No faces', 'image/jpeg'),
     'scream': Sample('the_scream.jpg', 'No faces', 'image/jpeg'),
 }
 
 #: Which sample the API example points at, and where that picture came from.
-#: The Commons copy is the fallback because it is public and permanent; see
-#: _example_url for why we cannot always print our own path.
 EXAMPLE_SAMPLE = 'apollo'
 EXAMPLE_SOURCE = 'https://upload.wikimedia.org/wikipedia/commons/3/3d/Apollo_11_Crew.jpg'
 
@@ -137,11 +126,8 @@ EXAMPLE_SOURCE = 'https://upload.wikimedia.org/wikipedia/commons/3/3d/Apollo_11_
 def sample_data_uri(name: str) -> str:
     """A sample picture as a data URI, read once per process.
 
-    Samples go through the queue as base64 rather than as a URL to
-    ``/static``: the worker's SSRF guard refuses to fetch anything that
-    resolves to a private address, and our own host is one. Safe to cache --
-    a fixed handful of files, fixed at build time, and the strings are
-    immutable.
+    Base64 rather than a ``/static`` URL: the worker's SSRF guard refuses to
+    fetch our own, non-public host.
     """
     sample = SAMPLES[name]
     payload = base64.b64encode((IMG_DIR / sample.filename).read_bytes()).decode()
@@ -160,16 +146,9 @@ def _absolute(path: str) -> str:
 
 
 def _example_url() -> str:
-    """A URL for the API example that will actually fetch.
-
-    Our own copy of the picture once the app knows its public address: those
-    are known paths and it is the most useful thing to show. With no public
-    address the only self-URL we could print is localhost, and the worker's
-    SSRF guard refuses to fetch a non-public address by design -- so the
-    fallback is where the picture came from, which is public, permanent, and
-    small enough to clear the size limit. An example that fails on the first
-    try is worse than no example at all.
-    """
+    """A URL for the API example that will actually fetch: our own copy once
+    ``public_url`` is set, otherwise the picture's source on Commons. A
+    localhost URL would be refused by the worker's SSRF guard."""
     base = get_settings().public_url.rstrip('/')
     if base.startswith(('http://', 'https://')):
         return f'{base}/static/img/{SAMPLES[EXAMPLE_SAMPLE].filename}'
@@ -208,23 +187,14 @@ def head_tags(title: str) -> tuple:
 
 
 def theme_state(theme: str | None) -> Span:
-    """The single element the whole palette hangs off.
-
-    ``style.css`` reads it with ``body:has(#theme-state[data-theme="dark"])``.
-    An absent attribute means nobody has chosen yet, which is the only case
-    where ``prefers-color-scheme`` gets a say. Flipping the switch swaps this
-    one span, so the page changes colour without a reload and without a line
-    of script -- and the same response sets the cookie, so the next load
-    already agrees with what is on screen.
-    """
+    """The element ``style.css`` reads the theme from. An absent attribute
+    means nobody has chosen, and ``prefers-color-scheme`` decides."""
     return Span(id='theme-state', hidden=True, data_theme=theme)
 
 
 def theme_switch(theme: str | None) -> Span:
-    """A checkbox drawn as a switch. The visuals come from the theme tokens
-    rather than from ``:checked``, so the knob shows the theme actually in
-    force -- including a first visit on a dark desktop, where the cookie does
-    not exist and the box is therefore unchecked."""
+    """A checkbox drawn as a switch. Its visuals come from the theme tokens,
+    not ``:checked``, so the knob shows the theme actually in force."""
     return Span(
         Input(type='checkbox', id='theme', name='theme', value='dark',
               checked=theme == 'dark', cls='visually-hidden', role='switch',
@@ -301,17 +271,11 @@ def url_hint(message: str = '', ok: bool = False, oob: bool = False) -> P:
 
 
 def upload_form(replace: bool = False) -> Form:
-    """The submit form.
+    """The submit form. With ``replace`` it swaps out of band over the one
+    on the page, which is how a submission clears the fields.
 
-    With ``replace``, it comes back marked for an out-of-band swap: htmx
-    replaces the form already on the page with this fresh, empty one. That is
-    how a submitted job clears the URL, the file input and the hint without
-    any JavaScript of ours.
-
-    The file input sits *before* its label on purpose: the label is the
-    dropzone, and a file input is a native drop target, so dropping onto the
-    label counts as choosing files. Browsers also fire :hover throughout a
-    drag, which is the entire drag-over state.
+    The file input sits before its label on purpose: the label is the
+    dropzone, and dropping onto a file input's label counts as choosing.
     """
     return Form(
         Input(type='file', id='files', name='image', accept='image/*', multiple=True,
@@ -344,9 +308,8 @@ def upload_form(replace: bool = False) -> Form:
         hx_swap='afterbegin',
         hx_encoding='multipart/form-data',
         hx_disabled_elt='find button',
-        # Without this the URL field inherits hx-disabled-elt and htmx logs
-        # `The selector "find button" ... returned no matches!` on every
-        # keystroke, because an <input> has no descendants to find.
+        # Otherwise the URL input inherits it and htmx logs a selector error
+        # on every keystroke.
         hx_disinherit='hx-disabled-elt',
     )
 
@@ -394,9 +357,7 @@ def session_section() -> Section:
         P('Results live in this tab only. Reloading loses them, so download '
           'anything you want to keep.', cls='note'),
         Div(id='queue'),
-        # After #queue rather than before it, because the rule that reveals
-        # this is a sibling combinator -- and an empty #queue is zero tall, so
-        # it still reads as sitting where the list will be.
+        # After #queue: the CSS that reveals it is a sibling combinator.
         Div('Nothing here yet. Drop a picture, paste a URL, or try a sample.', cls='empty'),
         cls='session',
     )
@@ -426,8 +387,6 @@ def _subtitle(result: JobResult, source: JobSource) -> str:
         step = result.step or 'Working on it'
         return f'{step} · {result.progress}%' if result.progress is not None else step
     if not result.state.is_terminal:
-        # queued, and RQ's deferred/scheduled, which we never create but
-        # which would otherwise fall through to the failed branch.
         return 'In the queue'
     if result.state == JobState.FINISHED:
         return f'{kind}{_faces(source.faces)}'
@@ -437,20 +396,18 @@ def _subtitle(result: JobResult, source: JobSource) -> str:
 def _result_view(job_id: str, image: str, before: str | None) -> Div:
     """The finished image, its Before/After toggle, and the full-screen view.
 
-    ``:has()`` does all the switching, so none of it costs a line of script.
-
-    The full-screen view is the *same* frame and footer re-laid-out as an
-    overlay rather than a second copy of them: duplicating the markup would
-    mean sending the whole result data URI twice in every card. A checkbox
-    drives it because ``<dialog>`` cannot be opened without ``showModal()``.
+    The full-screen view re-lays out the *same* frame rather than a copy, so
+    the result data URI is sent once. A checkbox drives it because
+    ``<dialog>`` cannot open without script.
     """
     toggle = f'full-{job_id}'
+    extension = 'jpg' if image.startswith('data:image/jpeg') else 'png'
     footer = [
         Span(cls='spacer'),
         Input(type='checkbox', id=toggle, cls='full-toggle visually-hidden'),
         Label('View full size', fr=toggle, cls='open-full'),
-        A('Download PNG', href=image, download=f'deal-with-it-{job_id[:8]}.png',
-          cls='download'),
+        A(f'Download {extension.upper()}', href=image,
+          download=f'deal-with-it-{job_id[:8]}.{extension}', cls='download'),
     ]
 
     if before is None:
@@ -476,8 +433,7 @@ def _result_view(job_id: str, image: str, before: str | None) -> Div:
 
     return Div(
         frame,
-        # Clicking the space around the image closes it. The frame above is
-        # pointer-events:none while open so those clicks land here.
+        # Clicking the space around the image closes it.
         Label(fr=toggle, cls='backdrop', aria_label='Close the full-size view'),
         Label('×', fr=toggle, cls='lightbox-close', title='Close',
               aria_label='Close the full-size view'),
@@ -490,13 +446,9 @@ def card(job_id: str, result: JobResult | None, source: JobSource,
          retryable: bool = True, dom_id: str | None = None) -> Article:
     """One job, in whatever state it is in.
 
-    Every state is the same element, so a card can replace itself with the
-    next answer: queued and started ones carry the hx-get that fetches the
-    next one, terminal ones do not, and the poll chain therefore ends by
-    itself rather than leaving a timer running against whatever replaced it.
-
-    ``result is None`` means RQ has never heard of the id -- expired, or made
-    up. There is nothing to retry in that case.
+    Queued and started cards carry the hx-get that fetches the next state;
+    terminal ones do not, so the poll chain ends by itself. ``result is
+    None`` means RQ has never heard of the id, so there is nothing to retry.
     """
     expired = result is None
     if result is None:
@@ -508,10 +460,8 @@ def card(job_id: str, result: JobResult | None, source: JobSource,
     label, chip = CHIPS.get(
         result.state, CHIPS[JobState.QUEUED] if polls else CHIPS[JobState.FAILED])
 
-    # A data URI is only worth sending once the card has stopped polling: as a
-    # thumbnail on a card that refetches every second it would be the whole
-    # upload, every second. Anything cheap (a remote URL, a static path) goes
-    # on every state.
+    # A data URI only once the card has stopped polling; otherwise it would
+    # be re-sent every second.
     thumb = source.thumb or (source.original if finished else None)
 
     body: list = []
@@ -520,8 +470,6 @@ def card(job_id: str, result: JobResult | None, source: JobSource,
     elif polls:
         body.append(Progress(max=100))
     elif finished and result.image:
-        # Prefer the cheap copy for "before" too: a sample's static path says
-        # the same thing as its data URI in 24 bytes instead of 300 KB.
         body.append(_result_view(job_id, result.image, source.thumb or source.original))
     else:
         message = result.error or 'That did not work.'
@@ -558,14 +506,7 @@ def card_for(job_id: str) -> Article:
 
 
 def rejected_card(label: str, kind: SourceKind, message: str) -> Article:
-    """A submission that never became a job.
-
-    It still gets a card rather than a bare sentence: a person who dropped
-    six files wants to see which one was refused, next to the five that were
-    not. There is no job behind it, so there is nothing to retry either.
-    """
-    # Not id="job-..." -- there is no job, and nothing should be able to poll
-    # or retry it by mistaking the element for one.
+    """A submission that never became a job, so there is nothing to retry."""
     job_id = f'rejected-{abs(hash((label, message))) % 10**8:08d}'
     return card(
         job_id,
@@ -580,12 +521,8 @@ def rejected_card(label: str, kind: SourceKind, message: str) -> Article:
 
 
 def snippet(text: str) -> Div:
-    """A code block with a Copy button.
-
-    The hx-on:click is the only script this project ships, and the ``pre``
-    keeps ``user-select: all`` so one click still selects the whole thing for
-    anyone whose browser refuses clipboard access.
-    """
+    """A code block with a Copy button. The hx-on:click is the only script
+    this project ships."""
     return Div(
         Pre(Code(text)),
         Button('Copy', type='button', cls='copy',
@@ -697,7 +634,11 @@ def docs_page(theme: str | None, reachable: bool) -> tuple:
                       ', ', Code('finished'), ' or ', Code('failed'), '. A failed job '
                       'carries a readable ', Code('error'), ': an unreachable URL, an '
                       'undecodable image, or no faces found. An unknown or expired job id '
-                      'gives a ', Code('404'), '.'),
+                      'gives a ', Code('404'), '. The result is a JPEG when the input was '
+                      'a JPEG and a PNG otherwise.'),
+                    P('Submissions are limited per client and refused with ', Code('429'),
+                      ' (too many in a minute) or ', Code('503'), ' (the queue is full); '
+                      'both carry a ', Code('Retry-After'), ' header.'),
                     P('While a job runs, ', Code('progress'), ' and ', Code('step'),
                       ' report the stage it has reached. They are checkpoints rather than '
                       'measurements: neither the detector nor Pillow reports how far '
@@ -750,12 +691,16 @@ async def _upload_payload(upload: UploadFile) -> str:
 
 
 def _enqueue(payload: dict, kind: SourceKind, label: str,
-             thumb: str | None = None) -> Article:
+             thumb: str | None = None, client: str | None = None) -> Article:
     """Validate, queue, and hand back the card for whatever state it is in."""
     try:
         request = ImageRequest.model_validate(payload)
     except ValidationError as exc:
         return rejected_card(label, kind, _first_message(exc))
+    try:
+        throttle.admit(client)
+    except throttle.Throttled as exc:
+        return rejected_card(label, kind, str(exc))
     job_id, _ = jobs.enqueue(
         request.as_payload(),
         meta={'kind': str(kind), 'label': label, 'thumb': thumb},
@@ -763,12 +708,13 @@ def _enqueue(payload: dict, kind: SourceKind, label: str,
     return card_for(job_id)
 
 
-def create_ui():
-    """Build the FastHTML app.
+def _client_of(request) -> str | None:
+    return request.client.host if request.client else None
 
-    Static assets are served by the outer FastAPI app instead of FastHTML's
-    catch-all route, which is a bare FileResponse over the process CWD.
-    """
+
+def create_ui():
+    """Build the FastHTML app, minus its static catch-all (src/app.py serves
+    /static)."""
     settings = get_settings()
     app, rt = fast_app(
         pico=False,
@@ -794,45 +740,44 @@ def create_ui():
         return docs_page(theme_of(request), jobs.is_broker_reachable())
 
     @app.post('/submit')
-    async def submit(url: str = '', image: list[UploadFile] | None = None, sample: str = ''):
+    async def submit(request, url: str = '', image: list[UploadFile] | None = None,
+                     sample: str = ''):
+        # The Redis work runs in the threadpool: enqueueing a 10 MB upload
+        # costs RQ half a second of zlib, which must not stall the loop.
+        client = _client_of(request)
         if sample:
-            return _submit_sample(sample)
+            return await run_in_threadpool(_submit_sample, sample, client)
 
-        # An untouched file input still posts one empty part, so the filename
-        # is what separates "chose nothing" from "chose something".
+        # An untouched file input still posts one empty part.
         files = [f for f in (image or []) if isinstance(f, UploadFile) and f.filename]
         if files:
-            cards = [await _submit_file(f) for f in files]
+            cards = [await _submit_file(f, client) for f in files]
             return (*cards, upload_form(replace=True))
 
-        return await _submit_url(url)
+        return await run_in_threadpool(_submit_url, url, client)
 
-    def _submit_sample(name: str):
+    def _submit_sample(name: str, client: str | None):
         if name not in SAMPLES:
             return rejected_card(name, SourceKind.SAMPLE, NOTHING_SUBMITTED)
         sample = SAMPLES[name]
-        # Samples do not reset the form: the buttons sit outside it, and
-        # wiping a half-typed URL because someone clicked a sample is rude.
+        # Samples do not reset the form: the buttons sit outside it.
         return _enqueue(
             {'url': None, 'base64': sample_data_uri(name)},
-            SourceKind.SAMPLE, sample.filename, f'/static/img/{sample.filename}',
+            SourceKind.SAMPLE, sample.filename, f'/static/img/{sample.filename}', client,
         )
 
-    async def _submit_file(upload: UploadFile):
+    async def _submit_file(upload: UploadFile, client: str | None):
         label = upload.filename or 'Uploaded image'
         try:
             payload = await _upload_payload(upload)
         except ValueError as exc:
             return rejected_card(label, SourceKind.UPLOAD, str(exc))
-        return _enqueue({'url': None, 'base64': payload}, SourceKind.UPLOAD, label)
+        return await run_in_threadpool(
+            _enqueue, {'url': None, 'base64': payload}, SourceKind.UPLOAD, label, None, client)
 
-    async def _submit_url(url: str):
-        """A bad URL answers in the hint, not with a card.
-
-        There is nothing to show a card *about* -- no job was created and no
-        picture was named -- and leaving the text in the field is what lets it
-        be corrected rather than retyped.
-        """
+    def _submit_url(url: str, client: str | None):
+        """A bad URL answers in the hint, not with a card: no job was created,
+        and leaving the text in the field lets it be corrected."""
         text = url.strip()
         if not text:
             return url_hint(NOTHING_SUBMITTED, oob=True)
@@ -842,18 +787,21 @@ def create_ui():
             request = ImageRequest.model_validate({'url': text, 'base64': None})
         except ValidationError as exc:
             return url_hint(_first_message(exc), oob=True)
+        try:
+            throttle.admit(client)
+        except throttle.Throttled as exc:
+            return url_hint(str(exc), oob=True)
 
-        job_id, _ = jobs.enqueue(
-            request.as_payload(),
-            meta={'kind': str(SourceKind.URL), 'label': jobs.label_for(request.as_payload())},
-        )
+        payload = request.as_payload()
+        job_id, _ = jobs.enqueue(payload, meta={
+            'kind': str(SourceKind.URL), 'label': jobs.label_for(payload), 'thumb': payload['url'],
+        })
         return card_for(job_id), upload_form(replace=True)
 
     @app.post('/validate')
     def validate(url: str = ''):
-        """Shape only: a handler that resolved a hostname would block the
-        event loop on whatever DNS the caller chose. The real check runs in
-        the worker, against the address the name actually resolves to."""
+        """Shape only: a handler must not block on DNS. The real check runs
+        in the worker."""
         text = url.strip()
         if not text:
             return url_hint()
@@ -866,7 +814,15 @@ def create_ui():
         return card_for(job_id)
 
     @app.post('/jobs/{job_id}/retry')
-    def retry_job(job_id: str):
+    def retry_job(request, job_id: str):
+        try:
+            throttle.admit(_client_of(request))
+        except throttle.Throttled as exc:
+            described = jobs.describe(job_id)
+            if described is None:
+                return card(job_id, None, JobSource())
+            refused = JobResult(job_id=job_id, state=JobState.FAILED, error=str(exc))
+            return card(job_id, refused, described[1])
         resubmitted = jobs.resubmit(job_id)
         if resubmitted is None:
             return card(job_id, None, JobSource())
@@ -878,8 +834,6 @@ def create_ui():
 
     @app.post('/theme')
     def set_theme(theme: str = ''):
-        """The switch posts here; the response is the one span the palette
-        hangs off, plus the cookie that makes the next load agree."""
         chosen = 'dark' if theme == 'dark' else 'light'
         return theme_state(chosen), cookie(
             THEME_COOKIE, chosen, max_age=THEME_MAX_AGE, path='/', samesite='lax',
@@ -887,8 +841,7 @@ def create_ui():
 
     @app.get('/empty')
     def empty():
-        """Nothing, on purpose: Remove and Clear are swaps that need a
-        response body to discard."""
+        """Empty on purpose: Remove and Clear swap this in."""
         return Response('', media_type='text/html')
 
     return app

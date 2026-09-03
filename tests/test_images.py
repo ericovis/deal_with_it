@@ -1,5 +1,6 @@
 import base64
 import socket
+from io import BytesIO
 
 import numpy as np
 import pytest
@@ -194,8 +195,9 @@ class TestSsrfGuard:
 
 class TestLoad:
     def test_loads_from_base64(self, png_bytes, settings):
-        array = images.load(base64_data=data_uri(png_bytes), settings=settings)
+        array, source_format = images.load(base64_data=data_uri(png_bytes), settings=settings)
         assert array.shape == (32, 32, 3)
+        assert source_format == 'PNG'
 
     @responses.activate
     def test_loads_from_url(self, png_bytes, settings):
@@ -203,7 +205,7 @@ class TestLoad:
             responses.GET, 'https://example.test/a.png',
             body=png_bytes, content_type='image/png',
         )
-        array = images.load(url='https://example.test/a.png', settings=settings)
+        array, _ = images.load(url='https://example.test/a.png', settings=settings)
         assert array.shape == (32, 32, 3)
 
     def test_requires_a_source(self, settings):
@@ -254,3 +256,132 @@ class TestShapeError:
 
 def _refuse_to_resolve(*args, **kwargs):
     raise AssertionError('shape_error must not resolve a hostname')
+
+
+class TestAddressClassification:
+    @pytest.mark.parametrize('address', [
+        '127.0.0.1', '10.1.2.3', '169.254.169.254', '100.64.0.1', '0.0.0.0',
+        '::1', '::ffff:127.0.0.1', '::ffff:169.254.169.254',
+        # NAT64: a gateway would dial the embedded 127.0.0.1.
+        '64:ff9b::7f00:1', '64:ff9b::a9fe:a9fe',
+        # 6to4 embedding a private address.
+        '2002:7f00:1::',
+    ])
+    def test_reserved_addresses_are_not_public(self, address):
+        assert not images.is_public_address(address)
+
+    @pytest.mark.parametrize('address', ['8.8.8.8', '93.184.216.34', '2606:4700::1111',
+                                         '64:ff9b::808:808'])
+    def test_routable_addresses_are(self, address):
+        assert images.is_public_address(address)
+
+
+class TestPinnedConnections:
+    """The address that was checked must be the address that is dialled.
+
+    Otherwise requests resolves the name a second time on connect, and a DNS
+    answer that changes in between lands somewhere that was never checked.
+    """
+
+    @pytest.fixture
+    def image_server(self, png_bytes):
+        import threading
+        from http.server import BaseHTTPRequestHandler, HTTPServer
+
+        class Handler(BaseHTTPRequestHandler):
+            def do_GET(self):
+                self.send_response(200)
+                self.send_header('content-type', 'image/png')
+                self.send_header('content-length', str(len(png_bytes)))
+                self.end_headers()
+                self.wfile.write(png_bytes)
+
+            def log_message(self, *args):
+                pass
+
+        server = HTTPServer(('127.0.0.1', 0), Handler)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        yield server.server_port
+        server.shutdown()
+
+    @pytest.fixture
+    def rebinding_dns(self, monkeypatch):
+        """``rebind.test`` answers loopback once, then somewhere unroutable."""
+        calls = []
+
+        def fake_getaddrinfo(host, port, *args, **kwargs):
+            if host == 'rebind.test':
+                calls.append(host)
+                address = '127.0.0.1' if len(calls) == 1 else '10.255.255.1'
+            else:
+                address = host  # an IP literal, from the connect itself
+            return [(socket.AF_INET, socket.SOCK_STREAM, 6, '', (address, port or 80))]
+
+        monkeypatch.setattr(socket, 'getaddrinfo', fake_getaddrinfo)
+        return calls
+
+    def test_the_validated_address_is_the_one_dialled(
+            self, image_server, rebinding_dns, png_bytes, settings):
+        permissive = settings.model_copy(update={'allow_private_addresses': True})
+        url = f'http://rebind.test:{image_server}/a.png'
+        assert images.fetch_url(url, permissive) == png_bytes
+        assert rebinding_dns == ['rebind.test'], 'the name must be resolved exactly once'
+
+    def test_an_unpinned_host_is_refused_at_the_socket(self, settings):
+        """Belt and braces: the adapter will not dial a host nobody validated."""
+        adapter = images.PinnedAdapter()
+        request = requests.Request('GET', 'https://example.test/a.png').prepare()
+        with pytest.raises(ImageSourceError, match='non-public'):
+            adapter.get_connection_with_tls_context(request, verify=True)
+
+    def test_tls_still_verifies_the_original_hostname(self, settings):
+        captured = {}
+
+        class FakePoolManager:
+            def connection_from_host(self, **kwargs):
+                captured.update(kwargs)
+                return object()
+
+        adapter = images.PinnedAdapter()
+        adapter.poolmanager = FakePoolManager()
+        adapter.pin('example.test', '93.184.216.34')
+        request = requests.Request('GET', 'https://example.test/a.png').prepare()
+        adapter.get_connection_with_tls_context(request, verify=True)
+        assert captured['host'] == '93.184.216.34'
+        assert captured['pool_kwargs']['server_hostname'] == 'example.test'
+        assert captured['pool_kwargs']['assert_hostname'] == 'example.test'
+
+
+class TestCrashesFoundUnderLoad:
+    """Two failures the live abuse run turned into generic crashes."""
+
+    def test_pillows_own_bomb_ceiling_is_reported_as_the_pixel_limit(self, settings, monkeypatch):
+        # Pillow raises before our header check gets a look, for anything
+        # over twice its MAX_IMAGE_PIXELS. Lower it so a small PNG trips it.
+        monkeypatch.setattr(Image, 'MAX_IMAGE_PIXELS', 1_000)
+        with pytest.raises(ImageSourceError, match='pixel limit'):
+            images.to_rgb_array(make_png(size=(100, 100)), settings)
+
+    def test_a_resolver_error_that_is_not_gaierror_is_still_a_rejection(
+            self, settings, monkeypatch):
+        def busy(*args, **kwargs):
+            raise OSError(16, 'Device or resource busy')
+
+        monkeypatch.setattr(socket, 'getaddrinfo', busy)
+        with pytest.raises(ImageSourceError, match='could not be resolved'):
+            images.fetch_url('https://example.test/a.png', settings)
+
+
+class TestDecode:
+    def test_reports_the_source_format(self, png_bytes, settings):
+        array, source_format = images.decode(png_bytes, settings)
+        assert array.shape == (32, 32, 3)
+        assert source_format == 'PNG'
+
+    def test_load_reports_it_too(self, settings):
+        buffer = BytesIO()
+        Image.new('RGB', (8, 8), 'red').save(buffer, format='JPEG')
+        _, source_format = images.load(base64_data=data_uri(buffer.getvalue(), 'image/jpeg'),
+                                       settings=settings)
+        assert source_format == 'JPEG'

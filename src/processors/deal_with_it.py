@@ -16,14 +16,12 @@ from src.processors.base import BaseProcessor
 
 GLASSES_PATH = Path(__file__).resolve().parents[1] / 'static' / 'img' / 'glasses.svg'
 
-#: Rendered at twice the width it will end up. Rotating a bitmap resamples it,
-#: and doing that with pixels to spare is what keeps the edges clean; the
-#: resize afterwards throws the surplus away.
+#: Rendered at this multiple of the final width, so the rotate has pixels
+#: to spare before the resize.
 SUPERSAMPLE = 2
-#: Render widths are rounded up to a multiple of this, so a photo full of
-#: similarly sized faces asks for one render rather than one per face.
+#: Render widths are rounded up to a multiple of this, so similar faces
+#: share one render.
 RENDER_STEP = 32
-#: A ceiling, so a pathologically large face cannot ask for a huge canvas.
 MAX_RENDER = 4096
 
 
@@ -39,19 +37,9 @@ def _glasses_source(path: Path) -> str:
 
 @functools.lru_cache(maxsize=16)
 def _render_glasses(source: str, width: int) -> Image.Image:
-    """The glasses drawn at ``width`` pixels across.
-
-    The artwork is vector, so this draws it at the size the face actually
-    needs instead of shipping a 3000px raster and throwing most of it away.
-    resvg is a static Rust build -- no cairo, and no apt layer in the worker
-    image.
-
-    Keyed on the source text and the width, both immutable. Not on the
-    processor: a cache keyed on ``self`` pins every instance and its decoded
-    image for the life of the process, which is the bug ``base64_output``
-    used to have. Callers only rotate or resize what comes back, and both
-    return a new image, so handing out the same one is safe.
-    """
+    """The glasses rasterised at ``width`` pixels across. Keyed on the SVG
+    text and the width, never on a processor instance. Callers only rotate
+    or resize the result, which both return new images."""
     png = bytes(resvg_py.svg_to_bytes(svg_string=source, width=width))
     return Image.open(BytesIO(png)).convert('RGBA')
 
@@ -78,11 +66,7 @@ class DealWithItProcessor(BaseProcessor):
 
     def _detection_input(self) -> tuple[NDArray[np.uint8], float]:
         """The image the detector sees, and the factor to undo any shrinking.
-
-        Detection cost grows with area, and a phone photo is far larger than
-        the detector needs. Shrinking it first is the single biggest win
-        available here; the glasses are still composited at full resolution.
-        """
+        Detection cost grows with area; compositing stays full-resolution."""
         height, width = self.image.shape[:2]
         longest = max(height, width)
         if not self._max_detection_size or longest <= self._max_detection_size:
@@ -129,10 +113,7 @@ class DealWithItProcessor(BaseProcessor):
         if not face_locations:
             raise NoFacesFound('No faces were found in this image.')
 
-        # One landmarks call for every face at once, passing the locations we
-        # already have. Calling it per face made the library redo detection on
-        # the whole image once per person -- for a group photo that was the
-        # difference between 11 seconds and 20 milliseconds.
+        # One batched call: per face, the library re-runs detection each time.
         all_landmarks = fr.face_landmarks(detection_image, face_locations=face_locations)
 
         self.progress(75, f'Drawing glasses on {len(face_locations)} '

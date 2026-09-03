@@ -319,6 +319,14 @@ class TestCards:
         job_id = self.start(client, hx)
         body = client.get(f'/jobs/{job_id}', headers=hx).text
         assert f'download="deal-with-it-{job_id[:8]}.png"' in body
+        assert 'Download PNG' in body
+
+    def test_a_jpeg_result_downloads_as_a_jpeg(self, client, hx, stub_task):
+        stub_task(support.SUCCEEDS_AS_JPEG)
+        job_id = self.start(client, hx)
+        body = client.get(f'/jobs/{job_id}', headers=hx).text
+        assert f'download="deal-with-it-{job_id[:8]}.jpg"' in body
+        assert 'Download JPG' in body
 
     def test_the_full_size_view_is_an_overlay_not_a_link(self, client, hx):
         """A data: URI cannot be navigated to -- browsers block it -- so the

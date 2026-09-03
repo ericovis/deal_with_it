@@ -1,8 +1,6 @@
 """Worker entry point: ``python -m src.worker``.
 
-Uses the forking worker rather than SimpleWorker on purpose -- if dlib
-segfaults on a pathological image, only the work horse dies and the worker
-picks up the next job.
+The forking worker, so a segfault in dlib kills only the work horse.
 """
 
 import logging

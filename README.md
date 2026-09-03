@@ -112,6 +112,11 @@ Responds `202` with a job to poll:
 }
 ```
 
+The result is a JPEG when the input was a JPEG and a PNG otherwise. A
+submission may be refused with `429` (too many from one client in a minute)
+or `503` (the queue is full); both carry `Retry-After`. Load figures and
+the abuse checks are in [docs/LOAD.md](docs/LOAD.md).
+
 `state` is one of `queued`, `started`, `finished` or `failed`. A `failed` job
 carries a human-readable `error` -- an unreachable URL, an undecodable image,
 or no faces found. An unknown or expired job id gives a `404`.

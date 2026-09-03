@@ -13,10 +13,16 @@ REPORTS_PROGRESS = 'tests.support.reports_progress'
 COUNTS_FACES = 'tests.support.counts_faces'
 
 IMAGE = 'data:image/png;base64,c3VuZ2xhc3Nlcw=='
+JPEG_IMAGE = 'data:image/jpeg;base64,c3VuZ2xhc3Nlcw=='
+SUCCEEDS_AS_JPEG = 'tests.support.succeeds_as_jpeg'
 
 
 def succeeds(payload: dict) -> dict:
     return {'image': IMAGE, 'error': None}
+
+
+def succeeds_as_jpeg(payload: dict) -> dict:
+    return {'image': JPEG_IMAGE, 'error': None}
 
 
 def rejects(payload: dict) -> dict:
