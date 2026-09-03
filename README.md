@@ -64,6 +64,19 @@ uv run pytest
 
 The suite is hermetic: no test reaches the network or needs a Redis server.
 
+There is also a browser suite, for the CSS-only interactions and the htmx
+swaps that no test client can see:
+
+```
+uv sync --group e2e
+uv run playwright install chromium
+uv run pytest tests/e2e
+```
+
+It runs against a real server with a real worker, both started in-process.
+Without the `e2e` group installed those tests are skipped and `uv run pytest`
+still passes.
+
 ## API
 
 `POST /api/jobs` with **either** a `url` **or** a `base64` data URI:

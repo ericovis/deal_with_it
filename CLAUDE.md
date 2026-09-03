@@ -206,7 +206,39 @@ of it). Everything is hermetic:
 - `stub_task` repoints `jobs.TASK` at a fake in `tests/support.py`. Job
   functions must be importable, so they cannot be defined in a test body.
 - Real detection runs against the repo's own images: `me.jpg` (1 face),
-  `multiple_people.jpg` (8 faces), `glasses.png` (none).
+  `apollo_11_crew.jpg` (3), `multiple_people.jpg` (8), `solvay_1927.jpg` (29),
+  `glasses.png` (none). The sample tiles state those counts in words, so
+  `test_every_sample_has_the_faces_its_caption_claims` pins every one --
+  change a picture and the page would otherwise start lying about it.
+
+### The browser suite
+
+`tests/e2e` drives a real Chromium. It exists because this interface leans on
+CSS doing what scripts usually do -- `:has()` switches Before/After, opens the
+full-screen view and flips the palette -- and a test client sees the markup
+that implies all of it and none of the behaviour. Both htmx bugs fixed during
+the redesign were found by writing these, not by the 255 tests above.
+
+```
+uv sync --group e2e && uv run playwright install chromium
+uv run pytest tests/e2e          # 24 tests, ~40s
+uv run pytest -m "not e2e"       # everything else
+```
+
+Without the group installed `tests/e2e` is not collected at all, so plain
+`uv run pytest` still passes. CI runs it as its own job.
+
+The stack is real but self-contained: uvicorn in a thread, an RQ worker in
+another, fakeredis, and the genuine detector. Two things the worker thread
+needs, both in `tests/e2e/conftest.py`: **RQ enforces `job_timeout` with
+SIGALRM, and only the main thread may install a signal handler**, so the
+handlers *and* `death_penalty_class` are stubbed out. Miss the second and
+every job dies with "signal only works in main thread" before running a line,
+which looks exactly like a broken app.
+
+Every test also asserts the console stayed quiet. A page that ships no
+JavaScript of its own should log nothing, so anything there is htmx failing
+or markup we got wrong.
 
 ## What the revival changed
 
