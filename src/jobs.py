@@ -110,7 +110,14 @@ def result_for(job_id: str) -> JobResult | None:
         logger.error('job %s crashed: %s', job.id, result.exc_string if result else 'unknown')
         return JobResult(job_id=job.id, state=JobState.FAILED, error=GENERIC_FAILURE)
 
-    return JobResult(job_id=job.id, state=_STATE_MAP.get(status, JobState(status.value)))
+    # meta was already loaded by Job.fetch, so this costs no extra round trip.
+    meta = job.meta or {}
+    return JobResult(
+        job_id=job.id,
+        state=_STATE_MAP.get(status, JobState(status.value)),
+        progress=meta.get('progress'),
+        step=meta.get('step'),
+    )
 
 
 def _finished_result(job: Job) -> JobResult:
@@ -127,7 +134,8 @@ def _finished_result(job: Job) -> JobResult:
     if not image:
         logger.error('job %s finished without an image or an error: %r', job.id, value)
         return JobResult(job_id=job.id, state=JobState.FAILED, error=GENERIC_FAILURE)
-    return JobResult(job_id=job.id, state=JobState.FINISHED, image=image)
+    return JobResult(job_id=job.id, state=JobState.FINISHED, image=image,
+                     progress=100, step='Done')
 
 
 def is_broker_reachable() -> bool:

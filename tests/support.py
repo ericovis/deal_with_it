@@ -9,6 +9,7 @@ SUCCESS = 'tests.support.succeeds'
 REJECTS = 'tests.support.rejects'
 CRASHES = 'tests.support.crashes'
 RETURNS_NOTHING = 'tests.support.returns_nothing'
+REPORTS_PROGRESS = 'tests.support.reports_progress'
 
 IMAGE = 'data:image/png;base64,c3VuZ2xhc3Nlcw=='
 
@@ -28,3 +29,11 @@ def crashes(payload: dict) -> dict:
 
 def returns_nothing(payload: dict) -> dict:
     return {'image': None, 'error': None}
+
+
+def reports_progress(payload: dict) -> dict:
+    """Exercises the real progress plumbing from inside a worker."""
+    from src.tasks import report_progress
+
+    report_progress(42, 'Halfway up the stairs')
+    return {'image': IMAGE, 'error': None}

@@ -6,6 +6,8 @@ must not import anything web-related -- the worker container has no app.
 
 import logging
 
+from rq import get_current_job
+
 from src import images
 from src.config import get_settings
 from src.errors import DealWithItError
@@ -13,6 +15,19 @@ from src.models import ImageRequest
 from src.processors.deal_with_it import DealWithItProcessor
 
 logger = logging.getLogger(__name__)
+
+
+def report_progress(percent: int, step: str) -> None:
+    """Record how far along we are on the job itself.
+
+    A no-op outside a worker, so the task stays callable on its own.
+    """
+    job = get_current_job()
+    if job is None:
+        return
+    job.meta['progress'] = percent
+    job.meta['step'] = step
+    job.save_meta()
 
 
 def process_image(payload: dict) -> dict:
@@ -27,15 +42,21 @@ def process_image(payload: dict) -> dict:
     settings = get_settings()
     request = ImageRequest.model_validate(payload)
     try:
+        report_progress(10, 'Fetching the image')
         array = images.load(
             url=str(request.url) if request.url else None,
             base64_data=request.base64,
             settings=settings,
         )
-        processor = DealWithItProcessor(array, max_detection_size=settings.max_detection_size)
+        processor = DealWithItProcessor(
+            array,
+            max_detection_size=settings.max_detection_size,
+            on_progress=report_progress,
+        )
         processor.call()
     except DealWithItError as exc:
         logger.info('rejected image: %s', exc)
         return {'image': None, 'error': str(exc)}
 
+    report_progress(90, 'Encoding the result')
     return {'image': processor.base64_output, 'error': None}

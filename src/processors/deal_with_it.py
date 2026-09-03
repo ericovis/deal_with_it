@@ -44,8 +44,8 @@ class DealWithItProcessor(BaseProcessor):
     resample = Image.BILINEAR
 
     def __init__(self, image: NDArray[np.uint8], glasses_path: Path | None = None,
-                 max_detection_size: int = 0) -> None:
-        super().__init__(image)
+                 max_detection_size: int = 0, on_progress=None) -> None:
+        super().__init__(image, on_progress=on_progress)
         self._glasses_path = glasses_path or GLASSES_PATH
         self._max_detection_size = max_detection_size
 
@@ -90,6 +90,7 @@ class DealWithItProcessor(BaseProcessor):
         return -int(degrees(atan2(y_diff, x_diff)))
 
     def call(self) -> None:
+        self.progress(35, 'Looking for faces')
         detection_image, upscale = self._detection_input()
         face_locations = fr.face_locations(detection_image)
         if not face_locations:
@@ -101,6 +102,8 @@ class DealWithItProcessor(BaseProcessor):
         # difference between 11 seconds and 20 milliseconds.
         all_landmarks = fr.face_landmarks(detection_image, face_locations=face_locations)
 
+        self.progress(75, f'Drawing glasses on {len(face_locations)} '
+                          f'{"face" if len(face_locations) == 1 else "faces"}')
         self.output = Image.fromarray(self.image)
         for face, landmarks in zip(face_locations, all_landmarks, strict=True):
             left_eye = _scaled(landmarks['left_eye'][0], upscale)

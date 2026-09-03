@@ -68,7 +68,7 @@ The suite is hermetic: no test reaches the network or needs a Redis server.
 `POST /api/jobs` with **either** a `url` **or** a `base64` data URI:
 
 ```json
-{ "url": "https://emagalha.es/images/me.jpg" }
+{ "url": "https://ericovis.com/images/me.jpg" }
 ```
 ```json
 { "base64": "data:image/png;base64,..." }
@@ -91,13 +91,24 @@ Responds `202` with a job to poll:
   "job_id": "9f2c...",
   "state": "finished",
   "image": "data:image/png;base64,...",
-  "error": null
+  "error": null,
+  "progress": 100,
+  "step": "Done"
 }
 ```
 
 `state` is one of `queued`, `started`, `finished` or `failed`. A `failed` job
 carries a human-readable `error` -- an unreachable URL, an undecodable image,
 or no faces found. An unknown or expired job id gives a `404`.
+
+While a job runs, `progress` and `step` report the stage it has reached
+("Looking for faces", "Drawing glasses on 5 faces", "Encoding the result").
+They are checkpoints rather than measurements -- neither dlib nor Pillow
+reports how far through it is.
+
+The page uses the same fields to drive a progress bar, drops each finished
+image into a gallery that lives only in that tab, and blanks the form so the
+next one can be submitted straight away.
 
 `GET /api/health` reports whether the broker is reachable.
 
@@ -128,4 +139,4 @@ on for local fixtures.
 
 ## License
 
-Created by [Eric Magalhães](https://emagalha.es) under the [MIT License](/LICENSE)
+Created by [Eric Magalhães](https://ericovis.com) under the [MIT License](/LICENSE)

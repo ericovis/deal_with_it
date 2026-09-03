@@ -1,6 +1,7 @@
 """Processor scaffolding: take pixels in, produce a PIL image out."""
 
 import base64
+from collections.abc import Callable
 from io import BytesIO
 
 import numpy as np
@@ -11,10 +12,22 @@ from PIL import Image
 class BaseProcessor:
     img_format = 'PNG'
 
-    def __init__(self, image: NDArray[np.uint8]) -> None:
+    def __init__(self, image: NDArray[np.uint8],
+                 on_progress: Callable[[int, str], None] | None = None) -> None:
         self.image = image
         self.output: Image.Image | None = None
         self._encoded: str | None = None
+        self._on_progress = on_progress
+
+    def progress(self, percent: int, step: str) -> None:
+        """Announce a checkpoint, if anyone is listening.
+
+        These are checkpoints, not measurements: neither dlib nor Pillow
+        reports how far through it is, so the percentages mark which stage
+        has been reached rather than pretending to smooth progress.
+        """
+        if self._on_progress is not None:
+            self._on_progress(percent, step)
 
     def call(self) -> None:
         raise NotImplementedError

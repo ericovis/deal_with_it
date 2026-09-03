@@ -22,7 +22,7 @@ class ImageRequest(BaseModel):
     url: AnyHttpUrl | None = Field(
         default=None,
         description='Public http(s) URL of the image to process.',
-        examples=['https://emagalha.es/images/me.jpg'],
+        examples=['https://ericovis.com/images/me.jpg'],
     )
     base64: str | None = Field(
         default=None,
@@ -91,4 +91,11 @@ class JobResult(BaseModel):
     )
     error: str | None = Field(
         default=None, description='Why the job failed, if it did.'
+    )
+    progress: int | None = Field(
+        default=None, ge=0, le=100,
+        description='How far along the job is. A stage checkpoint, not a measurement.',
+    )
+    step: str | None = Field(
+        default=None, description='What the worker is doing right now.'
     )

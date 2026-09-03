@@ -62,6 +62,30 @@ With FastHTML on the outside, `/api/report.csv` never reaches FastAPI.
 locks that in. That catch-all is also a bare `FileResponse` over the process
 CWD, so `create_ui()` strips it and `src/app.py` mounts `StaticFiles` instead.
 
+### htmx swaps in the UI
+
+Three things happen when a job finishes, all as out-of-band swaps in one
+response (`src/ui.py:finished`): the polling fragment empties, the image is
+inserted at the top of `#gallery`, and a blank `#form` replaces the filled-in
+one. Only on success -- a failure leaves the form alone so it can be
+corrected.
+
+**The gallery item is wrapped in an envelope div, and that nesting is
+load-bearing.** htmx inserts the element carrying `hx-swap-oob` only when the
+swap style is `outerHTML`; for anything else, including `afterbegin`, it
+inserts that element's *children* (`isInlineSwap` in htmx 2.0.7 returns true
+for `outerHTML` alone). Put the class on the outer div and the `.gallery-item`
+wrapper vanishes silently, taking its styling and the
+`:has(.gallery-item)` rule that unhides the section.
+
+The gallery is DOM-only: nothing is written to disk or kept server-side, so a
+reload loses it. That is deliberate, and the page says so.
+
+Progress comes from the worker writing checkpoints to `job.meta`
+(`src/tasks.py:report_progress`), which `jobs.result_for` reads back. They are
+stage markers, not measurements. A queued job renders `<progress>` with no
+value, which browsers animate as indeterminate.
+
 ### Why RQ
 
 Considered and rejected: Celery (far more machinery than a one-queue app
@@ -84,6 +108,15 @@ delegates to `podman-compose` 1.6.0. Verified working under it: service-name
 DNS, port mapping, and `depends_on: condition: service_healthy`. Image names
 are fully qualified (`docker.io/library/...`) because Podman will not guess a
 registry.
+
+`docker compose restart <service>` **does not work** under podman-compose when
+the service has a healthcheck dependency -- it stops the dependency and then
+refuses to start the dependents ("container state improper"). Use
+`docker compose up -d` again, which recreates what it needs.
+
+The `web` service reloads on edit; the `worker` does not, because RQ has no
+reloader. Restart it after touching anything under `src/tasks.py` or
+`src/processors/`.
 
 Locally, without containers:
 

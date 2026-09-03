@@ -29,6 +29,7 @@ from fasthtml.common import (
     Nav,
     P,
     Pre,
+    Progress,
     Section,
     Span,
     Title,
@@ -36,7 +37,6 @@ from fasthtml.common import (
     UploadFile,
     fast_app,
 )
-from fasthtml.svg import Circle, Svg
 from pydantic import ValidationError
 
 from src import jobs
@@ -85,14 +85,14 @@ def head_tags() -> tuple:
     )
 
 
-def spinner() -> Svg:
-    return Svg(
-        Circle(cx=50, cy=50, r=42, transform='rotate(-90,50,50)'),
-        cls='spinner', viewBox='0 0 100 100', width=20, height=20,
-    )
+def upload_form(replace: bool = False) -> Form:
+    """The submit form.
 
-
-def upload_form() -> Form:
+    With ``replace``, it comes back marked for an out-of-band swap: htmx
+    replaces the form already on the page with this fresh, empty one. That is
+    how a finished job clears the URL and the file input without any
+    JavaScript of ours.
+    """
     return Form(
         Fieldset(
             Label('URL', _for='url'),
@@ -103,6 +103,7 @@ def upload_form() -> Form:
         ),
         Div(Button('Deal with It!', type='submit'), cls='submit'),
         id='form',
+        hx_swap_oob='true' if replace else None,
         hx_post='/submit',
         hx_target='#result',
         hx_swap='innerHTML',
@@ -111,16 +112,20 @@ def upload_form() -> Form:
     )
 
 
-def working(job_id: str, message: str = 'Working on it...') -> Div:
+def working(job_id: str, step: str, percent: int | None = None) -> Div:
     """A fragment that replaces itself with the next poll's answer.
 
     ``load delay:`` rather than ``every``: the chain ends by itself as soon as
     a response comes back without the hx-get, so a finished job cannot leave a
     timer running against whatever replaced it.
+
+    A queued job renders a <progress> with no value, which browsers animate
+    as indeterminate -- honest, since nothing is happening yet.
     """
+    label = f'{step}... {percent}%' if percent is not None else f'{step}...'
     return Div(
-        spinner(),
-        P(message, id='message'),
+        Progress(value=percent, max=100),
+        P(label, id='message'),
         id=f'job-{job_id}',
         cls='working',
         hx_get=f'/jobs/{job_id}',
@@ -136,11 +141,41 @@ def failure(message: str, job_id: str | None = None) -> Div:
     )
 
 
-def finished(job_id: str, image: str) -> Div:
+def gallery_item(job_id: str, image: str) -> Div:
+    """One finished image, inserted at the top of the gallery.
+
+    hx-swap-oob with a position and selector adds to #gallery rather than
+    replacing anything, which is what accumulates the session's results.
+
+    The outer div is a transport envelope and never reaches the page: for any
+    swap style other than outerHTML, htmx inserts the *children* of the
+    element carrying hx-swap-oob, not the element itself. Without the extra
+    level the .gallery-item wrapper would be stripped, taking its styling --
+    and the :has() rule that reveals the section -- with it.
+    """
     return Div(
-        Img(id='result-img', src=image, alt='Deal with me'),
-        P(A('Download', href=image, download='deal_with_it.png'), id='message'),
-        id=f'job-{job_id}',
+        Div(
+            A(Img(src=image, alt='Deal with me'), href=image, target='_blank',
+              title='Open full size'),
+            P(A('Download', href=image, download=f'deal-with-it-{job_id[:8]}.png')),
+            cls='gallery-item',
+            id=f'result-{job_id}',
+        ),
+        hx_swap_oob='afterbegin:#gallery',
+    )
+
+
+def finished(job_id: str, image: str) -> tuple:
+    """Three swaps at once, and the reason the poll chain ends here.
+
+    The polling fragment empties out, the image joins the gallery, and the
+    form comes back blank. The form is only reset on success: a failed job
+    leaves what was submitted in place so it can be corrected and retried.
+    """
+    return (
+        Div(id=f'job-{job_id}'),
+        gallery_item(job_id, image),
+        upload_form(replace=True),
     )
 
 
@@ -200,6 +235,13 @@ def page() -> tuple:
                   'then click "Deal with it!" to see the API in action.'),
                 Div(id='result'),
                 upload_form(),
+                Div(
+                    H4('This session'),
+                    P('These live in this page only. Reloading loses them, so '
+                      'download anything you want to keep.', cls='gallery-note'),
+                    Div(id='gallery'),
+                    id='gallery-section',
+                ),
                 cls='container'), id='demo'),
             Section(Div(
                 H2('Api Docs'),
@@ -208,7 +250,7 @@ def page() -> tuple:
                   'the image, one to collect the result.'),
                 H4('Submit an image'),
                 P('POST to ', Code('/api/jobs'), ' with either of these bodies:'),
-                Pre(Code('{\n  "url": "https://emagalha.es/images/me.jpg"\n}', cls='json')),
+                Pre(Code('{\n  "url": "https://ericovis.com/images/me.jpg"\n}', cls='json')),
                 Pre(Code('{\n  "base64": "data:image/png;base64,..."\n}', cls='json')),
                 P('The response points at the job you just created:'),
                 Pre(Code('{\n  "job_id": "9f2c...",\n  "state": "queued",\n'
@@ -217,8 +259,10 @@ def page() -> tuple:
                 P('GET the ', Code('status_url'), ' until ', Code('state'), ' is ',
                   Code('finished'), ' or ', Code('failed'), ':'),
                 Pre(Code('{\n  "job_id": "9f2c...",\n  "state": "finished",\n'
-                         '  "image": "data:image/png;base64,...",\n  "error": null\n}',
-                         cls='json')),
+                         '  "image": "data:image/png;base64,...",\n  "error": null,\n'
+                         '  "progress": 100,\n  "step": "Done"\n}', cls='json')),
+                P('While a job is running, ', Code('progress'), ' and ', Code('step'),
+                  ' report which stage it has reached.'),
                 cls='container'), id='api'),
             Section(Div(
                 H2('License'),
@@ -226,7 +270,7 @@ def page() -> tuple:
                     href='https://github.com/ericovis/deal_with_it/blob/master/LICENSE')),
                 cls='container'), id='license'),
         ),
-        Footer(Div('© 2018-2026 ', A('Eric Magalhães', href='https://emagalha.es'),
+        Footer(Div('© 2018-2026 ', A('Eric Magalhães', href='https://ericovis.com'),
                    cls='container')),
     )
 
@@ -296,7 +340,7 @@ def create_ui():
             return failure(str(exc))
 
         job_id, _ = jobs.enqueue(request.as_payload())
-        return working(job_id)
+        return working(job_id, 'In the queue')
 
     @rt('/jobs/{job_id}')
     def job_fragment(job_id: str):
@@ -307,7 +351,8 @@ def create_ui():
             return finished(job_id, result.image)
         if result.state.is_terminal:
             return failure(result.error or 'That did not work.', job_id)
-        message = 'Looking for faces...' if result.state == JobState.STARTED else 'In the queue...'
-        return working(job_id, message)
+        if result.state == JobState.STARTED:
+            return working(job_id, result.step or 'Working on it', result.progress)
+        return working(job_id, 'In the queue')
 
     return app
