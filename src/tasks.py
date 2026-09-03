@@ -30,6 +30,18 @@ def report_progress(percent: int, step: str) -> None:
     job.save_meta()
 
 
+def record_faces(faces: list, detection: str) -> None:
+    """Keep what was found on the job, in original-image coordinates: the
+    detector's box and five points, and the 68 landmarks the glasses were
+    placed from. A no-op outside a worker."""
+    job = get_current_job()
+    if job is None:
+        return
+    job.meta['landmarks'] = [face.as_record() for face in faces]
+    job.meta['detection'] = detection
+    job.save_meta()
+
+
 def process_image(payload: dict) -> dict:
     """Fetch or decode the image, draw the glasses, return a data URI.
 
@@ -54,6 +66,7 @@ def process_image(payload: dict) -> dict:
         # bytes and, at phone resolution, longer than the detection itself.
         processor.img_format = 'JPEG' if source_format == 'JPEG' else 'PNG'
         processor.call()
+        record_faces(processor.faces, processor.detection)
     except DealWithItError as exc:
         logger.info('rejected image: %s', exc)
         return {'image': None, 'error': str(exc)}

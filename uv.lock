@@ -329,11 +329,14 @@ dependencies = [
     { name = "redis" },
     { name = "requests" },
     { name = "rq" },
+    { name = "setuptools" },
     { name = "uvicorn", extra = ["standard"] },
 ]
 
 [package.optional-dependencies]
 worker = [
+    { name = "dlib-bin" },
+    { name = "face-recognition-models" },
     { name = "opencv-python-headless" },
     { name = "resvg-py" },
 ]
@@ -353,6 +356,8 @@ e2e = [
 
 [package.metadata]
 requires-dist = [
+    { name = "dlib-bin", marker = "extra == 'worker'", specifier = "==20.0.1" },
+    { name = "face-recognition-models", marker = "extra == 'worker'", specifier = ">=0.3" },
     { name = "fastapi", specifier = ">=0.118" },
     { name = "numpy", specifier = ">=2" },
     { name = "opencv-python-headless", marker = "extra == 'worker'", specifier = ">=4.10" },
@@ -364,6 +369,7 @@ requires-dist = [
     { name = "requests", specifier = ">=2.32" },
     { name = "resvg-py", marker = "extra == 'worker'", specifier = ">=0.5" },
     { name = "rq", specifier = ">=2.6" },
+    { name = "setuptools", specifier = ">=80,<82" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.38" },
 ]
 provides-extras = ["worker"]
@@ -380,6 +386,37 @@ e2e = [
     { name = "playwright", specifier = ">=1.49" },
     { name = "pytest-playwright", specifier = ">=0.6" },
 ]
+
+[[package]]
+name = "dlib-bin"
+version = "20.0.1"
+source = { registry = "https://pypi.org/simple" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/2e/3e/bb741e5038691ff9ef1ffc9ff12143bdf43ae51ed03a5e460443c6101610/dlib_bin-20.0.1-cp312-cp312-macosx_14_0_arm64.whl", hash = "sha256:5c6059f646df9a29fbc5d03807b88da95f7afabdc157aa97d5a4bce4efc3f655", size = 3047946, upload-time = "2026-03-30T10:16:47.545Z" },
+    { url = "https://files.pythonhosted.org/packages/10/d9/83550c4c84027940c89c75ac1ed01f21fef2a038812fbf70ff51c81c3d5a/dlib_bin-20.0.1-cp312-cp312-manylinux_2_27_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:be46ef2124fd8be571b1a80a7aff945496fef1eb6c8192ef431315535c92f8a3", size = 3554558, upload-time = "2026-03-30T10:16:49.147Z" },
+    { url = "https://files.pythonhosted.org/packages/c8/47/fc29f6178bdae15a57910752d6fb04359f913e679bcdf46882cbb82c81a4/dlib_bin-20.0.1-cp312-cp312-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:b2aa57c17a4e1470b76cebbcc3e62999fdb6dfa18a7f7b8844d28638b1b491db", size = 4170796, upload-time = "2026-03-30T10:16:50.602Z" },
+    { url = "https://files.pythonhosted.org/packages/96/2e/8c240f2618537cdb4e9d76d809c1e5b8ebf557eecfde67e4a4f9f31892ed/dlib_bin-20.0.1-cp312-cp312-musllinux_1_2_aarch64.whl", hash = "sha256:101bae5769208f53270f09d1e5f13176a678cc53fe60ecbd13b82a7ec223edb3", size = 4710416, upload-time = "2026-03-30T10:16:52.083Z" },
+    { url = "https://files.pythonhosted.org/packages/00/5b/8f202c1a45baac0ee96a901d00d7c02a1ce2012c4e6e304a01754edcb01f/dlib_bin-20.0.1-cp312-cp312-musllinux_1_2_x86_64.whl", hash = "sha256:c9df2ad8d95ab6eb624a2dcb92e4b73abfaf909647b2b448626e3ad17feef79f", size = 5366926, upload-time = "2026-03-30T10:16:53.759Z" },
+    { url = "https://files.pythonhosted.org/packages/81/29/df6d5e0027a5e1e49a7f9729afff583b64ca24a84825475247759c042653/dlib_bin-20.0.1-cp312-cp312-win_amd64.whl", hash = "sha256:8f2a04bf2a9f8b299b006bca8a31608d51ad3db6285d1814ba04218a2fc974fa", size = 2591310, upload-time = "2026-03-30T10:16:55.215Z" },
+    { url = "https://files.pythonhosted.org/packages/3d/03/969deeee51b5ef892e27aec79cf6a0a86ec73d4ddd114f29f512cc732427/dlib_bin-20.0.1-cp313-cp313-macosx_14_0_arm64.whl", hash = "sha256:5e10ae3267b27cb805e954293657ab2c63154f859a3e787db9647d6430b2d0b6", size = 3047979, upload-time = "2026-03-30T10:16:56.595Z" },
+    { url = "https://files.pythonhosted.org/packages/49/80/9a102591689a69edab932df936de24395709131891b88c57e6ff66337486/dlib_bin-20.0.1-cp313-cp313-manylinux_2_27_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:b1051b35bc9d3228d160077b9034d76197e51d294e634d3c6b874e58f43e8320", size = 3554577, upload-time = "2026-03-30T10:16:58.207Z" },
+    { url = "https://files.pythonhosted.org/packages/f0/e7/ee8a0cc9487777d14d11961cbc3bba6655c94446bbb03890eaddc9b982c5/dlib_bin-20.0.1-cp313-cp313-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:a0de46ce448bfb495f35f33162b91fe85ed91a8f3d5ae5f3c749ed5d9576f93f", size = 4170727, upload-time = "2026-03-30T10:16:59.612Z" },
+    { url = "https://files.pythonhosted.org/packages/aa/a8/f5c00e894f71db43c51c2d943222c07eaaee04a2d71e9c711d337c343ddb/dlib_bin-20.0.1-cp313-cp313-musllinux_1_2_aarch64.whl", hash = "sha256:e07ed8ca67ec8a9c1eb53b2f3fc1030385eb346d3e3fd5cd9d6b7bdc2e283959", size = 4709878, upload-time = "2026-03-30T10:17:01.409Z" },
+    { url = "https://files.pythonhosted.org/packages/65/c9/8ea9653d1d8c31074db15fd41a3bd845d50d9744022bf8caae7e4f05338d/dlib_bin-20.0.1-cp313-cp313-musllinux_1_2_x86_64.whl", hash = "sha256:afe577d69bb76d914bc9e56e4d01c225f3530f9a5b8c59994a7c8ad06f598309", size = 5366730, upload-time = "2026-03-30T10:17:03.273Z" },
+    { url = "https://files.pythonhosted.org/packages/95/2d/f10e126b058b0bef5eab8556bfc1495a4852188a6b1bbbd7d8e09bfadba6/dlib_bin-20.0.1-cp313-cp313-win_amd64.whl", hash = "sha256:8aa4b75282e59a57d131039dd2786649eea2dbc62ee8f90f3c1af4333e332b03", size = 2591450, upload-time = "2026-03-30T10:17:04.682Z" },
+    { url = "https://files.pythonhosted.org/packages/3a/5e/5adc3d75418f5f855771ae6aa4fe4be60678245facf302bc2548352d29fe/dlib_bin-20.0.1-cp314-cp314-macosx_14_0_arm64.whl", hash = "sha256:ac360053dd9640e10c52656f3aeeac3a0e945dd1c305cdc142560783280a2350", size = 3049729, upload-time = "2026-03-30T10:17:06.148Z" },
+    { url = "https://files.pythonhosted.org/packages/ac/4f/5ef6009ef5d11f832c4f947af791321c6518d890f5184dd79094cfcc9768/dlib_bin-20.0.1-cp314-cp314-manylinux_2_27_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:446e00bc0697ec18a24d25a0c069202a403f0c40ba826da684c7ba9a1f4f3b3b", size = 3561445, upload-time = "2026-03-30T10:17:08.059Z" },
+    { url = "https://files.pythonhosted.org/packages/b4/c8/30e9304ea51cdf2346277e17e3dc19d3284e80e02a28b4b8b2acd5c10622/dlib_bin-20.0.1-cp314-cp314-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:a0d18c5a13005caad5f7fb749b4372cd182b0b956af4ffd1fce285c6e0a5f1b4", size = 4173652, upload-time = "2026-03-30T10:17:09.667Z" },
+    { url = "https://files.pythonhosted.org/packages/a7/da/0a2bdca548d2a3e53079bb24560697fac21fb0b0a9eb0c0951ae7d8b603b/dlib_bin-20.0.1-cp314-cp314-musllinux_1_2_aarch64.whl", hash = "sha256:a6ad1d9c78eb6c14aa04328608d7aa9b20c056616050d41cb809d9e349a77db6", size = 4722488, upload-time = "2026-03-30T10:17:11.069Z" },
+    { url = "https://files.pythonhosted.org/packages/db/82/1543f36a7c3e96ebfa90f88393d48434d0104629dd787afcd959d8c7445f/dlib_bin-20.0.1-cp314-cp314-musllinux_1_2_x86_64.whl", hash = "sha256:7573532459ac4678515790b8e130f5e92077e80d479fad9d697b888c7a783328", size = 5370367, upload-time = "2026-03-30T10:17:12.8Z" },
+    { url = "https://files.pythonhosted.org/packages/85/58/b0640b1ea2e3e1b0e0fe76589baa69fca0fc58c14ec9aa4063c849081cbf/dlib_bin-20.0.1-cp314-cp314-win_amd64.whl", hash = "sha256:59831334d298e2cef93f841c70d3ce7c05ea47dd68ccf94e187a839f6506a438", size = 2665718, upload-time = "2026-03-30T10:17:14.727Z" },
+]
+
+[[package]]
+name = "face-recognition-models"
+version = "0.3.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/cf/3b/4fd8c534f6c0d1b80ce0973d01331525538045084c73c153ee6df20224cf/face_recognition_models-0.3.0.tar.gz", hash = "sha256:b79bd200a88c87c9a9d446c990ae71c5a626d1f3730174e6d570157ff1d896cf", size = 100149358, upload-time = "2017-09-28T22:53:52.516Z" }
 
 [[package]]
 name = "fakeredis"
@@ -1227,6 +1264,15 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/ed/20/656d67f5b25ca9bda4e02b1de25867b2954e1d19e03648060f167ad0f4cc/ruff-0.16.5-py3-none-win32.whl", hash = "sha256:288b0a5f080492fe5635db849f9e2e84aa3cce7b7f0e955997d416c507c76a26", size = 10034250, upload-time = "2026-08-27T16:34:11.8Z" },
     { url = "https://files.pythonhosted.org/packages/5b/42/ee8e68a207b9127fcde6c3d7e197def432f346cb1af159e1fa14ca0d1cdc/ruff-0.16.5-py3-none-win_amd64.whl", hash = "sha256:ddc6385fb2137f616357ca03d6c74f4be987f80fed4008566b754f6032b8546f", size = 10516714, upload-time = "2026-08-27T16:34:13.963Z" },
     { url = "https://files.pythonhosted.org/packages/73/e3/7df5a396e445b9ba49ce9a9437439a4d80042c61c0ade199abf8d16de1ac/ruff-0.16.5-py3-none-win_arm64.whl", hash = "sha256:a64abe90968719b851bb7cedffaa8753fbdbdadab483089682db623f3edc587e", size = 10391564, upload-time = "2026-08-27T16:34:16.064Z" },
+]
+
+[[package]]
+name = "setuptools"
+version = "81.0.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/0d/1c/73e719955c59b8e424d015ab450f51c0af856ae46ea2da83eba51cc88de1/setuptools-81.0.0.tar.gz", hash = "sha256:487b53915f52501f0a79ccfd0c02c165ffe06631443a886740b91af4b7a5845a", size = 1198299, upload-time = "2026-02-06T21:10:39.601Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/e1/e3/c164c88b2e5ce7b24d667b9bd83589cf4f3520d97cad01534cd3c4f55fdb/setuptools-81.0.0-py3-none-any.whl", hash = "sha256:fdd925d5c5d9f62e4b74b30d6dd7828ce236fd6ed998a08d81de62ce5a6310d6", size = 1062021, upload-time = "2026-02-06T21:10:37.175Z" },
 ]
 
 [[package]]

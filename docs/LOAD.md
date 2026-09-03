@@ -21,7 +21,15 @@ defaults on for `abuse`.
 ## Worker threads
 
 Sample mix (one face, eight faces, twenty-nine faces, a painting), 60 jobs,
-16 concurrent clients, one worker process, YuNet detector:
+16 concurrent clients, one worker process. YuNet detection plus dlib's
+68-point landmarks per face, which is what ships:
+
+| threads | finished jobs/min | end-to-end p50 | worker peak RSS |
+|---------|-------------------|----------------|-----------------|
+| 2       | 229               | 3.7 s          | 557 MB          |
+| 5       | 307               | 2.8 s          | 1135 MB         |
+
+YuNet alone, before the landmark pass was added, for the record:
 
 | threads | finished jobs/min | end-to-end p50 | worker peak RSS |
 |---------|-------------------|----------------|-----------------|
@@ -41,8 +49,9 @@ under a second.
 For the record, two earlier configurations on the same mix: the forking RQ
 worker with dlib did 20 jobs/min per process, because its work horse
 resolved the task by name after the fork and re-imported the models on
-every job; the threaded worker with dlib did 151 jobs/min on five threads.
-YuNet detects in a third of dlib's time, hence 375.
+every job; the threaded worker with dlib's own detector did 151 jobs/min
+on five threads. YuNet detects in a third of the time; the landmark pass
+that follows costs about 20 ms per face and loads a 100 MB model once.
 
 The web tier is never the bottleneck: with 32 jobs in flight, `GET
 /api/jobs/{id}` answered in 3 ms (p50) and `/api/health` in 2 to 4 ms. It
@@ -57,12 +66,12 @@ Redis, so the cap does not need to match the worker's.
 | input      | on the wire | jobs | end-to-end p50 | result | worker peak RSS |
 |------------|-------------|------|----------------|--------|-----------------|
 | 12 MP JPEG | 0.9 MB      | 10   | 2.9 s          | 1.6 MB | —               |
-| 36 MP JPEG | 1.7 MB      | 5    | 5.0 s          | 3.1 MB | 2.1 GB          |
+| 36 MP JPEG | 1.7 MB      | 5    | 6.0 s          | 3.1 MB | 2.9 GB          |
 
 A job's working set is about 400 MB at 12 MP and 800 MB at the 36 MP
-ceiling, so the worker's peak is roughly `threads × 800 MB` under a flood of
-maximum-size images. Budget 4 GB for five threads, or lower
-`DWI_MAX_IMAGE_PIXELS`.
+ceiling, so the worker's peak is roughly `threads × 800 MB` plus the models
+under a flood of maximum-size images. Budget 4 GB for five threads, 2 GB
+for the default two, or lower `DWI_MAX_IMAGE_PIXELS`.
 
 Before results matched the input format, a 36 MP job returned a 22.5 MB PNG
 data URI and the encode alone took 7.3 s, longer than detection. A JPEG at

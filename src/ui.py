@@ -588,13 +588,18 @@ def docs_page(theme: str | None, reachable: bool) -> tuple:
                     P('Faces are found with ',
                       A('YuNet', href='https://github.com/opencv/opencv_zoo/tree/main/'
                                       'models/face_detection_yunet'),
-                      ', a small ONNX detector run through OpenCV. For every face it '
-                      'returns five landmarks: both eyes, the tip of the nose and the '
-                      'corners of the mouth.'),
-                    P('The line between the eyes gives the tilt of the head and the '
-                      'size of the frame; how far the nose sits off that line gives the '
-                      'turn, so the glasses narrow and taper on a face seen from the '
-                      'side. It also finds dogs now and then; cats, never.'),
+                      ', a small ONNX detector run through OpenCV. If it finds nothing '
+                      'it looks again at the picture doubled in size, then with its '
+                      'contrast equalised. Each face then goes to ',
+                      A('dlib', href='http://dlib.net'),
+                      "'s 68-point shape predictor for the landmarks the glasses are "
+                      'placed from.'),
+                    P('The line between the outer corners of the eyes gives the tilt '
+                      'of the head and the size of the frame; how far the nose sits '
+                      'off that line gives the turn, so the glasses narrow and taper '
+                      'on a face seen from the side. Every point found comes back in '
+                      'the result, as ', Code('faces'), '. It also finds dogs now and '
+                      'then; cats, never.'),
                     P('Compositing is done with ',
                       A('Pillow', href='https://github.com/python-pillow/Pillow'),
                       ' in a background worker managed by ',
@@ -633,7 +638,11 @@ def docs_page(theme: str | None, reachable: bool) -> tuple:
                       ' is ', Code('finished'), ' or ', Code('failed'), ':'),
                     snippet('{\n  "job_id": "9f2c...",\n  "state": "finished",\n'
                             '  "image": "data:image/png;base64,...",\n  "error": null,\n'
-                            '  "progress": 100,\n  "step": "Done"\n}'),
+                            '  "progress": 100,\n  "step": "Done",\n'
+                            '  "detection": "plain",\n'
+                            '  "faces": [{"box": [101, 420, 402, 197], "score": 0.95,\n'
+                            '             "points": {"left_eye": [249.7, 225.3], ...},\n'
+                            '             "landmarks": [[199.0, 208.0], ...]}]\n}'),
                     P(Code('state'), ' is one of ', Code('queued'), ', ', Code('started'),
                       ', ', Code('finished'), ' or ', Code('failed'), '. A failed job '
                       'carries a readable ', Code('error'), ': an unreachable URL, an '

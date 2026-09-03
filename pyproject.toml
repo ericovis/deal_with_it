@@ -18,6 +18,8 @@ dependencies = [
     "requests>=2.32",
     "pillow>=11",
     "numpy>=2",
+    # face_recognition_models imports pkg_resources, which setuptools 82 removed.
+    "setuptools>=80,<82",
 ]
 
 [project.optional-dependencies]
@@ -25,6 +27,10 @@ dependencies = [
 worker = [
     # YuNet face detection (src/models/*.onnx) runs on OpenCV's DNN module.
     "opencv-python-headless>=4.10",
+    # dlib's 68-point shape predictor places the glasses; the model file
+    # comes from face_recognition_models. Prebuilt wheel: no compiler.
+    "dlib-bin==20.0.1",
+    "face-recognition-models>=0.3",
     # Rasterises glasses.svg. Statically linked, so no apt layer.
     "resvg-py>=0.5",
 ]
@@ -58,6 +64,7 @@ markers = [
 ]
 filterwarnings = [
     "error::DeprecationWarning:src.*",
+    "ignore:pkg_resources is deprecated:UserWarning",
 ]
 
 [tool.coverage.run]

@@ -98,6 +98,21 @@ class JobCreated(BaseModel):
     status_url: str
 
 
+class FaceRecord(BaseModel):
+    """One face the worker found, in the coordinates of the submitted image."""
+
+    box: tuple[int, int, int, int] = Field(description='top, right, bottom, left')
+    score: float = Field(description="The detector's confidence, 0 to 1.")
+    points: dict[str, tuple[float, float]] = Field(
+        description="The detector's five points: left_eye, right_eye, nose, "
+                    'mouth_left, mouth_right. Left and right as seen in the picture.',
+    )
+    landmarks: list[tuple[float, float]] = Field(
+        description='The 68 landmarks the glasses were placed from, in the '
+                    'usual dlib/iBUG order.',
+    )
+
+
 class JobResult(BaseModel):
     """Poll response. ``image`` is set once state is ``finished``."""
 
@@ -115,4 +130,11 @@ class JobResult(BaseModel):
     )
     step: str | None = Field(
         default=None, description='What the worker is doing right now.'
+    )
+    faces: list[FaceRecord] | None = Field(
+        default=None, description='Every face the glasses went on, once finished.'
+    )
+    detection: str | None = Field(
+        default=None,
+        description='Which pass found the faces: plain, upscaled or equalised.',
     )

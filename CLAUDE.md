@@ -10,11 +10,17 @@ a picture. Submitting an image enqueues a background job; the page polls until
 the worker is done.
 
 Face detection is YuNet, a 230 KB ONNX model (`src/models/`, MIT) run
-through OpenCV's DNN module; compositing is Pillow. YuNet returns five
-landmarks per face. The line between the eyes gives the frame's tilt and
-width, and the nose tip's offset along that line gives the turn (yaw),
-which narrows and tapers the frame. See `_place` in
-`src/processors/deal_with_it.py`.
+through OpenCV's DNN module, with two fallback passes (upscaled, then
+contrast-equalised, at a stricter score) when the plain one finds nothing.
+Each face then goes to dlib's 68-point shape predictor, inside a square
+built from YuNet's points (`predictor_box`) rather than YuNet's own box,
+which is the wrong shape for a model trained on dlib's detector. The
+glasses are placed from those landmarks with the original rule: rotated by
+the line between the outer eye corners, anchored on the left eye's outer
+corner, sized from that span rather than the detector's box. The nose tip's
+offset along the eye line gives the turn (yaw), which tapers the frame. See
+`_place` in `src/processors/deal_with_it.py`. Both point sets are stored on
+the job (`meta['landmarks']`) and returned by the API as `faces`.
 
 ## Architecture
 
@@ -67,8 +73,9 @@ Invariants worth knowing before editing:
 - **`glasses.svg` is the only copy of the artwork.** The worker rasterises it
   per face, in memory, at the width that face needs.
 - **The detector is thread-local** (`_detector` in
-  `src/processors/deal_with_it.py`): `setInputSize` mutates it. OpenCV's own
-  thread pool is pinned to one thread so it does not fight the worker's.
+  `src/processors/deal_with_it.py`): `setInputSize` mutates it. The shape
+  predictor is shared; it is thread-safe. OpenCV's own thread pool is pinned
+  to one thread so it does not fight the worker's.
 - **The samples are base64 through the queue**, not `/static` URLs: the
   worker's SSRF guard refuses our own (non-public) host. Same reason the API
   example on `/docs` points at Wikimedia unless `DWI_PUBLIC_URL` is set.
@@ -113,10 +120,13 @@ let the container restart. Measured numbers are in `docs/LOAD.md`.
 ## Dependencies
 
 - `opencv-python-headless` for the detector. Headless on purpose: the GUI
-  build drags in X libraries the slim image does not have.
+  build drags in X libraries the slim image does not have. The model file
+  is vendored in `src/models/` from opencv_zoo (MIT).
+- `dlib-bin` (a prebuilt wheel of dlib) for the shape predictor, whose
+  ~100 MB model comes from `face_recognition_models`. That package imports
+  `pkg_resources`, hence `setuptools>=80,<82`: setuptools 82 removed it.
 - `resvg-py` rasterises the glasses. Statically linked, so no apt layer.
   `cairosvg` would need libcairo; don't swap it in.
-- The model file is vendored in `src/models/` from opencv_zoo (MIT).
 
 ## Testing
 

@@ -3,9 +3,10 @@
 import numpy as np
 import pytest
 
-from src import images, tasks
+from src import images, jobs, tasks
 from src.images import ImageSourceError
 from src.processors.deal_with_it import NoFacesFound
+from tests import support
 
 
 @pytest.fixture
@@ -30,6 +31,8 @@ def stub_processor(monkeypatch):
     def install(outcome):
         class FakeProcessor:
             img_format = 'PNG'
+            faces: list = []
+            detection = 'plain'
 
             def __init__(self, array, **kwargs):
                 self.base64_output = None
@@ -133,3 +136,19 @@ class TestFaceCount:
     def test_no_other_step_claims_a_count(self, meta, step):
         tasks.report_progress(10, step)
         assert 'faces' not in meta
+
+
+class TestRecordedFaces:
+    def test_what_was_found_lands_on_the_job(self, async_queue, drain, stub_task):
+        stub_task(support.RECORDS_FACES)
+        job_id, _ = jobs.enqueue({'url': 'https://example.test/a.png', 'base64': None})
+        drain()
+        result = jobs.result_for(job_id)
+        assert result.detection == 'upscaled'
+        assert len(result.faces) == 1
+        assert result.faces[0].box == (10, 90, 90, 10)
+        assert len(result.faces[0].landmarks) == 68
+        assert result.faces[0].points['nose'] == (50.0, 60.0)
+
+    def test_outside_a_worker_it_is_a_no_op(self):
+        tasks.record_faces([], 'plain')

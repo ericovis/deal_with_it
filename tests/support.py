@@ -12,6 +12,7 @@ RETURNS_NOTHING = 'tests.support.returns_nothing'
 REPORTS_PROGRESS = 'tests.support.reports_progress'
 COUNTS_FACES = 'tests.support.counts_faces'
 DAWDLES = 'tests.support.dawdles'
+RECORDS_FACES = 'tests.support.records_faces'
 
 IMAGE = 'data:image/png;base64,c3VuZ2xhc3Nlcw=='
 JPEG_IMAGE = 'data:image/jpeg;base64,c3VuZ2xhc3Nlcw=='
@@ -53,6 +54,23 @@ def dawdles(payload: dict) -> dict:
 
     for _ in range(500):
         time.sleep(0.01)
+    return {'image': IMAGE, 'error': None}
+
+
+class _FakeFace:
+    def as_record(self):
+        return {'box': [10, 90, 90, 10], 'score': 0.9,
+                'points': {'left_eye': (30.0, 40.0), 'right_eye': (70.0, 40.0),
+                           'nose': (50.0, 60.0), 'mouth_left': (35.0, 75.0),
+                           'mouth_right': (65.0, 75.0)},
+                'landmarks': [[float(i), float(i)] for i in range(68)]}
+
+
+def records_faces(payload: dict) -> dict:
+    """What the real task does after drawing: keeps the faces on the job."""
+    from src.tasks import record_faces
+
+    record_faces([_FakeFace()], 'upscaled')
     return {'image': IMAGE, 'error': None}
 
 

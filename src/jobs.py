@@ -221,8 +221,10 @@ def _finished_result(job: Job) -> JobResult:
     if not image:
         logger.error('job %s finished without an image or an error: %r', job.id, value)
         return JobResult(job_id=job.id, state=JobState.FAILED, error=GENERIC_FAILURE)
+    meta = job.meta or {}
     return JobResult(job_id=job.id, state=JobState.FINISHED, image=image,
-                     progress=100, step='Done')
+                     progress=100, step='Done',
+                     faces=meta.get('landmarks') or None, detection=meta.get('detection'))
 
 
 def is_broker_reachable() -> bool:
