@@ -69,7 +69,7 @@ The suite is hermetic: no test reaches the network or needs a Redis server.
 `POST /api/jobs` with **either** a `url` **or** a `base64` data URI:
 
 ```json
-{ "url": "https://ericovis.com/images/me.jpg" }
+{ "url": "https://example.com/photo.jpg" }
 ```
 ```json
 { "base64": "data:image/png;base64,..." }

@@ -612,7 +612,7 @@ def docs_page(theme: str | None, reachable: bool) -> tuple:
                     P(Code('POST /api/jobs'), ' with either a ', Code('url'), ' or a ',
                       Code('base64'), ' data URI, not both:'),
                     Div(
-                        snippet('{\n  "url": "https://ericovis.com/images/me.jpg"\n}'),
+                        snippet('{\n  "url": "https://example.com/photo.jpg"\n}'),
                         snippet('{\n  "base64": "data:image/png;base64,..."\n}'),
                         cls='pair',
                     ),

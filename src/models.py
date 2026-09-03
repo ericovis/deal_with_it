@@ -22,7 +22,7 @@ class ImageRequest(BaseModel):
     url: AnyHttpUrl | None = Field(
         default=None,
         description='Public http(s) URL of the image to process.',
-        examples=['https://ericovis.com/images/me.jpg'],
+        examples=['https://example.com/photo.jpg'],
     )
     base64: str | None = Field(
         default=None,
