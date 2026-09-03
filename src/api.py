@@ -1,21 +1,24 @@
-"""The JSON API.
+"""The JSON API, mounted under ``/api`` by :mod:`src.app`.
 
-Mounted under ``/api`` by :mod:`src.app`, which is why the paths here are
-relative. Handlers do no image work at all -- they hand a payload to the
-queue and read job state back, so nothing here can block for longer than a
-Redis round trip.
+Handlers are plain ``def`` on purpose: they talk to Redis, and FastAPI runs
+sync handlers in a threadpool, so a slow round trip or a large payload does
+not stall the event loop.
 """
 
 import logging
 
 from fastapi import APIRouter, HTTPException, Request, status
 
-from src import jobs
-from src.models import ImageRequest, JobCreated, JobResult
+from src import jobs, throttle
+from src.models import ImageRequest, JobCreated, JobResult, SourceKind
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
+
+
+def client_of(request: Request) -> str | None:
+    return request.client.host if request.client else None
 
 
 @router.post(
@@ -23,13 +26,30 @@ router = APIRouter()
     response_model=JobCreated,
     status_code=status.HTTP_202_ACCEPTED,
     summary='Queue an image for processing',
+    responses={
+        429: {'description': 'Too many submissions from this client'},
+        503: {'description': 'The queue is full'},
+    },
 )
-async def create_job(image: ImageRequest, request: Request) -> JobCreated:
+def create_job(image: ImageRequest, request: Request) -> JobCreated:
     """Accept an image reference and return immediately with a job id.
 
     Poll ``status_url`` until ``state`` is ``finished`` or ``failed``.
     """
-    job_id, state = jobs.enqueue(image.as_payload())
+    try:
+        throttle.admit(client_of(request))
+    except throttle.Throttled as exc:
+        raise HTTPException(
+            status_code=exc.status_code,
+            detail=str(exc),
+            headers={'Retry-After': str(exc.retry_after)},
+        ) from exc
+    payload = image.as_payload()
+    job_id, state = jobs.enqueue(payload, meta={
+        'kind': str(SourceKind.URL if payload['url'] else SourceKind.UPLOAD),
+        'label': jobs.label_for(payload),
+        'thumb': payload['url'],
+    })
     return JobCreated(
         job_id=job_id,
         state=state,
@@ -44,7 +64,7 @@ async def create_job(image: ImageRequest, request: Request) -> JobCreated:
     summary='Read the state, and eventually the result, of a job',
     responses={404: {'description': 'Unknown or expired job id'}},
 )
-async def read_job(job_id: str) -> JobResult:
+def read_job(job_id: str) -> JobResult:
     result = jobs.result_for(job_id)
     if result is None:
         raise HTTPException(
@@ -55,5 +75,5 @@ async def read_job(job_id: str) -> JobResult:
 
 
 @router.get('/health', summary='Liveness and broker connectivity')
-async def health() -> dict:
+def health() -> dict:
     return {'status': 'ok', 'redis': jobs.is_broker_reachable()}

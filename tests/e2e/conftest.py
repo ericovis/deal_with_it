@@ -46,32 +46,10 @@ def _wait_for(check, what: str, seconds: float = 30.0) -> None:
 
 
 def _serve_queue(connection, stop: threading.Event) -> None:
-    """Work the queue until told to stop.
-
-    A fresh worker per pass, in bursts: ``work()`` installs signal handlers,
-    which only the main thread may do, and this one runs beside the server.
-    """
-    from rq import SimpleWorker
-    from rq.timeouts import BaseDeathPenalty
-
+    """Work the queue until told to stop, with the real worker class, one
+    burst at a time so the stop flag is honoured promptly."""
     from src.config import get_settings
-
-    class NoDeathPenalty(BaseDeathPenalty):
-        """RQ enforces job_timeout with SIGALRM, and only the main thread may
-        install a signal handler. Without this every job here dies with
-        "signal only works in main thread" before it runs a line."""
-
-        def setup_death_penalty(self):
-            pass
-
-        def cancel_death_penalty(self):
-            pass
-
-    class ThreadWorker(SimpleWorker):
-        death_penalty_class = NoDeathPenalty
-
-        def _install_signal_handlers(self):
-            pass
+    from src.worker import ThreadWorker
 
     name = get_settings().queue_name
     while not stop.is_set():
@@ -83,9 +61,7 @@ def _serve_queue(connection, stop: threading.Event) -> None:
 
 @pytest.fixture(scope='session', autouse=True)
 def _needs_the_face_stack():
-    pytest.importorskip(
-        'face_recognition', reason="the real worker runs here: install the 'worker' extra"
-    )
+    pytest.importorskip('cv2', reason="the real worker runs here: install the 'worker' extra")
 
 
 @pytest.fixture(scope='session', autouse=True)

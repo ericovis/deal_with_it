@@ -1,20 +1,19 @@
-# Fully-qualified image names on purpose: Podman refuses to guess a registry
-# for a short name, and this file has to work for both engines.
+# Fully-qualified image names: Podman will not guess a registry.
 services:
 
   redis:
     image: docker.io/library/redis:7-alpine
-    # Nothing here is worth persisting -- jobs and results are ephemeral, and
-    # a disk-backed queue would just be a slower one.
-    command: redis-server --save "" --appendonly no
+    # Jobs and results are ephemeral, so no persistence. maxmemory with
+    # noeviction makes a flood fail loudly (enqueue errors) instead of
+    # evicting queued jobs or swapping the host.
+    command: redis-server --save "" --appendonly no --maxmemory 1gb --maxmemory-policy noeviction
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
       timeout: 3s
       retries: 5
     ports:
-      # Bound to localhost only: this Redis has no password, and it is only
-      # published so a uvicorn running outside compose can reach it.
+      # Localhost only: no password on this Redis.
       - "127.0.0.1:6379:6379"
 
   web:
@@ -36,10 +35,11 @@ services:
     build:
       context: .
       target: dev
-    # No reloader: RQ has none, so restart this service after editing a task.
+    # No reloader: restart after editing the task or processors.
     command: python -m src.worker
     environment:
       DWI_REDIS_URL: redis://redis:6379/0
+      # One process, DWI_WORKER_THREADS threads (default 2). See docs/LOAD.md.
     volumes:
       - .:/app
     depends_on:

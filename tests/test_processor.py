@@ -9,7 +9,16 @@ import pytest
 from PIL import Image, ImageOps
 
 from src.processors.base import BaseProcessor
-from src.processors.deal_with_it import DealWithItProcessor, NoFacesFound
+from src.processors.deal_with_it import (
+    DealWithItProcessor,
+    Face,
+    Landmarks,
+    NoFacesFound,
+    detect,
+    find_faces,
+    landmarks_for,
+    predictor_box,
+)
 
 
 def as_array(path) -> np.ndarray:
@@ -67,6 +76,13 @@ class TestDealWithItProcessor:
         assert result.shape == original.shape, 'the output keeps the original dimensions'
         assert not np.array_equal(result, original), 'something must have been drawn'
 
+    def test_a_jpeg_output_is_a_jpeg_data_uri(self, single_face_image):
+        processor = DealWithItProcessor(as_array(single_face_image))
+        processor.img_format = 'JPEG'
+        processor.call()
+        assert processor.base64_output.startswith('data:image/jpeg;base64,')
+        assert decode_output(processor.base64_output).format == 'JPEG'
+
     def test_output_is_a_png_data_uri(self, single_face_image):
         processor = DealWithItProcessor(as_array(single_face_image))
         processor.call()
@@ -81,10 +97,7 @@ class TestDealWithItProcessor:
 
         changed_rows = np.any(np.asarray(processor.output.convert('RGB')) != original, axis=(1, 2))
         assert changed_rows.sum() > 0
-        # Independent count from the detector itself, so the assertion below
-        # does not just restate the implementation.
-        import face_recognition as fr
-        assert len(fr.face_locations(original)) > 1
+        assert len(find_faces(original)) > 1
 
     def test_raises_when_there_are_no_faces(self, faceless_image):
         processor = DealWithItProcessor(as_array(faceless_image))
@@ -142,22 +155,6 @@ class TestDealWithItProcessor:
             processor.call()
 
 
-class TestAngle:
-    @pytest.mark.parametrize('left,right,expected', [
-        ((0, 0), (100, 0), 0),
-        ((0, 100), (100, 0), 45),
-        ((0, 0), (100, 100), -45),
-    ])
-    def test_angle_between_eyes(self, left, right, expected):
-        processor = DealWithItProcessor(np.zeros((2, 2, 3), dtype=np.uint8))
-        assert processor._get_angle(left, right) == expected
-
-    def test_glasses_are_wider_than_the_face(self):
-        processor = DealWithItProcessor(np.zeros((2, 2, 3), dtype=np.uint8))
-        glasses = processor._get_glasses(100)
-        assert glasses.size[0] == 130
-
-
 class TestDetectionDownscaling:
     """Detection runs on a shrunken copy; the glasses go on the original."""
 
@@ -213,10 +210,12 @@ SAMPLE_FACES = {
     'girl_with_a_pearl_earring.jpg': 1,
     'american_gothic.jpg': 2,
     'the_syndics.jpg': 6,
-    'the_night_watch.jpg': 8,
+    'the_night_watch.jpg': 19,
     'dog_handler.jpg': 1,
-    'princess_mary_and_nelson.jpg': 1,
-    'dogs_playing_poker.jpg': 1,
+    # Nelson is a dog, and so are the poker players. The detector cannot
+    # tell, and the captions say what it draws on.
+    'princess_mary_and_nelson.jpg': 2,
+    'dogs_playing_poker.jpg': 3,
     'cat_nap.jpg': 0,
     'van_gogh_self_portrait.jpg': 0,
     'the_scream.jpg': 0,
@@ -226,7 +225,7 @@ SAMPLE_FACES = {
 #: The words the tiles use, so the two cannot drift apart.
 IN_WORDS = {
     0: 'No faces', 1: 'One face', 2: 'Two faces', 3: 'Three faces',
-    6: 'Six faces', 8: 'Eight faces', 29: 'Twenty-nine faces',
+    6: 'Six faces', 8: 'Eight faces', 19: 'Nineteen faces', 29: 'Twenty-nine faces',
 }
 
 
@@ -239,11 +238,11 @@ def test_every_sample_has_the_faces_its_caption_claims(filename, claimed):
     would quietly start lying. Anyone who changes a picture has to change the
     number in src/ui.py:SAMPLES to match.
     """
-    import face_recognition as fr
-
     from tests.conftest import STATIC_IMG
 
-    assert len(fr.face_locations(as_array(STATIC_IMG / filename))) == claimed
+    array = as_array(STATIC_IMG / filename)
+    small, _ = DealWithItProcessor(array, max_detection_size=1600)._detection_input()
+    assert len(find_faces(small)) == claimed
 
 
 def test_every_sample_is_credited():
@@ -265,3 +264,181 @@ def test_the_captions_say_what_the_counts_are():
     assert shipped.keys() == SAMPLE_FACES.keys(), 'a sample was added or removed'
     for filename, faces in SAMPLE_FACES.items():
         assert shipped[filename] == IN_WORDS[faces], filename
+
+
+@pytest.mark.faces
+class TestThreadSafety:
+    """The worker runs jobs in threads. The YuNet instance is not safe to
+    share (``setInputSize`` mutates it); the shape predictor is."""
+
+    def test_concurrent_detection_matches_sequential(self):
+        import threading
+
+        from tests.conftest import STATIC_IMG
+
+        names = ['me.jpg', 'multiple_people.jpg', 'apollo_11_crew.jpg', 'american_gothic.jpg']
+        arrays = {name: as_array(STATIC_IMG / name) for name in names}
+
+        def analyse(array):
+            return [(face, landmarks_for(array, face)) for face in find_faces(array)]
+
+        expected = {name: analyse(array) for name, array in arrays.items()}
+        seen = {}
+
+        def detect_one(name):
+            seen[name] = analyse(arrays[name])
+
+        threads = [threading.Thread(target=detect_one, args=(name,)) for name in names]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join()
+        assert seen == expected
+
+
+@pytest.mark.faces
+class TestLandmarks:
+    def test_sixty_eight_points_inside_the_face(self, single_face_image):
+        array = as_array(single_face_image)
+        face = find_faces(array)[0]
+        marks = landmarks_for(array, face)
+        assert len(marks.points) == 68
+        top, right, bottom, left = face.box
+        xs = [x for x, _ in marks.points]
+        assert left - 20 < min(xs) and max(xs) < right + 20
+
+    def test_the_eye_corners_bracket_the_eyes(self, single_face_image):
+        array = as_array(single_face_image)
+        face = find_faces(array)[0]
+        marks = landmarks_for(array, face)
+        assert marks.outer_left[0] < face.left_eye[0] < face.right_eye[0] < marks.outer_right[0]
+        assert abs(marks.outer_left[1] - face.left_eye[1]) < 15
+
+    def test_the_processor_keeps_what_it_found(self, multiple_faces_image):
+        processor = DealWithItProcessor(as_array(multiple_faces_image))
+        processor.call()
+        assert len(processor.faces) == 8
+        assert processor.detection == 'plain'
+        record = processor.faces[0].as_record()
+        assert set(record) == {'box', 'score', 'points', 'landmarks'}
+        assert len(record['landmarks']) == 68
+        assert set(record['points']) == {'left_eye', 'right_eye', 'nose', 'mouth_left',
+                                         'mouth_right'}
+
+    def test_me_jpg_is_barely_tilted(self, single_face_image):
+        """The reference picture: the original placement found 2 degrees."""
+        from math import atan2, degrees
+
+        processor = DealWithItProcessor(as_array(single_face_image))
+        processor.call()
+        marks = processor.faces[0].landmarks
+        dx = marks.outer_right[0] - marks.outer_left[0]
+        dy = marks.outer_right[1] - marks.outer_left[1]
+        assert abs(-int(degrees(atan2(dy, dx))) - 2) <= 1
+
+
+@pytest.mark.faces
+class TestAugmentation:
+    def test_a_tiny_face_is_found_on_a_later_pass(self, single_face_image):
+        """Shrunk until the plain pass misses it, a harder look finds it."""
+        from PIL import Image as PILImage
+
+        original = PILImage.open(single_face_image)
+        for side in (120, 100, 80, 64, 48):
+            small = np.asarray(original.resize((side, side)), dtype=np.uint8)
+            if not find_faces(small):
+                faces, how = detect(small)
+                assert how in ('upscaled', 'equalised')
+                assert len(faces) == 1
+                top, right, bottom, left = faces[0].box
+                assert 0 <= left < right <= side and 0 <= top < bottom <= side
+                return
+        pytest.skip('the plain pass found the face at every size tried')
+
+    def test_a_blank_image_is_still_empty(self):
+        faces, how = detect(np.full((200, 200, 3), 128, dtype=np.uint8))
+        assert faces == [] and how == 'plain'
+
+
+class TestPlacement:
+    """Where the frame lands, from three landmarks. No detector needed."""
+
+    @staticmethod
+    def processor():
+        return DealWithItProcessor(np.zeros((400, 400, 3), dtype=np.uint8))
+
+    def test_the_left_lens_sits_on_the_left_eyes_outer_corner(self):
+        proc = self.processor()
+        img, (x, y) = proc._place((120, 200), (280, 200), (200, 250))
+        assert x + int(img.width * proc.lens_offset) == 120
+        assert y + int(img.height / 2) == 200
+
+    def test_the_width_follows_the_eye_span(self):
+        proc = self.processor()
+        wide, _ = proc._place((100, 200), (300, 200), (200, 250))
+        narrow, _ = proc._place((175, 200), (225, 200), (200, 212))
+        assert wide.width == round(200 * proc.width_per_span)
+        assert narrow.width == round(50 * proc.width_per_span)
+
+    def test_a_tilted_head_gets_a_rotated_frame(self):
+        proc = self.processor()
+        level, _ = proc._place((120, 200), (280, 200), (200, 250))
+        tilted, _ = proc._place((120, 180), (280, 220), (200, 250))
+        assert tilted.height > level.height, 'rotate(expand=True) grows the canvas'
+        span = ((280 - 120) ** 2 + (220 - 180) ** 2) ** 0.5
+        assert tilted.width == round(proc.width_per_span * span), 'the rotated width fits the face'
+
+    def test_a_turned_head_tapers_the_far_side(self):
+        proc = self.processor()
+        frontal, _ = proc._place((120, 200), (280, 200), (200, 250))
+        turned, _ = proc._place((120, 200), (280, 200), (150, 250))
+        alpha = np.asarray(turned)[:, :, 3]
+        left_span = np.flatnonzero(alpha[:, 2] > 0)
+        right_span = np.flatnonzero(alpha[:, -3] > 0)
+        assert turned.height > frontal.height
+        assert left_span.size < right_span.size, 'the far (left) edge is the short one'
+
+    def test_a_frontal_face_is_not_tapered(self):
+        proc = self.processor()
+        img, _ = proc._place((120, 200), (280, 200), (200, 250))
+        rendered = proc._rendered(img.width)
+        assert img.height == pytest.approx(rendered.height * img.width / rendered.width, abs=1)
+
+    def test_scaling_scales_every_point(self):
+        face = Face(box=(150, 300, 300, 100), left_eye=(150.0, 200.0), right_eye=(250.0, 200.0),
+                    nose=(200.0, 240.0), mouth_left=(160.0, 280.0), mouth_right=(240.0, 280.0),
+                    score=0.9).scaled(2.0)
+        assert face.left_eye == (300.0, 400.0) and face.mouth_right == (480.0, 560.0)
+        assert face.box == (300, 600, 600, 200)
+        marks = Landmarks(((1.0, 2.0),) * 68).scaled(3.0)
+        assert marks.points[0] == (3.0, 6.0)
+
+    def test_a_cat_stays_a_cat(self, faceless_image):
+        """Equalising the contrast finds "faces" in the fur, below the bar."""
+        faces, how = detect(as_array(faceless_image))
+        assert faces == [] and how == 'plain'
+
+
+class TestPredictorBox:
+    """The shape predictor was trained on dlib's own detector boxes. It gets
+    a square built from YuNet's points, not YuNet's taller box: on the
+    Vermeer the raw box put the eye corner 34 px off."""
+
+    face = Face(box=(0, 400, 500, 0), left_eye=(100.0, 200.0), right_eye=(200.0, 200.0),
+                nose=(150.0, 250.0), mouth_left=(110.0, 300.0), mouth_right=(190.0, 300.0),
+                score=0.9)
+
+    def test_it_is_a_square_of_the_eye_distance(self):
+        top, right, bottom, left = predictor_box(self.face)
+        assert right - left == bottom - top == 240
+
+    def test_it_is_centred_between_the_eyes_and_the_mouth(self):
+        top, right, bottom, left = predictor_box(self.face)
+        assert (left + right) / 2 == 150
+        assert (top + bottom) / 2 == 200 + 0.3 * 100
+
+    def test_a_degenerate_face_does_not_divide_by_zero(self):
+        squashed = Face(box=(0, 1, 1, 0), left_eye=(5.0, 5.0), right_eye=(5.0, 5.0),
+                        nose=(5.0, 5.0), mouth_left=(5.0, 5.0), mouth_right=(5.0, 5.0), score=1)
+        top, right, bottom, left = predictor_box(squashed)
+        assert right > left and bottom > top

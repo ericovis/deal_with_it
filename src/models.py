@@ -1,10 +1,4 @@
-"""Request and response schemas.
-
-These validate *shape* only. Fetching and decoding the image is the worker's
-job (see :mod:`src.images`) -- doing network I/O inside a validator, as this
-model used to, blocks the event loop and turns every slow host into a stuck
-web process.
-"""
+"""Request and response schemas. Shape only: no network I/O in a validator."""
 
 from enum import StrEnum
 from typing import Self
@@ -38,8 +32,7 @@ class ImageRequest(BaseModel):
 
     @model_validator(mode='after')
     def a_single_parameter_must_be_passed(self) -> Self:
-        # Checks values, not key presence: clients routinely send both keys
-        # with one of them null, and rejecting that was a long-standing bug.
+        # Values, not key presence: clients send both keys with one null.
         if self.url is not None and self.base64 is not None:
             raise ValueError('An url OR a base64 string must be passed, not both.')
         if self.url is None and self.base64 is None:
@@ -82,17 +75,14 @@ class SourceKind(StrEnum):
 
 
 class JobSource(BaseModel):
-    """Where a job's image came from, so a card can label itself.
-
-    Deliberately not part of :class:`JobResult`: the JSON API's response is a
-    published contract, and none of this is any of its business.
-    """
+    """Where a job's image came from, so a card can label itself. Not part
+    of :class:`JobResult`, which is the API's published contract."""
 
     kind: SourceKind = SourceKind.URL
     #: File name, or ``host/path`` for a URL.
     label: str = ''
-    #: An image cheap enough to re-send on every poll -- a remote URL or a
-    #: static path. None for an upload, whose only copy is a data URI.
+    #: A remote URL or a static path. None for an upload, which has only a
+    #: data URI, and that must not be re-sent on every poll.
     thumb: str | None = None
     #: What was actually submitted: the "before" half of a finished card.
     original: str | None = None
@@ -106,6 +96,21 @@ class JobCreated(BaseModel):
     job_id: str
     state: JobState
     status_url: str
+
+
+class FaceRecord(BaseModel):
+    """One face the worker found, in the coordinates of the submitted image."""
+
+    box: tuple[int, int, int, int] = Field(description='top, right, bottom, left')
+    score: float = Field(description="The detector's confidence, 0 to 1.")
+    points: dict[str, tuple[float, float]] = Field(
+        description="The detector's five points: left_eye, right_eye, nose, "
+                    'mouth_left, mouth_right. Left and right as seen in the picture.',
+    )
+    landmarks: list[tuple[float, float]] = Field(
+        description='The 68 landmarks the glasses were placed from, in the '
+                    'usual dlib/iBUG order.',
+    )
 
 
 class JobResult(BaseModel):
@@ -125,4 +130,11 @@ class JobResult(BaseModel):
     )
     step: str | None = Field(
         default=None, description='What the worker is doing right now.'
+    )
+    faces: list[FaceRecord] | None = Field(
+        default=None, description='Every face the glasses went on, once finished.'
+    )
+    detection: str | None = Field(
+        default=None,
+        description='Which pass found the faces: plain, upscaled or equalised.',
     )

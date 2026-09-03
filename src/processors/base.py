@@ -10,7 +10,9 @@ from PIL import Image
 
 
 class BaseProcessor:
+    #: 'PNG' or 'JPEG'. The task sets it to match the input.
     img_format = 'PNG'
+    jpeg_quality = 90
 
     def __init__(self, image: NDArray[np.uint8],
                  on_progress: Callable[[int, str], None] | None = None) -> None:
@@ -20,12 +22,7 @@ class BaseProcessor:
         self._on_progress = on_progress
 
     def progress(self, percent: int, step: str) -> None:
-        """Announce a checkpoint, if anyone is listening.
-
-        These are checkpoints, not measurements: neither dlib nor Pillow
-        reports how far through it is, so the percentages mark which stage
-        has been reached rather than pretending to smooth progress.
-        """
+        """Announce a checkpoint, if anyone is listening."""
         if self._on_progress is not None:
             self._on_progress(percent, step)
 
@@ -37,16 +34,15 @@ class BaseProcessor:
         """The result as a data URI, or None if nothing was produced."""
         if self.output is None:
             return None
-        # Encoded lazily and memoised on the instance. This used to be a
-        # functools.cache on the method, which keyed on `self` in a global
-        # dict and so pinned every processor -- and its decoded image -- in
-        # memory for the lifetime of the process.
+        # Memoised on the instance, never in a module-level cache keyed on
+        # self: that pins every processor and its image for the process.
         if self._encoded is None:
             self._encoded = self._encode()
         return self._encoded
 
     def _encode(self) -> str:
         buffer = BytesIO()
-        self.output.save(buffer, format=self.img_format)
+        options = {'quality': self.jpeg_quality} if self.img_format == 'JPEG' else {}
+        self.output.save(buffer, format=self.img_format, **options)
         payload = base64.b64encode(buffer.getvalue()).decode('utf8')
         return f'data:image/{self.img_format.lower()};base64,{payload}'

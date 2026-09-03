@@ -23,7 +23,8 @@ page then polls until the result is ready. There are two pages: the app at
 [FastAPI](https://fastapi.tiangolo.com), the queue is
 [RQ](https://python-rq.org), and the glasses are pasted on with
 [Pillow](https://python-pillow.org) using landmarks from
-[face_recognition](https://github.com/ageitgey/face_recognition). The glasses
+[YuNet](https://github.com/opencv/opencv_zoo/tree/main/models/face_detection_yunet)
+and [dlib](http://dlib.net)'s 68-point shape predictor. The glasses
 themselves are an SVG, rasterised at the size each face needs.
 
 ## Prerequisites
@@ -108,9 +109,29 @@ Responds `202` with a job to poll:
   "image": "data:image/png;base64,...",
   "error": null,
   "progress": 100,
-  "step": "Done"
+  "step": "Done",
+  "detection": "plain",
+  "faces": [
+    {
+      "box": [101, 420, 402, 197],
+      "score": 0.95,
+      "points": {"left_eye": [249.7, 225.3], "right_eye": [357.7, 213.2], "nose": [307.2, 282.4],
+                 "mouth_left": [262.0, 330.0], "mouth_right": [352.0, 322.0]},
+      "landmarks": [[199.0, 208.0], "... 68 points in dlib order"]
+    }
+  ]
 }
 ```
+
+`faces` lists every face the glasses went on, in the coordinates of the
+submitted image: the detector's box (top, right, bottom, left) and five
+points, and the 68 landmarks the placement used. `detection` says which
+pass found them: `plain`, `upscaled` or `equalised`.
+
+The result is a JPEG when the input was a JPEG and a PNG otherwise. A
+submission may be refused with `429` (too many from one client in a minute)
+or `503` (the queue is full); both carry `Retry-After`. Load figures and
+the abuse checks are in [docs/LOAD.md](docs/LOAD.md).
 
 `state` is one of `queued`, `started`, `finished` or `failed`. A `failed` job
 carries a human-readable `error` -- an unreachable URL, an undecodable image,
@@ -118,7 +139,7 @@ or no faces found. An unknown or expired job id gives a `404`.
 
 While a job runs, `progress` and `step` report the stage it has reached
 ("Looking for faces", "Drawing glasses on 8 faces", "Encoding the result").
-They are checkpoints rather than measurements -- neither dlib nor Pillow
+They are checkpoints rather than measurements -- neither OpenCV nor Pillow
 reports how far through it is.
 
 The page uses the same fields. Each submission becomes a card in the session

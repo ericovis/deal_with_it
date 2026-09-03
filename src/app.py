@@ -1,20 +1,19 @@
-"""Composition root.
+"""Composition root: FastAPI on the outside, FastHTML mounted at ``/``.
 
-FastAPI is the outer app and FastHTML is mounted at ``/``. The other way
-round also works, but FastHTML installs a static-file catch-all as its first
-route, which silently swallows any mounted path ending in something that
-looks like an asset extension -- ``/api/report.csv`` included.
+FastAPI has to be the outer app because FastHTML's static-file catch-all
+matches any path ending in an asset extension, ``/api/report.csv`` included.
 """
 
 import logging
 import os
 
-from fastapi import FastAPI, Request, status
-from fastapi.responses import JSONResponse
+from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
+from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from src.api import router as api_router
 from src.config import get_settings
+from src.throttle import BodyTooLarge, too_large_response
 from src.ui import create_ui
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -24,6 +23,58 @@ logging.basicConfig(
     level=os.environ.get('LOG_LEVEL', 'INFO'),
     format='%(asctime)s %(levelname)s %(name)s %(message)s',
 )
+
+SECURITY_HEADERS = {
+    b'x-content-type-options': b'nosniff',
+    b'x-frame-options': b'DENY',
+    b'referrer-policy': b'strict-origin-when-cross-origin',
+}
+
+
+class BodyLimit:
+    """Refuse a request body over ``max_request_bytes``, and stamp the
+    security headers on every response.
+
+    Checks the declared Content-Length first, then counts the bytes as the
+    handler reads them, so a chunked upload with no declared length is cut
+    off at the same limit instead of being buffered whole.
+    """
+
+    def __init__(self, app: ASGIApp) -> None:
+        self.app = app
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope['type'] != 'http':
+            await self.app(scope, receive, send)
+            return
+
+        limit = get_settings().max_request_bytes
+        headers = dict(scope.get('headers') or [])
+        declared = headers.get(b'content-length', b'').decode()
+        if declared.isdigit() and int(declared) > limit:
+            await too_large_response(limit)(scope, receive, self._stamping(send))
+            return
+
+        seen = 0
+
+        async def counting_receive() -> Message:
+            nonlocal seen
+            message = await receive()
+            if message['type'] == 'http.request':
+                seen += len(message.get('body', b''))
+                if seen > limit:
+                    raise BodyTooLarge(limit)
+            return message
+
+        await self.app(scope, counting_receive, self._stamping(send))
+
+    @staticmethod
+    def _stamping(send: Send) -> Send:
+        async def stamping_send(message: Message) -> None:
+            if message['type'] == 'http.response.start':
+                message['headers'] = [*message.get('headers', []), *SECURITY_HEADERS.items()]
+            await send(message)
+        return stamping_send
 
 
 def create_app() -> FastAPI:
@@ -35,30 +86,11 @@ def create_app() -> FastAPI:
         openapi_url='/api/openapi.json',
         redoc_url=None,
     )
-    @app.middleware('http')
-    async def refuse_oversized_bodies(request: Request, call_next):
-        """Reject a too-large body before anything buffers it.
-
-        The image limits in src.images only apply once the worker has the
-        payload -- by which point the web tier has already held the whole
-        upload in memory and pushed it into Redis. A declared Content-Length
-        is all we can check here (uvicorn requires one for non-chunked
-        requests), so this is a cheap guard rather than a complete one.
-        """
-        declared = request.headers.get('content-length')
-        limit = get_settings().max_request_bytes
-        if declared and declared.isdigit() and int(declared) > limit:
-            return JSONResponse(
-                status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
-                content={'detail': f'The request body must be under {limit} bytes.'},
-            )
-        return await call_next(request)
-
+    app.add_middleware(BodyLimit)
     app.include_router(api_router, prefix='/api')
-    # StaticFiles rather than FastHTML's catch-all: it resolves paths against
-    # the directory and rejects anything that escapes it.
+    # StaticFiles rather than FastHTML's catch-all, which is a bare
+    # FileResponse over the process CWD.
     app.mount('/static', StaticFiles(directory=STATIC_DIR), name='static')
-    # Mounted last, and at the root, so it only sees what nothing above claimed.
     app.mount('/', create_ui())
     return app
 

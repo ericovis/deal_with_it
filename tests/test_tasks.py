@@ -3,20 +3,21 @@
 import numpy as np
 import pytest
 
-from src import images, tasks
+from src import images, jobs, tasks
 from src.images import ImageSourceError
 from src.processors.deal_with_it import NoFacesFound
+from tests import support
 
 
 @pytest.fixture
 def stub_load(monkeypatch):
     """Replace image loading so these tests need neither network nor pixels."""
 
-    def install(result):
+    def install(result, source_format='PNG'):
         def fake_load(url=None, base64_data=None, settings=None):
             if isinstance(result, Exception):
                 raise result
-            return result
+            return result, source_format
 
         monkeypatch.setattr(images, 'load', fake_load)
 
@@ -25,10 +26,17 @@ def stub_load(monkeypatch):
 
 @pytest.fixture
 def stub_processor(monkeypatch):
+    seen = {}
+
     def install(outcome):
         class FakeProcessor:
+            img_format = 'PNG'
+            faces: list = []
+            detection = 'plain'
+
             def __init__(self, array, **kwargs):
                 self.base64_output = None
+                seen['processor'] = self
 
             def call(self):
                 if isinstance(outcome, Exception):
@@ -36,8 +44,21 @@ def stub_processor(monkeypatch):
                 self.base64_output = outcome
 
         monkeypatch.setattr(tasks, 'DealWithItProcessor', FakeProcessor)
+        return seen
 
     return install
+
+
+class TestOutputFormat:
+    @pytest.mark.parametrize('source_format, expected', [
+        ('JPEG', 'JPEG'), ('PNG', 'PNG'), ('WEBP', 'PNG'), ('GIF', 'PNG'), ('', 'PNG'),
+    ])
+    def test_a_jpeg_comes_back_as_a_jpeg_and_everything_else_as_png(
+            self, stub_load, stub_processor, source_format, expected):
+        stub_load(np.zeros((2, 2, 3), dtype=np.uint8), source_format)
+        seen = stub_processor('data:image/png;base64,AAAA')
+        tasks.process_image({'url': 'https://example.test/a', 'base64': None})
+        assert seen['processor'].img_format == expected
 
 
 def test_returns_the_processed_image(stub_load, stub_processor):
@@ -115,3 +136,19 @@ class TestFaceCount:
     def test_no_other_step_claims_a_count(self, meta, step):
         tasks.report_progress(10, step)
         assert 'faces' not in meta
+
+
+class TestRecordedFaces:
+    def test_what_was_found_lands_on_the_job(self, async_queue, drain, stub_task):
+        stub_task(support.RECORDS_FACES)
+        job_id, _ = jobs.enqueue({'url': 'https://example.test/a.png', 'base64': None})
+        drain()
+        result = jobs.result_for(job_id)
+        assert result.detection == 'upscaled'
+        assert len(result.faces) == 1
+        assert result.faces[0].box == (10, 90, 90, 10)
+        assert len(result.faces[0].landmarks) == 68
+        assert result.faces[0].points['nose'] == (50.0, 60.0)
+
+    def test_outside_a_worker_it_is_a_no_op(self):
+        tasks.record_faces([], 'plain')

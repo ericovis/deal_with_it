@@ -38,7 +38,7 @@ class TestSubmitting:
         expect(page.locator('#queue article')).to_have_count(0)
 
     def test_a_picture_goes_all_the_way_to_a_result(self, page: Page):
-        """Browser to htmx to FastHTML to RQ to dlib to Pillow and back."""
+        """Browser to htmx to FastHTML to RQ to the detector to Pillow and back."""
         card = run(page, 'me')
         expect(card.locator('.frame img.after')).to_be_visible()
         expect(card.locator('.card-id b')).to_have_text('me.jpg')
