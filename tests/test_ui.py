@@ -289,11 +289,26 @@ class TestCards:
         assert f'value="after" checked id="view-{job_id}-a"' in body
         assert 'class="segmented"' in body
 
-    def test_each_result_can_be_opened_and_downloaded(self, client, hx):
+    def test_each_result_can_be_downloaded(self, client, hx):
         job_id = self.start(client, hx)
         body = client.get(f'/jobs/{job_id}', headers=hx).text
-        assert f'href="{support.IMAGE}" target="_blank"' in body
         assert f'download="deal-with-it-{job_id[:8]}.png"' in body
+
+    def test_the_full_size_view_is_an_overlay_not_a_link(self, client, hx):
+        """A data: URI cannot be navigated to -- browsers block it -- so the
+        old target="_blank" link did nothing at all."""
+        job_id = self.start(client, hx)
+        body = client.get(f'/jobs/{job_id}', headers=hx).text
+        assert 'target="_blank"' not in body
+        assert f'id="full-{job_id}"' in body
+        assert body.count(f'for="full-{job_id}"') == 3, 'open, backdrop and close'
+        assert 'class="lightbox-close"' in body
+
+    def test_the_overlay_reuses_the_one_copy_of_the_image(self, client, hx):
+        """Duplicating the markup would send the whole data URI twice."""
+        job_id = self.start(client, hx)
+        body = client.get(f'/jobs/{job_id}', headers=hx).text
+        assert body.count(f'src="{support.IMAGE}"') == 1
 
     def test_a_queued_job_keeps_polling(self, client, hx, async_queue, stub_task):
         stub_task(support.SUCCESS)

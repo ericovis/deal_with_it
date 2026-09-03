@@ -855,7 +855,11 @@ body:has(#queue article) .clear {
     color: var(--text);
 }
 
-.result input:checked + label {
+/* Matched through the container rather than as `input:checked + label`, so
+   the same rule can style a control that is not a sibling of its radios --
+   which is what lets the overlay reuse them. */
+.result:has([value="before"]:checked) label[data-view="before"],
+.result:has([value="after"]:checked) label[data-view="after"] {
     background: var(--primary);
     color: var(--primary-fg);
 }
@@ -872,7 +876,22 @@ body:has(#queue article) .clear {
 .open-full {
     font-size: 13px;
     font-weight: 600;
+    color: var(--accent);
+    cursor: pointer;
+    text-decoration: underline;
+    text-underline-offset: 2px;
 }
+
+.open-full:hover {
+    color: var(--accent-hover);
+}
+
+.full-toggle:focus-visible + .open-full {
+    outline: 2px solid var(--accent);
+    outline-offset: 3px;
+    border-radius: 3px;
+}
+
 
 .download {
     display: inline-flex;
@@ -890,6 +909,115 @@ body:has(#queue article) .clear {
 .download:hover {
     background: var(--primary-hover);
     color: var(--primary-fg);
+}
+
+/* ------------------------------------------------------ full-screen view */
+
+/* The same frame and footer, re-laid-out as an overlay -- not a second copy
+   of them, which would put the whole result data URI in the card twice. A
+   checkbox and :has() rather than <dialog>, which cannot be opened without
+   showModal() and therefore without script.
+
+   The trade-off that buys: no focus trap and no Escape key. The close button,
+   the backdrop and the checkbox itself (still in the tab order) are the ways
+   out. */
+.backdrop,
+.lightbox-close {
+    display: none;
+}
+
+body:has(.full-toggle:checked) {
+    overflow: hidden;
+}
+
+.result:has(.full-toggle:checked) .backdrop {
+    display: block;
+    position: fixed;
+    inset: 0;
+    z-index: 100;
+    /* Dark in both themes: it is a viewer, and a light one fights the image. */
+    background: rgba(15, 16, 12, .93);
+    cursor: zoom-out;
+}
+
+.result:has(.full-toggle:checked) .frame {
+    position: fixed;
+    inset: 0;
+    z-index: 101;
+    align-items: center;
+    background: none;
+    border-radius: 0;
+    padding: 72px 24px 96px;
+    /* So a click beside the image falls through to the backdrop and closes. */
+    pointer-events: none;
+}
+
+.result:has(.full-toggle:checked) .frame img {
+    max-width: 100%;
+    max-height: 100%;
+    object-fit: contain;
+    border-radius: 8px;
+    pointer-events: auto;
+}
+
+.result:has(.full-toggle:checked) .lightbox-close {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    position: fixed;
+    top: 18px;
+    right: 18px;
+    z-index: 102;
+    width: 40px;
+    height: 40px;
+    border-radius: 50%;
+    border: 1px solid rgba(249, 248, 246, .24);
+    background: rgba(249, 248, 246, .08);
+    color: #f9f8f6;
+    font-size: 22px;
+    line-height: 1;
+    cursor: pointer;
+}
+
+.result:has(.full-toggle:checked) .lightbox-close:hover {
+    background: rgba(249, 248, 246, .2);
+}
+
+.result:has(.full-toggle:checked) .card-foot {
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 102;
+    justify-content: center;
+    padding: 18px 24px 26px;
+}
+
+.result:has(.full-toggle:checked) .spacer,
+.result:has(.full-toggle:checked) .open-full {
+    display: none;
+}
+
+/* The overlay is dark whatever the theme, so its controls cannot use the
+   theme's surfaces. */
+.result:has(.full-toggle:checked) .segmented {
+    border-color: rgba(249, 248, 246, .28);
+}
+
+.result:has(.full-toggle:checked) .segmented label {
+    background: rgba(249, 248, 246, .1);
+    color: #f9f8f6;
+}
+
+.result:has(.full-toggle:checked):has([value="before"]:checked) label[data-view="before"],
+.result:has(.full-toggle:checked):has([value="after"]:checked) label[data-view="after"] {
+    background: #f9f8f6;
+    color: #24261F;
+}
+
+.result:has(.full-toggle:checked) .download {
+    background: #f9f8f6;
+    color: #24261F;
 }
 
 /* -------------------------------------------------------------- progress */

@@ -382,39 +382,53 @@ def _subtitle(result: JobResult, source: JobSource) -> str:
 
 
 def _result_view(job_id: str, image: str, before: str | None) -> Div:
-    """The finished image, with a Before/After toggle built from two radios.
+    """The finished image, its Before/After toggle, and the full-screen view.
 
-    ``:has()`` does the switching, so the comparison costs no script and the
-    radios keep the control in the tab order.
+    ``:has()`` does all the switching, so none of it costs a line of script.
+
+    The full-screen view is the *same* frame and footer re-laid-out as an
+    overlay rather than a second copy of them: duplicating the markup would
+    mean sending the whole result data URI twice in every card. A checkbox
+    drives it because ``<dialog>`` cannot be opened without ``showModal()``.
     """
+    toggle = f'full-{job_id}'
     footer = [
         Span(cls='spacer'),
-        A('Open full size', href=image, target='_blank', cls='open-full'),
+        Input(type='checkbox', id=toggle, cls='full-toggle visually-hidden'),
+        Label('View full size', fr=toggle, cls='open-full'),
         A('Download PNG', href=image, download=f'deal-with-it-{job_id[:8]}.png',
           cls='download'),
     ]
-    if before is None:
-        return Div(Div(Img(src=image, alt='Result'), cls='frame'),
-                   Div(*footer, cls='card-foot'), cls='result')
 
-    name = f'view-{job_id}'
-    return Div(
-        Div(
+    if before is None:
+        frame = Div(Img(src=image, alt='Result'), cls='frame')
+        controls = footer
+    else:
+        name = f'view-{job_id}'
+        frame = Div(
             Img(src=before, alt='The picture as submitted', cls='before'),
             Img(src=image, alt='Result', cls='after'),
             cls='frame',
-        ),
-        Div(
+        )
+        controls = [
             Div(
                 Input(type='radio', id=f'{name}-b', name=name, value='before'),
-                Label('Before', fr=f'{name}-b'),
+                Label('Before', fr=f'{name}-b', data_view='before'),
                 Input(type='radio', id=f'{name}-a', name=name, value='after', checked=True),
-                Label('After', fr=f'{name}-a'),
+                Label('After', fr=f'{name}-a', data_view='after'),
                 cls='segmented',
             ),
             *footer,
-            cls='card-foot',
-        ),
+        ]
+
+    return Div(
+        frame,
+        # Clicking the space around the image closes it. The frame above is
+        # pointer-events:none while open so those clicks land here.
+        Label(fr=toggle, cls='backdrop', aria_label='Close the full-size view'),
+        Label('×', fr=toggle, cls='lightbox-close', title='Close',
+              aria_label='Close the full-size view'),
+        Div(*controls, cls='card-foot'),
         cls='result',
     )
 
