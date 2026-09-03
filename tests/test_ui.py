@@ -350,7 +350,7 @@ class TestCards:
         body = client.get(f'/jobs/{job_id}', headers=hx).text
         assert f'hx-get="/jobs/{job_id}"' in body
         assert 'hx-trigger="load delay:1s"' in body
-        assert 'In the queue' in body
+        assert 'Next up' in body
 
     def test_a_queued_job_becomes_a_result_after_the_worker_runs(
             self, client, hx, async_queue, stub_task, drain):
@@ -422,6 +422,52 @@ class TestPollingPayloads:
         assert 'src="https://example.test/a.png" alt="" class="thumb"' in body
 
 
+class TestTheWait:
+    """A queued card says how much queue is in front of it."""
+
+    def start(self, client, hx):
+        return job_ids(submit(client, hx, url='https://example.test/a.png').text)[0]
+
+    def poll(self, client, hx, job_id):
+        return client.get(f'/jobs/{job_id}', headers=hx).text
+
+    def test_the_first_job_is_next_up(self, client, hx, async_queue, stub_task):
+        stub_task(support.SUCCESS)
+        assert 'Next up' in self.poll(client, hx, self.start(client, hx))
+
+    def test_one_job_ahead_is_singular(self, client, hx, async_queue, stub_task):
+        stub_task(support.SUCCESS)
+        self.start(client, hx)
+        assert '1 job ahead' in self.poll(client, hx, self.start(client, hx))
+
+    def test_more_than_one_is_counted(self, client, hx, async_queue, stub_task):
+        stub_task(support.SUCCESS)
+        self.start(client, hx)
+        self.start(client, hx)
+        assert '2 jobs ahead' in self.poll(client, hx, self.start(client, hx))
+
+    def test_the_count_falls_as_the_worker_works(
+            self, client, hx, async_queue, stub_task, drain):
+        stub_task(support.SUCCESS)
+        self.start(client, hx)
+        mine = self.start(client, hx)
+        assert '1 job ahead' in self.poll(client, hx, mine)
+        drain(max_jobs=1)
+        assert 'Next up' in self.poll(client, hx, mine)
+
+    def test_a_job_the_worker_has_taken_says_nothing_about_the_queue(self, client, hx,
+                                                                     monkeypatch):
+        """Once a job is out of the list there is no position, and the step
+        it is on is the better news anyway."""
+        monkeypatch.setattr(jobs, 'describe', lambda job_id: (
+            JobResult(job_id=job_id, state='queued'),
+            JobSource(kind=SourceKind.URL, label='example.test/a.png'),
+        ))
+        body = client.get('/jobs/whatever', headers=hx).text
+        assert 'In the queue' in body
+        assert 'ahead' not in body
+
+
 class TestProgress:
     """A progress bar fed by checkpoints the worker records on the job."""
 
@@ -433,7 +479,7 @@ class TestProgress:
         job_id = self.start(client, hx)
         body = client.get(f'/jobs/{job_id}', headers=hx).text
         assert '<progress max="100">' in body, 'no value attribute means indeterminate'
-        assert 'In the queue' in body
+        assert 'Next up' in body
         assert '%' not in body, 'there is no honest percentage for a queued job'
 
     def test_a_running_job_shows_its_step_and_percentage(self, client, hx, monkeypatch):

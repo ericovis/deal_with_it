@@ -68,7 +68,7 @@ class TestReadJob:
         assert response.status_code == 200
         body = response.json()
         assert body == {'job_id': job_id, 'state': 'finished', 'image': support.IMAGE,
-                        'faces': None, 'detection': None,
+                        'faces': None, 'detection': None, 'ahead': None,
                         'error': None, 'progress': 100, 'step': 'Done'}
 
     def test_reports_a_rejected_image_with_its_reason(self, client, stub_task):

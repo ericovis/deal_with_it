@@ -101,27 +101,37 @@ def _fetch(job_id: str) -> Job | None:
         return None
 
 
-def _peek(job_id: str) -> tuple[JobStatus, dict] | None:
-    """Status and meta only, without the payload.
+def _peek(job_id: str) -> tuple[JobStatus, dict, int | None] | None:
+    """Status, meta and queue position, without the payload.
 
     ``Job.fetch`` reads the whole hash, and for an upload that includes the
-    image itself -- megabytes per poll, once a second per card. The two
-    fields a pending job is polled for are tiny.
+    image itself -- megabytes per poll, once a second per card. The three
+    things a pending job is polled for are tiny, and a pipeline buys all of
+    them for one round trip.
+
+    ``LPOS`` is the index of the id in the queue list, so it *is* the number
+    of jobs ahead of this one. It is None for anything not in the list: a job
+    already picked up, and one that never was.
     """
     queue = get_queue()
-    raw_status, raw_meta = queue.connection.hmget(Job.key_for(job_id), ['status', 'meta'])
+    with queue.connection.pipeline() as pipe:
+        pipe.hmget(Job.key_for(job_id), ['status', 'meta'])
+        pipe.lpos(queue.key, job_id)
+        (raw_status, raw_meta), ahead = pipe.execute()
     if raw_status is None:
         return None
     meta = queue.serializer.loads(raw_meta) if raw_meta else {}
-    return JobStatus(raw_status.decode()), meta
+    return JobStatus(raw_status.decode()), meta, ahead
 
 
-def _pending(job_id: str, status: JobStatus, meta: dict) -> JobResult:
+def _pending(job_id: str, status: JobStatus, meta: dict,
+             ahead: int | None = None) -> JobResult:
     return JobResult(
         job_id=job_id,
         state=_STATE_MAP.get(status, JobState(status.value)),
         progress=meta.get('progress'),
         step=meta.get('step'),
+        ahead=ahead,
     )
 
 
@@ -130,9 +140,9 @@ def result_for(job_id: str) -> JobResult | None:
     peeked = _peek(job_id)
     if peeked is None:
         return None
-    status, meta = peeked
+    status, meta, ahead = peeked
     if status not in _TERMINAL:
-        return _pending(job_id, status, meta)
+        return _pending(job_id, status, meta, ahead)
     job = _fetch(job_id)
     return None if job is None else _state_of(job)
 
@@ -142,9 +152,9 @@ def describe(job_id: str) -> tuple[JobResult, JobSource] | None:
     peeked = _peek(job_id)
     if peeked is None:
         return None
-    status, meta = peeked
+    status, meta, ahead = peeked
     if status not in _TERMINAL:
-        return _pending(job_id, status, meta), _source_of(meta, None)
+        return _pending(job_id, status, meta, ahead), _source_of(meta, None)
     job = _fetch(job_id)
     if job is None:
         return None

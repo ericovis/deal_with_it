@@ -67,6 +67,11 @@ Invariants worth knowing before editing:
 - **Progress is stage markers** written to `job.meta` by the worker. The face
   count is lifted out of the "Drawing glasses on N faces" step because the
   next checkpoint overwrites `step`.
+- **A queued job's wait is `LPOS` on the queue list** — the index *is* the
+  number of jobs ahead, and `_peek` reads it in the same pipeline as the
+  status and meta, so a poll still costs one round trip. It comes back as
+  `ahead` on `JobResult` and is None once a worker has the job, which is
+  exactly when `progress`/`step` start saying something.
 - **The theme is a hidden `<span id="theme-state" data-theme=...>`** swapped
   by `POST /theme`. `style.css` reads only that span; an absent attribute lets
   `prefers-color-scheme` decide. Do not drive it from `:checked`.

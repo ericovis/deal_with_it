@@ -228,6 +228,44 @@ class TestPayloadAndRetry:
         assert jobs.resubmit('long-gone') is None
 
 
+class TestQueuePosition:
+    """How long a queued job still has to wait, in jobs."""
+
+    def test_the_first_job_in_is_next_up(self, async_queue, stub_task):
+        stub_task(support.SUCCESS)
+        job_id, _ = jobs.enqueue({'url': 'https://example.com/a.png', 'base64': None})
+        assert jobs.result_for(job_id).ahead == 0
+
+    def test_each_job_counts_the_ones_in_front_of_it(self, async_queue, stub_task):
+        stub_task(support.SUCCESS)
+        ids = [jobs.enqueue({'url': f'https://example.com/{n}.png', 'base64': None})[0]
+               for n in range(3)]
+        assert [jobs.result_for(job_id).ahead for job_id in ids] == [0, 1, 2]
+
+    def test_the_queue_shortens_as_jobs_are_taken(self, async_queue, stub_task, drain):
+        stub_task(support.SUCCESS)
+        first, second = (jobs.enqueue({'url': f'https://example.com/{n}.png',
+                                       'base64': None})[0] for n in range(2))
+        assert jobs.result_for(second).ahead == 1
+        drain(max_jobs=1)
+        assert jobs.result_for(first).state == JobState.FINISHED
+        assert jobs.result_for(second).ahead == 0
+
+    def test_a_job_nobody_is_waiting_behind_reports_nothing(self, sync_queue, stub_task):
+        """A finished job is out of the list, so there is no position to give."""
+        stub_task(support.SUCCESS)
+        job_id, _ = jobs.enqueue({'url': 'https://example.com/a.png', 'base64': None})
+        assert jobs.result_for(job_id).ahead is None
+
+    def test_the_position_rides_along_with_describe(self, async_queue, stub_task):
+        stub_task(support.SUCCESS)
+        jobs.enqueue({'url': 'https://example.com/a.png', 'base64': None})
+        job_id, _ = jobs.enqueue({'url': 'https://example.com/b.png', 'base64': None},
+                                 meta={'kind': 'url', 'label': 'b.png'})
+        result, source = jobs.describe(job_id)
+        assert (result.ahead, source.label) == (1, 'b.png')
+
+
 class TestLightPolling:
     """A pending job is polled once a second per card, and its hash holds the
     whole image. Polls must read only status and meta."""

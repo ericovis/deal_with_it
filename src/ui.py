@@ -381,13 +381,27 @@ def _faces(count: int | None) -> str:
     return f' · {count} face' if count == 1 else f' · {count} faces'
 
 
+def _wait(ahead: int | None) -> str:
+    """How much queue is in front of a card, in words.
+
+    None means the id is not in the queue list: either a worker already has
+    it, or this is one of RQ's deferred/scheduled states, which we never
+    create. Both read the same to someone waiting.
+    """
+    if ahead is None:
+        return 'In the queue'
+    if ahead == 0:
+        return 'Next up'
+    return '1 job ahead' if ahead == 1 else f'{ahead} jobs ahead'
+
+
 def _subtitle(result: JobResult, source: JobSource) -> str:
     kind = KIND_LABELS[source.kind]
     if result.state == JobState.STARTED:
         step = result.step or 'Working on it'
         return f'{step} · {result.progress}%' if result.progress is not None else step
     if not result.state.is_terminal:
-        return 'In the queue'
+        return _wait(result.ahead)
     if result.state == JobState.FINISHED:
         return f'{kind}{_faces(source.faces)}'
     return kind
@@ -652,6 +666,10 @@ def docs_page(theme: str | None, reachable: bool) -> tuple:
                     P('Submissions are limited per client and refused with ', Code('429'),
                       ' (too many in a minute) or ', Code('503'), ' (the queue is full); '
                       'both carry a ', Code('Retry-After'), ' header.'),
+                    P('A ', Code('queued'), ' job also carries ', Code('ahead'), ': how '
+                      'many jobs are in front of it, with ', Code('0'), ' meaning it is '
+                      'next. It goes null once a worker picks the job up, which is when ',
+                      Code('progress'), ' and ', Code('step'), ' take over.'),
                     P('While a job runs, ', Code('progress'), ' and ', Code('step'),
                       ' report the stage it has reached. They are checkpoints rather than '
                       'measurements: neither the detector nor Pillow reports how far '
