@@ -47,6 +47,14 @@ dev = [
     "fakeredis>=2.26",
     "ruff>=0.9",
 ]
+# Kept out of `dev` on purpose: a browser engine is a heavy thing to make
+# every contributor download to run the unit tests. `uv sync --group e2e`,
+# then `uv run playwright install chromium`. Without it tests/e2e is not
+# collected at all and `uv run pytest` still passes.
+e2e = [
+    "playwright>=1.49",
+    "pytest-playwright>=0.6",
+]
 
 [tool.uv]
 # Not a distributable package -- it is a service, run from the source tree.
@@ -60,6 +68,7 @@ testpaths = ["tests"]
 addopts = "--strict-markers"
 markers = [
     "faces: needs the optional face_recognition stack (install the 'worker' extra)",
+    "e2e: drives a real browser against a real server (install the 'e2e' group)",
 ]
 filterwarnings = [
     "error::DeprecationWarning:src.*",
