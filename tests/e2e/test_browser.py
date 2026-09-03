@@ -3,17 +3,20 @@
 import pytest
 from playwright.sync_api import Page, expect
 
+from src.ui import SAMPLES
 from tests.conftest import make_png
 from tests.e2e.conftest import TIMEOUT
 
 pytestmark = [pytest.mark.e2e, pytest.mark.faces]
 
-#: Position in the sample grid, which is the stable way to point at one.
-SAMPLES = {'me': 1, 'group': 2, 'glasses': 3}
+#: A tile is pointed at by its position in the grid, and the grid is rendered
+#: in the order SAMPLES is declared -- read from there rather than written out
+#: here, so adding a sample cannot silently make these click the wrong one.
+POSITION = {name: index for index, name in enumerate(SAMPLES, start=1)}
 
 
 def try_sample(page: Page, name: str) -> None:
-    page.locator(f'.samples button:nth-child({SAMPLES[name]})').click()
+    page.locator(f'.samples button:nth-child({POSITION[name]})').click()
 
 
 def first_card(page: Page):
