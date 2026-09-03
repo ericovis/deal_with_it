@@ -896,7 +896,6 @@ body:has(#queue article) .clear {
     border-radius: 3px;
 }
 
-
 .download {
     display: inline-flex;
     align-items: center;

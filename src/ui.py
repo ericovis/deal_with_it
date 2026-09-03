@@ -59,6 +59,7 @@ logger = logging.getLogger(__name__)
 POLL_INTERVAL = '1s'
 HEALTH_INTERVAL = '30s'
 REPO = 'https://github.com/ericovis/deal_with_it'
+MEME = 'https://knowyourmeme.com/memes/deal-with-it'
 LICENSE_URL = f'{REPO}/blob/master/LICENSE'
 IMG_DIR = Path(__file__).resolve().parent / 'static' / 'img'
 THEME_COOKIE = 'dwi_theme'
@@ -359,7 +360,7 @@ def session_section() -> Section:
 
 def page(theme: str | None, reachable: bool) -> tuple:
     return (
-        *head_tags('Deal With It | Eric Magalhães'),
+        *head_tags('Deal With It!'),
         site_header('app', theme, reachable),
         Main(app_pane(), session_section(), cls='container layout'),
         site_footer('app'),
@@ -582,8 +583,9 @@ def docs_page(theme: str | None, reachable: bool) -> tuple:
             Article(
                 Section(
                     H1('How it works'),
-                    P('Give it a picture, get it back with the meme sunglasses on '
-                      'every face in it.', cls='lead'),
+                    P('Give it a picture, get it back with the ',
+                      A('meme sunglasses', href=MEME),
+                      ' on every face in it.', cls='lead'),
                     Div(
                         figure('/static/img/me.jpg', 'Original picture', 'Turns this'),
                         figure('/static/img/deal_with_me.png', 'Processed picture',
