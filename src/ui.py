@@ -114,7 +114,8 @@ def sample_data_uri(name: str) -> str:
     Samples go through the queue as base64 rather than as a URL to
     ``/static``: the worker's SSRF guard refuses to fetch anything that
     resolves to a private address, and our own host is one. Safe to cache --
-    three files, fixed at build time, and the strings are immutable.
+    a fixed handful of files, fixed at build time, and the strings are
+    immutable.
     """
     sample = SAMPLES[name]
     payload = base64.b64encode((IMG_DIR / sample.filename).read_bytes()).decode()
