@@ -183,7 +183,9 @@ Every numbered pitfall from the original audit, for the record:
   resolution when connecting — a rebinding attacker has a window. Closing it
   means pinning the socket to the validated IP, which breaks TLS hostname
   verification.
-- `face_recognition_models` puts ~100 MB of model data in the worker image.
+- `face_recognition_models` puts ~100 MB of model data in the worker image,
+  which is why the Dockerfile has separate `web` (473 MB) and `worker`
+  (1.13 GB) targets. `docker compose` uses the `dev` target for both.
 - The HOG detector is CPU-only and mediocre on small or side-on faces.
 - `style.css` is hand-written from 2020 and has had no responsive testing
   since the rewrite.
