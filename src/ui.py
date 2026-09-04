@@ -55,6 +55,7 @@ from starlette.concurrency import run_in_threadpool
 from starlette.responses import Response
 
 from src import images, jobs, throttle
+from src.assets import asset
 from src.config import get_settings
 from src.models import ImageRequest, JobResult, JobSource, JobState, SourceKind
 
@@ -212,17 +213,18 @@ def head_tags(title: str, theme: str | None) -> tuple:
         Meta(property='og:image', content=card),
         Meta(property='og:description',
              content='A Python API for creating "Deal With It"-like Images.'),
-        Link(rel='icon', href='/static/img/favicon.png', type='image/png', sizes='16x16'),
-        Link(rel='icon', href='/static/img/icons/favicon-64.png', type='image/png',
+        Link(rel='icon', href=asset('/static/img/favicon.png'), type='image/png',
+             sizes='16x16'),
+        Link(rel='icon', href=asset('/static/img/icons/favicon-64.png'), type='image/png',
              sizes='64x64'),
-        Link(rel='apple-touch-icon', href='/static/img/icons/apple-touch-icon.png',
+        Link(rel='apple-touch-icon', href=asset('/static/img/icons/apple-touch-icon.png'),
              sizes='180x180'),
-        Link(rel='manifest', href='/static/manifest.webmanifest'),
+        Link(rel='manifest', href=asset('/static/manifest.webmanifest')),
         Link(rel='preconnect', href='https://fonts.googleapis.com'),
         Link(rel='stylesheet', href='https://fonts.googleapis.com/css2?'
                                     'family=Manrope:wght@400;500;600;700;800&'
                                     'family=Fira+Code:wght@400;500&display=swap'),
-        Link(rel='stylesheet', href='/static/css/style.css'),
+        Link(rel='stylesheet', href=asset('/static/css/style.css')),
     )
 
 
@@ -267,7 +269,7 @@ def site_header(active: str, theme: str | None, reachable: bool) -> Header:
 
     return Header(
         Div(
-            A(Img(src='/static/img/glasses.svg', alt=''), Span('Deal With It!'),
+            A(Img(src=asset('/static/img/glasses.svg'), alt=''), Span('Deal With It!'),
               href='/', cls='brand'),
             Nav(
                 # Wrapped so the mobile grid can place the three of them as
@@ -360,7 +362,7 @@ def upload_form(replace: bool = False) -> Form:
               hx_encoding='multipart/form-data',
               hx_target='#queue', hx_swap='afterbegin'),
         Label(
-            Img(src='/static/img/glasses.svg', alt=''),
+            Img(src=asset('/static/img/glasses.svg'), alt=''),
             # Two sets of words for one card: dropping is a desktop idea and
             # a phone has no computer to browse. Swapped by media query
             # rather than by sniffing the browser.
@@ -406,7 +408,7 @@ def upload_form(replace: bool = False) -> Form:
 def sample_tile(name: str) -> Button:
     sample = SAMPLES[name]
     return Button(
-        Img(src=f'/static/img/{sample.filename}', alt=''),
+        Img(src=asset(f'/static/img/{sample.filename}'), alt=''),
         Span(B(sample.title), Span(sample.filename), cls='caption'),
         type='button',
         cls='sample',
@@ -694,7 +696,7 @@ def snippet(text: str) -> Div:
 
 
 def figure(src: str, alt: str, caption: str) -> Figure:
-    return Figure(Img(src=src, alt=alt), Figcaption(caption))
+    return Figure(Img(src=asset(src), alt=alt), Figcaption(caption))
 
 
 def tile(name: str, description: str) -> Div:
@@ -951,7 +953,7 @@ def create_ui():
         # Samples do not reset the form: the buttons sit outside it.
         return _enqueue(
             {'url': None, 'base64': sample_data_uri(name)},
-            SourceKind.SAMPLE, sample.filename, f'/static/img/{sample.filename}', client,
+            SourceKind.SAMPLE, sample.filename, asset(f'/static/img/{sample.filename}'), client,
         )
 
     async def _submit_file(upload: UploadFile, client: str | None):
