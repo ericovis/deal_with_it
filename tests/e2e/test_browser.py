@@ -111,6 +111,15 @@ class TestSubmitting:
         page.locator('#files').set_input_files(picture)
         expect(page.locator('#queue article')).to_have_count(2, timeout=TIMEOUT)
 
+    def test_clicking_anywhere_on_the_dropzone_opens_the_picker(self, page: Page):
+        """The card is no longer the label itself -- it holds the camera
+        button too -- so the label's hit area is stretched back over it. A
+        click on the padding has to reach the file input all the same."""
+        page.goto('/')
+        with page.expect_file_chooser() as chooser:
+            page.locator('.dropzone').click(position={'x': 6, 'y': 6})
+        assert chooser.value.is_multiple(), 'the library input, not the camera'
+
     def test_a_typed_url_survives_an_upload(self, page: Page, tmp_path):
         """The form is no longer swapped out from under a file post, so
         whatever is in the URL field stays there."""
@@ -272,6 +281,16 @@ class TestOnAPhone:
         page.locator('.addbar-item.show-samples .open').click()
         expect(page.locator('.sample-strip')).to_be_visible()
         expect(page.locator('#url')).to_be_hidden(), 'one panel at a time'
+
+    def test_the_two_buttons_reach_the_two_inputs(self, page: Page):
+        """They sit inside the card, beside the label rather than in it."""
+        page.goto('/')
+        with page.expect_file_chooser() as camera:
+            page.locator('.pick-row .camera').click()
+        assert not camera.value.is_multiple(), 'one photo at a time'
+        with page.expect_file_chooser() as library:
+            page.locator('.pick-row .ghost').click()
+        assert library.value.is_multiple()
 
     def test_a_picture_from_the_camera_becomes_a_card(self, page: Page, tmp_path):
         """The camera input posts for itself, so a phone gets one card and

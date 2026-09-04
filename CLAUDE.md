@@ -118,6 +118,12 @@ Invariants worth knowing before editing:
 - **`#form` is never `display: none`.** The camera and library file inputs
   live in it, and a label cannot open a picker for an input with no box, so
   results mode hides the form's children instead.
+- **The dropzone card is a `<div>`, not the label.** On a phone the card also
+  holds a "Take a photo" label, and a label cannot nest in a label, so the
+  label is `.dropzone-face` inside it and `.dropzone-face::before` stretches
+  its hit area back over the whole card -- which is what keeps a click or a
+  drop on the padding working. `.pick-row` is `position: relative` so its two
+  buttons sit above that overlay, and `order` puts the limits line after them.
 - **The docs contents list is a `<details>`.** Above 860px it is forced open
   with `::details-content { content-visibility: visible }` and the summary is
   made inert, so the sidebar is the label and links it always was.
