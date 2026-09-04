@@ -3,10 +3,13 @@ dict out. Must not import anything web-related."""
 
 import logging
 import re
+from datetime import UTC, datetime, timedelta
+from uuid import uuid4
 
+from PIL import Image
 from rq import get_current_job
 
-from src import images
+from src import derivatives, images
 from src.config import get_settings
 from src.errors import DealWithItError
 from src.models import ImageRequest
@@ -42,11 +45,19 @@ def record_faces(faces: list, detection: str) -> None:
     job.save_meta()
 
 
-def process_image(payload: dict) -> dict:
-    """Fetch or decode the image, draw the glasses, return a data URI.
+def _job_id() -> str:
+    """Whose directory the pictures go in. Falls back to an id of its own so
+    the task can still be called directly, which the tests do."""
+    job = get_current_job()
+    return job.id if job is not None else f'detached-{uuid4().hex}'
 
-    Expected failures come back as an ``error`` string; anything else raises
-    and lands in RQ's failed registry.
+
+def process_image(payload: dict) -> dict:
+    """Fetch or decode the image, draw the glasses, write the derivatives.
+
+    Returns references into the blob store, not pictures: nothing
+    multi-megabyte goes back through Redis. Expected failures come back as an
+    ``error`` string; anything else raises and lands in RQ's failed registry.
     """
     settings = get_settings()
     request = ImageRequest.model_validate(payload)
@@ -69,7 +80,20 @@ def process_image(payload: dict) -> dict:
         record_faces(processor.faces, processor.detection)
     except DealWithItError as exc:
         logger.info('rejected image: %s', exc)
-        return {'image': None, 'error': str(exc)}
+        return {'images': None, 'error': str(exc)}
 
-    report_progress(90, 'Encoding the result')
-    return {'image': processor.base64_output, 'error': None}
+    report_progress(90, 'Writing the pictures')
+    job_id = _job_id()
+    # Not `images`: that name is the module this function fetches through.
+    written, downloads = derivatives.write_result(
+        job_id, processor.output, processor.img_format)
+    written |= derivatives.write_before(job_id, Image.fromarray(array))
+    expires_at = datetime.now(UTC) + timedelta(seconds=settings.blob_ttl)
+    return {
+        'images': written,
+        'downloads': downloads,
+        # Stamped when the files land, not read back off their mtime: a retry
+        # hard-links its source, which would make an mtime lie.
+        'expires_at': expires_at.isoformat(),
+        'error': None,
+    }

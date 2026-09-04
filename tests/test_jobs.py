@@ -10,6 +10,7 @@ from src.models import JobState
 from tests import support
 
 PAYLOAD = {'url': 'https://example.test/a.png', 'base64': None}
+UPLOADED = 'data:image/png;base64,c3VuZ2xhc3Nlcw=='
 
 
 class TestEnqueue:
@@ -45,12 +46,23 @@ class TestResultFor:
     def test_unknown_job_is_none(self, sync_queue):
         assert jobs.result_for('does-not-exist') is None
 
-    def test_finished_job_carries_the_image(self, sync_queue, stub_task):
+    def test_finished_job_points_at_its_pictures(self, sync_queue, stub_task):
         stub_task(support.SUCCESS)
-        result = jobs.result_for(jobs.enqueue(PAYLOAD)[0])
+        job_id, _ = jobs.enqueue(PAYLOAD)
+        result = jobs.result_for(job_id)
         assert result.state == JobState.FINISHED
-        assert result.image == support.IMAGE
+        assert result.images.view == f'/i/{job_id}/view.webp'
+        assert result.images.thumb == f'/i/{job_id}/thumb.webp'
+        assert result.images.full == f'/i/{job_id}/result.png'
+        assert result.expires_at is not None
         assert result.error is None
+
+    def test_a_finished_job_offers_its_downloads_by_format(self, sync_queue, stub_task):
+        stub_task(support.SUCCESS)
+        job_id, _ = jobs.enqueue(PAYLOAD)
+        downloads = jobs.result_for(job_id).downloads
+        assert downloads['png'] == f'/i/{job_id}/result.png'
+        assert downloads['webp'] == f'/i/{job_id}/result.webp'
 
     def test_rejected_input_is_reported_as_a_failure_with_its_message(self, sync_queue, stub_task):
         """The job succeeded; the image did not. The caller cares about the message."""
@@ -58,7 +70,7 @@ class TestResultFor:
         result = jobs.result_for(jobs.enqueue(PAYLOAD)[0])
         assert result.state == JobState.FAILED
         assert result.error == 'No faces were found in this image.'
-        assert result.image is None
+        assert result.images is None
 
     def test_a_crash_is_reported_generically(self, sync_queue, stub_task, caplog):
         """A traceback is for our logs, never for the response body."""
@@ -80,7 +92,7 @@ class TestResultFor:
         stub_task(support.SUCCESS)
         result = jobs.result_for(jobs.enqueue(PAYLOAD)[0])
         assert result.state == JobState.QUEUED
-        assert result.image is None
+        assert result.images is None
 
     def test_queued_becomes_finished_once_a_worker_runs(self, async_queue, stub_task, drain):
         stub_task(support.SUCCESS)
@@ -91,7 +103,7 @@ class TestResultFor:
 
         result = jobs.result_for(job_id)
         assert result.state == JobState.FINISHED
-        assert result.image == support.IMAGE
+        assert result.images.view == f'/i/{job_id}/view.webp'
 
 
 class TestConnection:
@@ -172,11 +184,14 @@ class TestMetadata:
 
     def test_an_upload_with_no_meta_gets_a_stand_in_name(self, sync_queue, stub_task):
         stub_task(support.SUCCESS)
-        job_id, _ = jobs.enqueue({'url': None, 'base64': support.IMAGE})
+        job_id, _ = jobs.enqueue({'url': None, 'base64': UPLOADED})
         _, source = jobs.describe(job_id)
         assert source.kind == 'upload'
         assert source.label == 'Uploaded image'
-        assert source.thumb is None, 'nothing cheap enough to show on every poll'
+        assert source.thumb is None, (
+            'an upload arrives with nothing to show; the card takes the '
+            'thumbnail off the finished result instead'
+        )
 
     @pytest.mark.parametrize('url,expected', [
         ('https://example.test/a.png', 'example.test/a.png'),
@@ -288,7 +303,7 @@ class TestLightPolling:
         result, source = jobs.describe(job_id)
         assert result.state == JobState.QUEUED
         assert source.label == 'a.png'
-        assert source.original is None
+        assert source.thumb is None, 'nothing to show until the worker writes one'
 
     def test_a_queued_job_is_read_without_its_payload(
             self, async_queue, stub_task, no_full_fetch):
@@ -313,8 +328,7 @@ class TestLightPolling:
         job_id, _ = jobs.enqueue(self.BIG, meta={'kind': 'upload', 'label': 'a.png'})
         result, source = jobs.describe(job_id)
         assert result.state == JobState.FINISHED
-        assert result.image == support.IMAGE
-        assert source.original == self.BIG['base64']
+        assert result.images.view == f'/i/{job_id}/view.webp'
 
     def test_an_unknown_id_is_none(self, async_queue, no_full_fetch):
         assert jobs.describe('nope') is None

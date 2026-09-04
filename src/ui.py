@@ -57,7 +57,14 @@ from starlette.responses import Response
 from src import images, jobs, throttle
 from src.assets import asset
 from src.config import get_settings
-from src.models import ImageRequest, JobResult, JobSource, JobState, SourceKind
+from src.models import (
+    ImageRequest,
+    JobImages,
+    JobResult,
+    JobSource,
+    JobState,
+    SourceKind,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -545,7 +552,7 @@ def _subtitle(result: JobResult, source: JobSource) -> str:
     return kind
 
 
-def _result_view(job_id: str, image: str, before: str | None, extension: str) -> Div:
+def _result_view(job_id: str, pictures: JobImages, downloads: dict[str, str]) -> Div:
     """The finished image, its Before/After toggle, and the full-screen view.
 
     The full-screen view re-lays out the *same* frame rather than a copy, so
@@ -554,6 +561,7 @@ def _result_view(job_id: str, image: str, before: str | None, extension: str) ->
     """
     toggle = f'full-{job_id}'
     zoom = f'zoom-{job_id}'
+    image, before = pictures.view, pictures.before
     footer = [
         Span(cls='spacer'),
         Input(type='checkbox', id=toggle, cls='full-toggle visually-hidden'),
@@ -564,8 +572,11 @@ def _result_view(job_id: str, image: str, before: str | None, extension: str) ->
         # too small to read. Native pinch still works either way.
         Input(type='checkbox', id=zoom, cls='zoom-toggle visually-hidden'),
         Label(Span('Zoom', cls='in'), Span('Fit', cls='out'), fr=zoom, cls='zoom'),
-        A(f'Download {extension.upper()}', href=image,
-          download=f'deal-with-it-{job_id[:8]}.{extension}', cls='download'),
+        # Full resolution, straight off disk. The `download` attribute names
+        # the saved file; nothing server-side is involved.
+        *[A(f'Download {fmt.upper()}', href=url,
+            download=f'deal-with-it-{job_id[:8]}.{fmt}', cls='download')
+          for fmt, url in sorted(downloads.items())],
     ]
     # Tapping the picture opens it, which is what a phone expects. Sized over
     # the frame rather than wrapping it, because the frame is also the
@@ -624,20 +635,20 @@ def card(job_id: str, result: JobResult | None, source: JobSource,
     label, chip = CHIPS.get(
         result.state, CHIPS[JobState.QUEUED] if polls else CHIPS[JobState.FAILED])
 
-    # Both halves of a finished card go out as URLs, never inline: a 7.9 MB
-    # upload inlined twice over made a 42 MB poll response, on a host whose
-    # two cores the worker wants. A URL job already has a remote one; an
-    # upload has nothing to show until it finishes.
-    submitted = source.thumb or (f'/jobs/{job_id}/source' if finished else None)
+    # A submission that came with a picture we already serve (a URL, a
+    # sample tile) shows that; anything else waits for the worker to write a
+    # thumbnail. Never the picture itself: inlined twice over, a 7.9 MB upload
+    # made a 42 MB poll response on a host whose two cores the worker wants.
+    pictures = result.images
+    submitted = source.thumb or (pictures.thumb if pictures else None)
 
     body: list = []
     if result.state == JobState.STARTED:
         body.append(Progress(value=result.progress, max=100))
     elif polls:
         body.append(Progress(max=100))
-    elif finished and result.image:
-        body.append(_result_view(job_id, f'/jobs/{job_id}/result', submitted,
-                                 _extension_of(result.image)))
+    elif finished and pictures:
+        body.append(_result_view(job_id, pictures, result.downloads or {}))
     else:
         message = result.error or 'That did not work.'
         retry = [Button('Retry', type='button', cls='retry',
@@ -673,30 +684,6 @@ def card(job_id: str, result: JobResult | None, source: JobSource,
         hx_trigger=f'load delay:{POLL_INTERVAL}' if polls else None,
         hx_swap='outerHTML' if polls else None,
     )
-
-
-def _image_response(found: tuple[bytes, str] | None) -> Response:
-    """One of a job's two pictures, or a 404 once the job has expired.
-
-    A job id is a uuid4 and neither picture ever changes under it, so the
-    browser may keep both for as long as the job itself lives. Private,
-    because the picture is: nothing in front of us may hold a copy.
-    ``nosniff`` is already on every response (``BodyLimit`` in
-    :mod:`src.app`), which is what makes the media type below safe to take
-    from a submitted image's own header.
-    """
-    if found is None:
-        return Response('', status_code=404)
-    payload, media_type = found
-    return Response(payload, media_type=media_type, headers={
-        'Cache-Control': f'private, max-age={get_settings().result_ttl}, immutable',
-    })
-
-
-def _extension_of(image: str) -> str:
-    """What to call the file the Download link saves. The result keeps the
-    format the picture came in as, so the data URI header is the answer."""
-    return 'jpg' if image.startswith('data:image/jpeg') else 'png'
 
 
 def card_for(job_id: str) -> Article:
@@ -1047,17 +1034,6 @@ def create_ui():
     @app.get('/jobs/{job_id}')
     def job_fragment(job_id: str):
         return card_for(job_id)
-
-    @app.get('/jobs/{job_id}/result')
-    def job_result_image(job_id: str):
-        """The processed picture, so the card can carry a URL rather than the
-        image itself. Sync `def`: it reads the whole job out of Redis."""
-        return _image_response(jobs.result_image(job_id))
-
-    @app.get('/jobs/{job_id}/source')
-    def job_source_image(job_id: str):
-        """The picture as submitted: the card's thumbnail and Before half."""
-        return _image_response(jobs.source_image(job_id))
 
     @app.post('/jobs/{job_id}/retry')
     def retry_job(request, job_id: str):

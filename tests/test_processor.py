@@ -1,13 +1,12 @@
 """Tests that exercise the real face detector against the repo's own images."""
 
-import base64
-from io import BytesIO
 from pathlib import Path
 
 import numpy as np
 import pytest
 from PIL import Image, ImageOps
 
+from src import blobs, derivatives
 from src.processors.base import BaseProcessor
 from src.processors.deal_with_it import (
     DealWithItProcessor,
@@ -26,43 +25,13 @@ def as_array(path) -> np.ndarray:
         return np.asarray(ImageOps.exif_transpose(img).convert('RGB'), dtype=np.uint8)
 
 
-def decode_output(data_uri: str) -> Image.Image:
-    payload = data_uri.split(',', 1)[1]
-    return Image.open(BytesIO(base64.b64decode(payload)))
-
-
 class TestBaseProcessor:
     def test_call_is_abstract(self, png_bytes):
         with pytest.raises(NotImplementedError):
             BaseProcessor(np.zeros((2, 2, 3), dtype=np.uint8)).call()
 
     def test_output_is_none_before_processing(self):
-        assert BaseProcessor(np.zeros((2, 2, 3), dtype=np.uint8)).base64_output is None
-
-    def test_encoding_is_memoised_on_the_instance(self):
-        """Guards the fix for a functools.cache that leaked every processor."""
-        processor = BaseProcessor(np.zeros((2, 2, 3), dtype=np.uint8))
-        processor.output = Image.new('RGB', (2, 2), 'red')
-        first = processor.base64_output
-        assert first is processor.base64_output
-
-        other = BaseProcessor(np.zeros((2, 2, 3), dtype=np.uint8))
-        other.output = Image.new('RGB', (2, 2), 'blue')
-        assert other.base64_output != first, 'each instance must encode its own output'
-
-    def test_no_module_level_cache_retains_instances(self):
-        """A cache keyed on self would keep the object alive after we drop it."""
-        import gc
-        import weakref
-
-        processor = BaseProcessor(np.zeros((2, 2, 3), dtype=np.uint8))
-        processor.output = Image.new('RGB', (2, 2), 'red')
-        assert processor.base64_output is not None
-        ref = weakref.ref(processor)
-
-        del processor
-        gc.collect()
-        assert ref() is None
+        assert BaseProcessor(np.zeros((2, 2, 3), dtype=np.uint8)).output is None
 
 
 class TestDealWithItProcessor:
@@ -76,19 +45,23 @@ class TestDealWithItProcessor:
         assert result.shape == original.shape, 'the output keeps the original dimensions'
         assert not np.array_equal(result, original), 'something must have been drawn'
 
-    def test_a_jpeg_output_is_a_jpeg_data_uri(self, single_face_image):
+    def test_a_jpeg_input_is_written_out_as_a_jpeg(self, single_face_image, blob_root):
         processor = DealWithItProcessor(as_array(single_face_image))
         processor.img_format = 'JPEG'
         processor.call()
-        assert processor.base64_output.startswith('data:image/jpeg;base64,')
-        assert decode_output(processor.base64_output).format == 'JPEG'
+        images, downloads = derivatives.write_result('job1', processor.output, 'JPEG')
+        assert images['full'] == 'job1/result.jpg'
+        with Image.open(blobs.path(images['full'])) as written:
+            assert written.format == 'JPEG'
 
-    def test_output_is_a_png_data_uri(self, single_face_image):
+    def test_anything_else_is_written_out_as_a_png(self, single_face_image, blob_root):
         processor = DealWithItProcessor(as_array(single_face_image))
         processor.call()
-
-        assert processor.base64_output.startswith('data:image/png;base64,')
-        assert decode_output(processor.base64_output).format == 'PNG'
+        images, downloads = derivatives.write_result('job1', processor.output, 'PNG')
+        assert images['full'] == 'job1/result.png'
+        with Image.open(blobs.path(images['full'])) as written:
+            assert written.format == 'PNG'
+        assert 'jpg' in downloads, 'a PNG photo is worth offering as a JPEG'
 
     def test_draws_on_every_face_in_a_group_photo(self, multiple_faces_image):
         original = as_array(multiple_faces_image)

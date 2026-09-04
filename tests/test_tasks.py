@@ -2,8 +2,9 @@
 
 import numpy as np
 import pytest
+from PIL import Image
 
-from src import images, jobs, tasks
+from src import blobs, images, jobs, tasks
 from src.images import ImageSourceError
 from src.processors.deal_with_it import NoFacesFound
 from tests import support
@@ -35,13 +36,13 @@ def stub_processor(monkeypatch):
             detection = 'plain'
 
             def __init__(self, array, **kwargs):
-                self.base64_output = None
+                self.output = None
                 seen['processor'] = self
 
             def call(self):
                 if isinstance(outcome, Exception):
                     raise outcome
-                self.base64_output = outcome
+                self.output = outcome
 
         monkeypatch.setattr(tasks, 'DealWithItProcessor', FakeProcessor)
         return seen
@@ -56,19 +57,38 @@ class TestOutputFormat:
     def test_a_jpeg_comes_back_as_a_jpeg_and_everything_else_as_png(
             self, stub_load, stub_processor, source_format, expected):
         stub_load(np.zeros((2, 2, 3), dtype=np.uint8), source_format)
-        seen = stub_processor('data:image/png;base64,AAAA')
+        seen = stub_processor(Image.new('RGB', (2, 2), 'red'))
         tasks.process_image({'url': 'https://example.test/a', 'base64': None})
         assert seen['processor'].img_format == expected
 
 
-def test_returns_the_processed_image(stub_load, stub_processor):
+def test_writes_the_pictures_and_returns_where_they_went(stub_load, stub_processor, blob_root):
+    """Nothing multi-megabyte goes back through Redis: the return value is a
+    handful of references to files on a disk both tiers can see."""
     stub_load(np.zeros((4, 4, 3), dtype=np.uint8))
-    stub_processor('data:image/png;base64,AAAA')
+    stub_processor(Image.new('RGB', (8, 8), 'red'))
 
-    assert tasks.process_image({'url': 'https://example.test/a.png', 'base64': None}) == {
-        'image': 'data:image/png;base64,AAAA',
-        'error': None,
-    }
+    result = tasks.process_image({'url': 'https://example.test/a.png', 'base64': None})
+
+    assert result['error'] is None
+    assert set(result['images']) == {'full', 'view', 'thumb', 'before'}
+    for reference in result['images'].values():
+        assert blobs.path(reference).is_file(), reference
+    assert result['downloads']['png'] == result['images']['full']
+    assert 'webp' in result['downloads']
+    assert result['expires_at'], 'the card counts down to this'
+
+
+def test_a_small_picture_is_not_blown_up_to_fill_a_derivative(
+        stub_load, stub_processor, blob_root):
+    """Fitting never upscales: an 8px picture is already the right size for
+    anything below it, and stretching it would cost bytes for nothing."""
+    stub_load(np.zeros((4, 4, 3), dtype=np.uint8))
+    stub_processor(Image.new('RGB', (8, 8), 'red'))
+
+    result = tasks.process_image({'url': 'https://example.test/a.png', 'base64': None})
+    with Image.open(blobs.path(result['images']['view'])) as view:
+        assert view.size == (8, 8)
 
 
 def test_reports_a_bad_source_as_an_error_not_a_crash(stub_load):
@@ -76,7 +96,7 @@ def test_reports_a_bad_source_as_an_error_not_a_crash(stub_load):
     stub_load(ImageSourceError('The URL is not an image.'))
 
     result = tasks.process_image({'url': 'https://example.test/a.png', 'base64': None})
-    assert result == {'image': None, 'error': 'The URL is not an image.'}
+    assert result == {'images': None, 'error': 'The URL is not an image.'}
 
 
 def test_reports_a_faceless_image_as_an_error(stub_load, stub_processor):
@@ -85,7 +105,7 @@ def test_reports_a_faceless_image_as_an_error(stub_load, stub_processor):
     stub_processor(NoFacesFound('No faces were found in this image.'))
 
     result = tasks.process_image({'url': 'https://example.test/a.png', 'base64': None})
-    assert result == {'image': None, 'error': 'No faces were found in this image.'}
+    assert result == {'images': None, 'error': 'No faces were found in this image.'}
 
 
 def test_unexpected_errors_propagate(stub_load, stub_processor):

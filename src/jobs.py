@@ -15,10 +15,9 @@ from rq.exceptions import NoSuchJobError
 from rq.job import Job, JobStatus
 from rq.utils import str_to_date
 
-from src import images
+from src import blobs
 from src.config import get_settings
-from src.errors import DealWithItError
-from src.models import JobResult, JobSource, JobState, SourceKind
+from src.models import JobImages, JobResult, JobSource, JobState, SourceKind
 
 logger = logging.getLogger(__name__)
 
@@ -217,45 +216,6 @@ def payload_for(job_id: str) -> dict | None:
     return job.args[0] if job is not None and job.args else None
 
 
-#: What a card may serve back as an image. The submitted half carries a
-#: media type the *client* chose, so it is checked against this list rather
-#: than echoed; the bytes behind it are already known to be a picture,
-#: because the worker decoded them.
-IMAGE_TYPES = frozenset({'image/jpeg', 'image/png', 'image/webp', 'image/gif'})
-OPAQUE_TYPE = 'application/octet-stream'
-
-
-def _as_image(data_uri: str | None) -> tuple[bytes, str] | None:
-    """A stored data URI as the bytes and media type to answer a GET with."""
-    if not data_uri or not images.is_data_uri(data_uri):
-        return None
-    media_type = data_uri[len('data:'):data_uri.index(';')]
-    try:
-        payload = images.decode_data_uri(data_uri)
-    except DealWithItError:  # pragma: no cover - the worker read it already
-        return None
-    return payload, media_type if media_type in IMAGE_TYPES else OPAQUE_TYPE
-
-
-def result_image(job_id: str) -> tuple[bytes, str] | None:
-    """The processed image, for a card to point an ``<img>`` at.
-
-    A finished card used to carry the picture inline, twice over: a 7.9 MB
-    upload came back as a 42 MB poll response, on a host whose cores the
-    worker needs. As a URL it is fetched once, in parallel, and cached.
-    """
-    job = _fetch(job_id)
-    if job is None or job.get_status() != JobStatus.FINISHED:
-        return None
-    return _as_image((job.return_value() or {}).get('image'))
-
-
-def source_image(job_id: str) -> tuple[bytes, str] | None:
-    """The image as submitted: the "before" half, and the card's thumbnail."""
-    payload = payload_for(job_id) or {}
-    return _as_image(payload.get('base64'))
-
-
 def resubmit(job_id: str) -> tuple[str, JobState] | None:
     """Queue a failed job's payload again, as a new job.
 
@@ -292,7 +252,6 @@ def _source_of(meta: dict, payload: dict | None) -> JobSource:
         kind=kind,
         label=meta.get('label') or (label_for(payload) if payload else ''),
         thumb=meta.get('thumb') or url,
-        original=url or payload.get('base64'),
         faces=meta.get('faces'),
     )
 
@@ -316,14 +275,19 @@ def _finished_result(job: Job) -> JobResult:
     value = job.return_value() or {}
     if error := value.get('error'):
         return JobResult(job_id=job.id, state=JobState.FAILED, error=error)
-    image = value.get('image')
-    if not image:
-        logger.error('job %s finished without an image or an error: %r', job.id, value)
+    written = value.get('images')
+    if not written:
+        logger.error('job %s finished without pictures or an error: %r', job.id, value)
         return JobResult(job_id=job.id, state=JobState.FAILED, error=GENERIC_FAILURE)
     meta = job.meta or {}
-    return JobResult(job_id=job.id, state=JobState.FINISHED, image=image,
-                     progress=100, step='Done',
-                     faces=meta.get('landmarks') or None, detection=meta.get('detection'))
+    return JobResult(
+        job_id=job.id, state=JobState.FINISHED,
+        images=JobImages(**{role: blobs.url(ref) for role, ref in written.items()}),
+        downloads={fmt: blobs.url(ref) for fmt, ref in (value.get('downloads') or {}).items()},
+        expires_at=value.get('expires_at'),
+        progress=100, step='Done',
+        faces=meta.get('landmarks') or None, detection=meta.get('detection'),
+    )
 
 
 def is_broker_reachable() -> bool:

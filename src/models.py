@@ -1,5 +1,6 @@
 """Request and response schemas. Shape only: no network I/O in a validator."""
 
+from datetime import datetime
 from enum import StrEnum
 from typing import Self
 
@@ -81,11 +82,9 @@ class JobSource(BaseModel):
     kind: SourceKind = SourceKind.URL
     #: File name, or ``host/path`` for a URL.
     label: str = ''
-    #: A remote URL or a static path. None for an upload, which has only a
-    #: data URI, and that must not be re-sent on every poll.
+    #: A remote URL or a static path the submission already had. An upload
+    #: has neither until the worker has written it a thumbnail.
     thumb: str | None = None
-    #: What was actually submitted: the "before" half of a finished card.
-    original: str | None = None
     #: How many faces the worker drew on, once it knows.
     faces: int | None = None
 
@@ -113,13 +112,43 @@ class FaceRecord(BaseModel):
     )
 
 
+class JobImages(BaseModel):
+    """Where to fetch a finished job's pictures.
+
+    URLs, not bytes. The result used to come back as a base64 data URI, which
+    put megabytes through Redis and out again in every poll; these point at
+    files the reverse proxy serves off disk.
+    """
+
+    view: str = Field(description='The result at viewing size (WebP, 1600px). '
+                                  'What the card and the full-screen view show.')
+    thumb: str = Field(description='The result as a thumbnail (WebP, 160px).')
+    before: str | None = Field(
+        default=None, description='The submitted image at viewing size (WebP).')
+    full: str = Field(description='The result at full resolution, in the format '
+                                  'it was submitted in.')
+
+
 class JobResult(BaseModel):
-    """Poll response. ``image`` is set once state is ``finished``."""
+    """Poll response. ``images`` is set once state is ``finished``."""
 
     job_id: str
     state: JobState
-    image: str | None = Field(
-        default=None, description='The processed image as a data URI, once finished.'
+    images: JobImages | None = Field(
+        default=None, description='Where to fetch the result, once finished.'
+    )
+    downloads: dict[str, str] | None = Field(
+        default=None,
+        description='Full-resolution downloads by format, e.g. {"jpg": "...", '
+                    '"webp": "..."}. Which formats are offered depends on what '
+                    'was submitted.',
+    )
+    share_url: str | None = Field(
+        default=None, description='A page showing this result, safe to pass on.')
+    expires_at: datetime | None = Field(
+        default=None,
+        description='When the pictures above stop being fetchable. After this '
+                    'they are gone, and so is the share page.',
     )
     error: str | None = Field(
         default=None, description='Why the job failed, if it did.'

@@ -61,15 +61,30 @@ class TestCreateJob:
 
 
 class TestReadJob:
-    def test_returns_the_image_once_finished(self, client):
+    def test_returns_links_once_finished(self, client):
         job_id = client.post('/api/jobs', json=URL_BODY).json()['job_id']
 
         response = client.get(f'/api/jobs/{job_id}')
         assert response.status_code == 200
         body = response.json()
-        assert body == {'job_id': job_id, 'state': 'finished', 'image': support.IMAGE,
-                        'faces': None, 'detection': None, 'ahead': None,
-                        'error': None, 'progress': 100, 'step': 'Done'}
+        assert body['state'] == 'finished'
+        assert body['images'] == {
+            'view': f'/i/{job_id}/view.webp',
+            'thumb': f'/i/{job_id}/thumb.webp',
+            'before': f'/i/{job_id}/before.webp',
+            'full': f'/i/{job_id}/result.png',
+        }
+        assert body['downloads'] == {'png': f'/i/{job_id}/result.png',
+                                     'webp': f'/i/{job_id}/result.webp'}
+        assert body['expires_at'], 'so a caller knows how long the links last'
+        assert 'image' not in body, 'the base64 data URI is gone on purpose'
+
+    def test_the_links_it_hands_out_actually_fetch(self, client):
+        """A contract that returns URLs is only worth anything if they work."""
+        job_id = client.post('/api/jobs', json=URL_BODY).json()['job_id']
+        body = client.get(f'/api/jobs/{job_id}').json()
+        for url in list(body['images'].values()) + list(body['downloads'].values()):
+            assert client.get(url).status_code == 200, url
 
     def test_reports_a_rejected_image_with_its_reason(self, client, stub_task):
         stub_task(support.REJECTS)
@@ -78,7 +93,7 @@ class TestReadJob:
         body = client.get(f'/api/jobs/{job_id}').json()
         assert body['state'] == 'failed'
         assert body['error'] == 'No faces were found in this image.'
-        assert body['image'] is None
+        assert body['images'] is None
 
     def test_hides_the_details_of_a_crash(self, client, stub_task):
         stub_task(support.CRASHES)
@@ -99,7 +114,7 @@ class TestReadJob:
         job_id = client.post('/api/jobs', json=URL_BODY).json()['job_id']
         body = client.get(f'/api/jobs/{job_id}').json()
         assert body['state'] == 'queued'
-        assert body['image'] is None
+        assert body['images'] is None
 
 
 class TestHealth:

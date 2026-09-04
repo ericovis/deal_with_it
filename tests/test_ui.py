@@ -6,7 +6,7 @@ import re
 import pytest
 
 from src import blobs, jobs
-from src.models import JobResult, JobSource, JobState, SourceKind
+from src.models import JobImages, JobResult, JobSource, JobState, SourceKind
 from src.ui import IMG_DIR, THEME_COOKIE
 from tests import support
 from tests.conftest import make_png
@@ -448,7 +448,7 @@ class TestCards:
     def test_a_finished_job_shows_the_image_and_stops_polling(self, client, hx):
         job_id = self.start(client, hx)
         body = client.get(f'/jobs/{job_id}', headers=hx).text
-        assert f'src="/jobs/{job_id}/result"' in body
+        assert f'src="/i/{job_id}/view.webp"' in body
         assert 'class="chip done"' in body
         assert 'hx-get="/jobs/' not in body, 'the poll chain must end here'
 
@@ -488,7 +488,7 @@ class TestCards:
         """Duplicating the markup would make the browser fetch it twice."""
         job_id = self.start(client, hx)
         body = client.get(f'/jobs/{job_id}', headers=hx).text
-        assert body.count(f'src="/jobs/{job_id}/result"') == 1
+        assert body.count(f'src="/i/{job_id}/view.webp"') == 1
 
     def test_a_queued_job_keeps_polling(self, client, hx, async_queue, stub_task):
         stub_task(support.SUCCESS)
@@ -504,7 +504,7 @@ class TestCards:
         job_id = self.start(client, hx)
         drain()
         body = client.get(f'/jobs/{job_id}', headers=hx).text
-        assert f'src="/jobs/{job_id}/result"' in body
+        assert f'src="/i/{job_id}/view.webp"' in body
 
     def test_a_rejected_image_shows_the_reason_and_offers_a_retry(self, client, hx, stub_task):
         stub_task(support.REJECTS)
@@ -586,15 +586,15 @@ class TestBlobServing:
         assert client.get(path).status_code in (400, 404)
 
 
-class TestResultImages:
-    """A finished card points at its two pictures; it does not carry them.
+class TestResultPictures:
+    """A finished card points at the job's own files; it never carries one.
 
     Inlined, a 7.9 MB upload came back as a 42 MB poll response -- the
-    submitted image and the result, twice each -- down a phone connection and
-    off the same two cores the worker detects on.
+    submitted image and the result, twice each -- and even as URLs the
+    full-resolution files were megabytes for something shown 460 px tall.
     """
 
-    def upload(self, client, hx, payload: bytes = None, mime: str = 'image/png'):
+    def upload(self, client, hx, payload=None, mime='image/png'):
         return job_ids(submit(client, hx, files=[
             ('image', ('me.png', payload or make_png(), mime))]).text)[0]
 
@@ -602,54 +602,32 @@ class TestResultImages:
         job_id = self.upload(client, hx)
         body = client.get(f'/jobs/{job_id}', headers=hx).text
         assert 'base64,' not in body
-        assert f'src="/jobs/{job_id}/result"' in body
-        assert f'src="/jobs/{job_id}/source"' in body
+        assert f'src="/i/{job_id}/view.webp"' in body
 
-    def test_the_result_is_served_as_an_image(self, client, hx):
+    def test_the_card_shows_the_viewing_copy_not_the_full_size_one(self, client, hx):
+        """The full-resolution file exists, but only behind Download."""
         job_id = self.upload(client, hx)
-        response = client.get(f'/jobs/{job_id}/result')
-        assert response.status_code == 200
-        assert response.headers['content-type'].startswith('image/png')
-        assert response.content == b'sunglasses', 'the stub result, decoded'
-
-    def test_the_submitted_image_is_served_back_unchanged(self, client, hx):
-        original = make_png(color='blue')
-        job_id = self.upload(client, hx, original)
-        response = client.get(f'/jobs/{job_id}/source')
-        assert response.status_code == 200
-        assert response.content == original
-
-    def test_both_are_cacheable_but_never_by_anything_in_between(self, client, hx):
-        job_id = self.upload(client, hx)
-        for suffix in ('result', 'source'):
-            headers = client.get(f'/jobs/{job_id}/{suffix}').headers
-            assert 'private' in headers['cache-control']
-            assert 'immutable' in headers['cache-control']
-            assert headers['x-content-type-options'] == 'nosniff'
-
-    def test_a_media_type_we_do_not_serve_is_not_echoed_back(self, client, hx):
-        """The submitted half is labelled by whoever uploaded it."""
-        job_id = job_ids(submit(client, hx, files=[
-            ('image', ('x.svg', make_png(), 'image/svg+xml'))]).text)[0]
-        response = client.get(f'/jobs/{job_id}/source')
-        assert response.headers['content-type'].startswith('application/octet-stream')
-
-    def test_an_unknown_job_has_no_images(self, client):
-        assert client.get('/jobs/nope/result').status_code == 404
-        assert client.get('/jobs/nope/source').status_code == 404
-
-    def test_a_job_that_has_not_finished_has_no_result_yet(
-            self, client, hx, async_queue, stub_task):
-        stub_task(support.SUCCESS)
-        job_id = self.upload(client, hx)
-        assert client.get(f'/jobs/{job_id}/result').status_code == 404
-
-    def test_a_url_job_points_at_the_url_it_was_given(self, client, hx):
-        """Nothing was uploaded, so there is nothing for us to serve back."""
-        job_id = job_ids(submit(client, hx, url='https://example.test/a.png').text)[0]
         body = client.get(f'/jobs/{job_id}', headers=hx).text
-        assert 'src="https://example.test/a.png"' in body
-        assert f'/jobs/{job_id}/source' not in body
+        assert f'src="/i/{job_id}/result.png"' not in body
+        assert f'href="/i/{job_id}/result.png"' in body
+
+    def test_the_thumbnail_is_the_thumbnail_and_not_the_view(self, client, hx):
+        job_id = self.upload(client, hx)
+        body = client.get(f'/jobs/{job_id}', headers=hx).text
+        assert f'src="/i/{job_id}/thumb.webp" alt="" class="thumb"' in body
+
+    def test_every_format_the_worker_wrote_is_offered(self, client, hx):
+        job_id = self.upload(client, hx)
+        body = client.get(f'/jobs/{job_id}', headers=hx).text
+        assert 'Download PNG' in body and 'Download WEBP' in body
+        assert f'download="deal-with-it-{job_id[:8]}.png"' in body
+        assert f'download="deal-with-it-{job_id[:8]}.webp"' in body
+
+    def test_the_pictures_a_card_points_at_are_all_fetchable(self, client, hx):
+        job_id = self.upload(client, hx)
+        body = client.get(f'/jobs/{job_id}', headers=hx).text
+        for path in set(re.findall(r'"(/i/[^"]+)"', body)):
+            assert client.get(path).status_code == 200, path
 
 
 class TestPollingPayloads:
@@ -745,10 +723,12 @@ class TestProgress:
 
     def test_a_finished_card_says_how_many_faces_it_drew_on(self, client, hx, monkeypatch):
         monkeypatch.setattr(jobs, 'describe', lambda job_id: (
-            JobResult(job_id=job_id, state=JobState.FINISHED, image=support.IMAGE,
-                      progress=100, step='Done'),
+            JobResult(job_id=job_id, state=JobState.FINISHED, progress=100, step='Done',
+                      images=JobImages(view=f'/i/{job_id}/view.webp',
+                                       thumb=f'/i/{job_id}/thumb.webp',
+                                       full=f'/i/{job_id}/result.png')),
             JobSource(kind=SourceKind.SAMPLE, label='multiple_people.jpg',
-                      thumb='/static/img/multiple_people.jpg', faces=8),
+                      thumb='/static/img/tiles/multiple_people.webp', faces=8),
         ))
         assert 'Sample picture · 8 faces' in client.get('/jobs/whatever', headers=hx).text
 
