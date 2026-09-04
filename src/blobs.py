@@ -235,11 +235,22 @@ def cache_control() -> str:
 class BlobFiles(StaticFiles):
     """``/i`` for a bare uvicorn.
 
-    In production Caddy serves this directory itself and repeats all three
-    rules below in its own ``handle /i/*`` block -- including ``nosniff``,
-    which it must, because Caddy never runs the middleware in ``src.app``
-    that stamps it on everything else. Change one, change the other.
+    In production Caddy serves this directory itself and has to repeat both
+    rules below in its own ``handle /i/*`` block, **plus** ``nosniff`` -- which
+    a response served from here gets for free from ``BodyLimit`` in
+    :mod:`src.app`, and which Caddy bypasses entirely. Change one, change the
+    other.
+
+    Subclassing ``StaticFiles`` rather than writing a route: traversal
+    hardening, ETags, conditional requests and ``Range`` all come with it.
     """
+
+    def lookup_path(self, path: str) -> tuple[str, os.stat_result | None]:
+        # Resolved per request, not at construction: the app is built once at
+        # import and the store's location is configuration, so binding it here
+        # is what lets DWI_BLOB_DIR mean something afterwards.
+        self.all_directories = [root()]
+        return super().lookup_path(path)
 
     async def get_response(self, path: str, scope) -> Response:
         if any(part.startswith('.') for part in path.split('/')):
@@ -248,5 +259,4 @@ class BlobFiles(StaticFiles):
         response = await super().get_response(path, scope)
         if response.status_code < 400:
             response.headers['cache-control'] = cache_control()
-            response.headers['x-content-type-options'] = 'nosniff'
         return response

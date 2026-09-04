@@ -4,7 +4,7 @@ import re
 
 import pytest
 
-from src import jobs
+from src import blobs, jobs
 from src.models import JobResult, JobSource, JobState, SourceKind
 from src.ui import THEME_COOKIE
 from tests import support
@@ -534,6 +534,44 @@ class TestCards:
         job_id = self.start(client, hx)
         client.get(f'/jobs/{job_id}', headers=hx)
         assert list(tmp_path.iterdir()) == []
+
+
+class TestBlobServing:
+    """`/i` for a bare uvicorn. Caddy serves the same directory in production
+    and repeats every rule below; these are what say what the rules are."""
+
+    JOB = '9f2c4a1b-0000-4000-8000-000000000001'
+
+    def test_a_blob_is_served(self, client, blob_root):
+        blobs.put(self.JOB, 'view.webp', b'RIFF....WEBPVP8 ')
+        response = client.get(f'/i/{self.JOB}/view.webp')
+        assert response.status_code == 200
+        assert response.content == b'RIFF....WEBPVP8 '
+
+    def test_it_carries_the_cache_policy_and_nosniff(self, client, blob_root):
+        """The cache policy is this mount's own; nosniff comes from the
+        BodyLimit middleware, which is exactly what Caddy bypasses -- so the
+        Caddyfile has to say both."""
+        blobs.put(self.JOB, 'view.webp', b'x')
+        headers = client.get(f'/i/{self.JOB}/view.webp').headers
+        assert headers['cache-control'] == blobs.cache_control()
+        assert 'private' in headers['cache-control']
+        assert 'nosniff' in headers['x-content-type-options']
+
+    def test_a_write_still_in_flight_is_not_served(self, client, blob_root):
+        """Dot-prefixed names are the temp files of an unfinished write."""
+        (blob_root / self.JOB).mkdir()
+        (blob_root / self.JOB / '.view.webp.abc123').write_bytes(b'half a picture')
+        assert client.get(f'/i/{self.JOB}/.view.webp.abc123').status_code == 404
+
+    def test_a_missing_blob_is_a_plain_404(self, client, blob_root):
+        assert client.get(f'/i/{self.JOB}/gone.webp').status_code == 404
+
+    @pytest.mark.parametrize('path', [
+        '/i/../README.md', '/i/%2e%2e/README.md', '/i/../../etc/passwd',
+    ])
+    def test_nothing_above_the_store_is_reachable(self, client, path):
+        assert client.get(path).status_code in (400, 404)
 
 
 class TestResultImages:

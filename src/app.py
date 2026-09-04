@@ -10,8 +10,10 @@ import os
 from fastapi import FastAPI
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
+from src import blobs
 from src.api import router as api_router
 from src.assets import STATIC_DIR, VersionedStatic
+from src.blobs import BlobFiles
 from src.config import get_settings
 from src.throttle import BodyTooLarge, too_large_response
 from src.ui import create_ui
@@ -89,6 +91,11 @@ def create_app() -> FastAPI:
     # FileResponse over the process CWD. The subclass adds the cache
     # headers the ?v= URLs in src/assets.py are worth.
     app.mount('/static', VersionedStatic(directory=STATIC_DIR), name='static')
+    # A job's pictures. In production Caddy serves this directory itself and
+    # repeats the same rules; this is what answers a bare uvicorn, and what
+    # makes the Caddy block a performance change rather than a correctness
+    # one -- without it, /i/* simply falls through to the app.
+    app.mount('/i', BlobFiles(directory=blobs.root(), check_dir=False), name='blobs')
     app.mount('/', create_ui())
     return app
 
