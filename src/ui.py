@@ -344,47 +344,52 @@ def upload_form(replace: bool = False) -> Form:
     """The submit form. With ``replace`` it swaps out of band over the one
     on the page, which is how a submission clears the fields.
 
-    The file input sits before its label on purpose: the label is the
-    dropzone, and dropping onto a file input's label counts as choosing.
+    The file input sits before the card on purpose: the card is the file
+    input's label, and dropping onto a file input's label counts as choosing.
     """
     return Form(
         Input(type='file', id='files', name='image', accept='image/*', multiple=True,
               cls='visually-hidden', hx_encoding='multipart/form-data',
               **{'hx-on:change': UPLOAD_ONE_BY_ONE}),
-        # The camera. `capture` makes a phone open it instead of the picker,
-        # and it takes one picture at a time, so it posts for itself rather
-        # than going through UPLOAD_ONE_BY_ONE. A desktop browser ignores
-        # `capture` and the input is never reached: nothing points at it
-        # above 600px.
+        Div(
+            Label(
+                Img(src=asset('/static/img/glasses.svg'), alt=''),
+                # Two sets of words for one card: dropping is a desktop idea
+                # and a phone has no computer to browse. Swapped by media
+                # query rather than by sniffing the browser.
+                Span('Drop pictures here', cls='title desktop-only'),
+                Span('Add a picture', cls='title mobile-only'),
+                Span('or ', Em('browse your computer'), cls='sub desktop-only'),
+                Span('Take one now, or pick from your library', cls='sub mobile-only'),
+                fr='files', cls='dropzone-face',
+            ),
+            # Inside the card, where the design puts them -- but beside the
+            # label rather than in it, because a label cannot nest in a
+            # label. `.dropzone-face::before` covers the rest of the card, so
+            # tapping or dropping anywhere else still reaches the input.
+            Div(
+                Label('Take a photo', fr='camera', cls='btn camera'),
+                Label('Choose from library', fr='files', cls='btn ghost'),
+                cls='pick-row mobile-only',
+            ),
+            Span('PNG or JPEG, up to 10 MB each. Several at once is fine.', cls='limits'),
+            cls='dropzone',
+        ),
+        # After the card, so `#files + .dropzone` still reaches it. `capture`
+        # makes a phone open the camera instead of the picker, and it takes
+        # one picture at a time, so it posts for itself rather than going
+        # through UPLOAD_ONE_BY_ONE. A desktop browser ignores the attribute,
+        # and nothing points at this input above 600px.
         Input(type='file', id='camera', name='image', accept='image/*',
               capture='environment', cls='visually-hidden',
               hx_post='/submit', hx_trigger='change',
               hx_encoding='multipart/form-data',
               hx_target='#queue', hx_swap='afterbegin'),
-        Label(
-            Img(src=asset('/static/img/glasses.svg'), alt=''),
-            # Two sets of words for one card: dropping is a desktop idea and
-            # a phone has no computer to browse. Swapped by media query
-            # rather than by sniffing the browser.
-            Span('Drop pictures here', cls='title desktop-only'),
-            Span('Add a picture', cls='title mobile-only'),
-            Span('or ', Em('browse your computer'), cls='sub desktop-only'),
-            Span('Take one now, or pick from your library', cls='sub mobile-only'),
-            Span('PNG or JPEG, up to 10 MB each. Several at once is fine.', cls='limits'),
-            fr='files', cls='dropzone',
-        ),
-        # After the dropzone, not inside it: a label cannot nest in a label.
-        # The CSS joins the two into one card.
-        Div(
-            Label('Take a photo', fr='camera', cls='btn camera'),
-            Label('Choose from library', fr='files', cls='btn ghost'),
-            cls='pick-row mobile-only',
-        ),
         Div('or a URL', cls='divider'),
         Div(
             Input(type='text', id='url', name='url',
                   placeholder='https://example.com/photo.jpg',
-                  autocomplete='off', spellcheck='false',
+                  autocomplete='off', spellcheck='false', inputmode='url',
                   hx_post='/validate', hx_trigger='input changed delay:400ms',
                   hx_target='#url-hint', hx_swap='outerHTML',
                   hx_sync='closest form:abort'),

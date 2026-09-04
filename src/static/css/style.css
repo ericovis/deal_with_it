@@ -399,11 +399,18 @@ button {
     gap: 10px;
 }
 
-/* The dropzone is a <label> for the file input, which is what makes dropping
+/* The card is a <label> for the file input, which is what makes dropping
    work without a line of JavaScript: a file input is a native drop target,
    and dropping on its label counts as choosing files. Browsers also fire
-   :hover while a drag is over the element, so that doubles as the drag state. */
+   :hover while a drag is over the element, so that doubles as the drag state.
+
+   The label is `.dropzone-face` inside the card rather than the card itself,
+   because on a phone the card also holds a "Take a photo" label and a label
+   cannot nest in a label. `.dropzone-face::before` stretches the label's hit
+   area back over the whole card, so tapping or dropping anywhere on it --
+   the padding, the limits line -- still lands on the input. */
 .dropzone {
+    position: relative;
     display: flex;
     flex-direction: column;
     align-items: center;
@@ -417,6 +424,20 @@ button {
     cursor: pointer;
     text-align: center;
     transition: background .15s, border-color .15s;
+}
+
+.dropzone-face {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 8px;
+}
+
+.dropzone-face::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    border-radius: 14px;
 }
 
 .dropzone:hover {
@@ -1514,9 +1535,11 @@ code {
 }
 
 @media (max-width: 860px) {
+    /* No gap: below 860px the contents list is a card that carries its own
+       margin, and 32px on top of it would read as a hole. */
     .docs {
         flex-direction: column;
-        gap: 32px;
+        gap: 0;
     }
 
     /* A card that opens on tap. Native disclosure, so no script and no
@@ -1525,6 +1548,7 @@ code {
         position: static;
         width: 100%;
         gap: 0;
+        margin-bottom: 24px;
         background: var(--surface);
         border: 1px solid var(--border);
         border-radius: 12px;
@@ -1536,16 +1560,23 @@ code {
     }
 
     .toc a {
-        padding: 10px 14px;
+        padding: 6px 14px;
+    }
+
+    /* The rule under the summary. On the first link rather than on the
+       content box, which only a browser with ::details-content can style. */
+    .toc a:first-of-type {
+        padding-top: 10px;
+        border-top: 1px solid var(--border);
     }
 
     .toc a.sub {
-        padding: 8px 14px 8px 28px;
+        padding: 4px 14px 4px 28px;
     }
 
     .toc .try-it {
         height: 40px;
-        margin: 8px 14px 14px;
+        margin: 12px 14px 14px;
     }
 }
 
@@ -1612,7 +1643,7 @@ code {
     .band .container {
         display: grid;
         grid-template-columns: 1fr auto;
-        column-gap: 12px;
+        column-gap: 16px;
         row-gap: 0;
         height: auto;
         padding: env(safe-area-inset-top) 20px 6px;
@@ -1625,6 +1656,7 @@ code {
     .brand {
         grid-area: 1 / 1;
         height: 48px;
+        gap: 10px;
     }
 
     .brand img {
@@ -1635,9 +1667,11 @@ code {
         font-size: 15px;
     }
 
+    /* No height here: the knob is positioned against this box, so
+       stretching it would leave the knob behind at the top of the row. The
+       48px comes from .brand, and the grid centres this against it. */
     .switch-wrap {
         grid-area: 1 / 2;
-        height: 48px;
         justify-self: end;
     }
 
@@ -1682,34 +1716,34 @@ code {
         display: none;
     }
 
-    /* The dropzone and the two buttons under it read as one card: the
-       buttons cannot go inside, because a label cannot nest in a label. */
     .dropzone {
         min-height: 0;
         padding: 22px 18px 18px;
-        border-bottom: 0;
-        border-bottom-left-radius: 0;
-        border-bottom-right-radius: 0;
     }
 
+    /* The buttons sit between the sub-heading and the limits line, which
+       `order` puts back after them -- they are the card's children, not the
+       label's. `position` lifts them over the label's hit overlay. */
     .pick-row {
+        position: relative;
+        order: 1;
         display: flex;
         gap: 8px;
-        padding: 0 18px 18px;
-        border: 1.5px dashed var(--border-strong);
-        border-top: 0;
-        border-radius: 0 0 14px 14px;
-        background: var(--surface);
+        width: 100%;
+        margin-top: 8px;
+    }
+
+    .dropzone .limits {
+        order: 2;
+        margin-top: 4px;
     }
 
     .pick-row .btn {
         flex: 1;
-        /* Or the longer label would take more than half the row. */
-        min-width: 0;
         display: inline-flex;
         align-items: center;
         justify-content: center;
-        padding: 0 10px;
+        padding: 0 14px;
         cursor: pointer;
     }
 
@@ -1721,7 +1755,12 @@ code {
 
     .pick-row .ghost:hover {
         border-color: var(--accent);
+        color: var(--accent);
         background: var(--surface);
+    }
+
+    .url-row .btn {
+        padding: 0 16px;
     }
 
     /* ----- results mode ----- */
@@ -1856,7 +1895,6 @@ code {
 
     body:has(#show-samples:checked) .samples {
         display: flex;
-        align-items: flex-start;
         gap: 10px;
         overflow-x: auto;
         padding: 0 20px 4px;
@@ -1872,6 +1910,15 @@ code {
         flex: none;
         width: 96px;
         scroll-snap-align: start;
+        /* The panel is --surface, so the tiles cannot be. */
+        background: var(--bg);
+    }
+
+    /* 96px is too narrow for "Twenty-nine faces" to wrap gracefully. */
+    body:has(#show-samples:checked) .sample .caption b {
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
     }
 
     /* ----- cards ----- */
@@ -1933,28 +1980,25 @@ code {
         max-height: 400px;
     }
 
-    /* Both rows are a couple of words wider than 390px likes. */
-    .card-head {
-        gap: 10px;
-    }
-
-    .card-foot {
-        gap: 8px;
-    }
-
     .frame-tap {
         display: block;
     }
 
-    /* 9px is what makes the target 38px tall; the 12 is what makes the whole
-       foot -- toggle, Full size, Download -- fit on one line at 390px. */
+    .card-foot {
+        gap: 10px;
+    }
+
+    /* 38px tall, which is the floor for a control you tap. */
     .segmented label {
-        padding: 9px 12px;
+        padding: 9px 14px;
+    }
+
+    .open-full {
+        padding: 8px 0;
     }
 
     .download {
         height: 38px;
-        padding: 0 12px;
     }
 
     /* ----- the full-size view ----- */
@@ -1982,7 +2026,7 @@ code {
     .result:has(.full-toggle:checked) .zoom-hint {
         display: block;
         position: fixed;
-        left: 16px;
+        left: 20px;
         top: calc(env(safe-area-inset-top) + 22px);
         z-index: 102;
         font-family: 'Fira Code', ui-monospace, monospace;
@@ -2026,8 +2070,17 @@ code {
         font-size: 15px;
     }
 
+    .doc section {
+        margin: 0 0 44px;
+    }
+
+    .doc h1 {
+        margin: 0 0 10px;
+    }
+
     .doc h2 {
         font-size: 24px;
+        margin: 0 0 8px;
     }
 
     .doc h3 {
@@ -2036,24 +2089,55 @@ code {
 
     .doc .lead {
         font-size: 17px;
+        margin: 0 0 20px;
     }
 
     /* Portraits stay side by side; the group photos would be a stripe. */
+    .figures {
+        gap: 12px;
+    }
+
     .figures.portraits {
         grid-template-columns: 1fr 1fr;
     }
 
-    .tiles {
-        grid-template-columns: 1fr;
+    .credit {
+        margin: 0 0 24px;
     }
 
-    .tile {
-        display: grid;
-        grid-template-columns: 56px 1fr;
+    code {
+        font-size: 13px;
+    }
+
+    .snippet,
+    .pair {
+        margin: 0 0 18px;
+    }
+
+    .pair {
         gap: 10px;
     }
 
+    .stages {
+        gap: 10px 8px;
+        margin: 0 0 32px;
+    }
+
+    .tiles {
+        grid-template-columns: 1fr;
+        gap: 10px;
+    }
+
+    .tile {
+        display: flex;
+        align-items: baseline;
+        gap: 14px;
+        padding: 12px 14px;
+    }
+
     .tile b {
+        flex: none;
+        width: 56px;
         margin-bottom: 0;
     }
 
