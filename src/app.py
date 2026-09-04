@@ -8,16 +8,13 @@ import logging
 import os
 
 from fastapi import FastAPI
-from fastapi.staticfiles import StaticFiles
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from src.api import router as api_router
+from src.assets import STATIC_DIR, VersionedStatic
 from src.config import get_settings
 from src.throttle import BodyTooLarge, too_large_response
 from src.ui import create_ui
-
-HERE = os.path.dirname(os.path.abspath(__file__))
-STATIC_DIR = os.path.join(HERE, 'static')
 
 logging.basicConfig(
     level=os.environ.get('LOG_LEVEL', 'INFO'),
@@ -89,8 +86,9 @@ def create_app() -> FastAPI:
     app.add_middleware(BodyLimit)
     app.include_router(api_router, prefix='/api')
     # StaticFiles rather than FastHTML's catch-all, which is a bare
-    # FileResponse over the process CWD.
-    app.mount('/static', StaticFiles(directory=STATIC_DIR), name='static')
+    # FileResponse over the process CWD. The subclass adds the cache
+    # headers the ?v= URLs in src/assets.py are worth.
+    app.mount('/static', VersionedStatic(directory=STATIC_DIR), name='static')
     app.mount('/', create_ui())
     return app
 

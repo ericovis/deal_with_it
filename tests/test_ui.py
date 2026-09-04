@@ -193,7 +193,7 @@ class TestInstalling:
     """The head metadata that lets the page live on a home screen."""
 
     def test_the_manifest_is_linked_and_served(self, client):
-        assert 'rel="manifest" href="/static/manifest.webmanifest"' in client.get('/').text
+        assert 'rel="manifest" href="/static/manifest.webmanifest?v=' in client.get('/').text
         response = client.get('/static/manifest.webmanifest')
         assert response.status_code == 200
         assert response.headers['content-type'].startswith('application/manifest+json')
@@ -207,7 +207,7 @@ class TestInstalling:
 
     def test_a_home_screen_gets_an_icon_of_its_own(self, client):
         body = client.get('/').text
-        assert 'rel="apple-touch-icon" href="/static/img/icons/apple-touch-icon.png"' in body
+        assert 'rel="apple-touch-icon" href="/static/img/icons/apple-touch-icon.png?v=' in body
         assert client.get('/static/img/icons/apple-touch-icon.png').status_code == 200
 
     def test_the_page_reaches_under_the_status_bar(self, client):
@@ -356,7 +356,7 @@ class TestSamples:
     def test_a_sample_card_shows_the_static_file_rather_than_the_data_uri(self, client, hx):
         """It is the same picture at a thousandth of the bytes."""
         body = submit(client, hx, sample='group').text
-        assert 'src="/static/img/multiple_people.jpg"' in body
+        assert 'src="/static/img/multiple_people.jpg?v=' in body
 
     def test_an_unknown_sample_is_refused(self, client, hx):
         response = submit(client, hx, sample='../../etc/passwd')

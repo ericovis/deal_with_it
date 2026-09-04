@@ -48,6 +48,7 @@ src/images.py       Fetching (SSRF-guarded) and decoding into a numpy array
 src/models.py       Pydantic v2 request/response schemas. Shape only
 src/config.py       Settings, all DWI_-prefixed env vars
 src/errors.py       DealWithItError: failures whose message is safe to show
+src/assets.py       Content-hashed /static URLs and their cache headers
 src/processors/     BaseProcessor + DealWithItProcessor
 src/static/         style.css, the sample photos, glasses.svg, the app
                     icons and the web manifest
@@ -81,6 +82,14 @@ Invariants worth knowing before editing:
   status and meta, so a poll still costs one round trip. It comes back as
   `ahead` on `JobResult` and is None once a worker has the job, which is
   exactly when `progress`/`step` start saying something.
+- **A `/static` URL carries its file's content hash.** `asset()` in
+  `src/assets.py` stamps `?v=<hash>`, and anything with a `v` is served
+  `immutable` for a year; a bare URL gets five minutes and its ETag. The
+  hash is cached per (path, mtime, size) because hashing everything a page
+  touches is 8ms and a stat is 0.07ms. The reverse proxy serves these files
+  itself in production and repeats the same two rules, so a change here is
+  a change in two places. `og:image` stays unversioned: it is a URL other
+  people's scrapers keep.
 - **The theme is a hidden `<span id="theme-state" data-theme=...>`** swapped
   by `POST /theme`. `style.css` reads only that span; an absent attribute lets
   `prefers-color-scheme` decide. Do not drive it from `:checked`.
