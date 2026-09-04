@@ -100,13 +100,22 @@ Responds `202` with a job to poll:
 }
 ```
 
-`GET /api/jobs/{job_id}` returns the state, and the image once it is done:
+`GET /api/jobs/{job_id}` returns the state, and links to the pictures once it
+is done:
 
 ```json
 {
   "job_id": "9f2c...",
   "state": "finished",
-  "image": "data:image/png;base64,...",
+  "images": {
+    "view":   "https://example.com/i/9f2c.../view.webp",
+    "thumb":  "https://example.com/i/9f2c.../thumb.webp",
+    "before": "https://example.com/i/9f2c.../before.webp",
+    "full":   "https://example.com/i/9f2c.../result.jpg"
+  },
+  "downloads": {"jpg": "...", "webp": "..."},
+  "share_url": "https://example.com/s/9f2c...",
+  "expires_at": "2026-09-04T17:32:00Z",
   "error": null,
   "progress": 100,
   "step": "Done",
@@ -122,6 +131,16 @@ Responds `202` with a job to poll:
   ]
 }
 ```
+
+`images` are links, not bytes. `view` is the one to show — WebP, 1600px, a
+fortieth of the full-resolution file — while `full` keeps the format the
+picture was submitted in, and `downloads` offers whichever other formats were
+written for it. Everything under `/i/` stops existing at `expires_at`, and so
+does `share_url`.
+
+> **API 2.0.** The result used to come back inline as `image`, a base64 data
+> URI. It is gone: it put megabytes through Redis and out again in every poll,
+> which was most of the reason results were slow to appear.
 
 `faces` lists every face the glasses went on, in the coordinates of the
 submitted image: the detector's box (top, right, bottom, left) and five

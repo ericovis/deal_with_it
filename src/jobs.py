@@ -30,6 +30,9 @@ GENERIC_FAILURE = 'Something went wrong while processing this image.'
 
 ABANDONED = 'The worker restarted while this image was being processed.'
 
+#: Where a finished result can be looked at by someone who was not here.
+SHARE_PREFIX = '/s/'
+
 #: How long past its own ``job_timeout`` a started job is given before the
 #: page stops believing in it. Only has to cover the clock skew between the
 #: worker that stamped ``started_at`` and whoever is reading it.
@@ -305,6 +308,7 @@ def _finished_result(job: Job) -> JobResult:
         job_id=job.id, state=JobState.FINISHED,
         images=JobImages(**{role: blobs.url(ref) for role, ref in written.items()}),
         downloads={fmt: blobs.url(ref) for fmt, ref in (value.get('downloads') or {}).items()},
+        share_url=f'{SHARE_PREFIX}{job.id}',
         expires_at=value.get('expires_at'),
         progress=100, step='Done',
         faces=meta.get('landmarks') or None, detection=meta.get('detection'),

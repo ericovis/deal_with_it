@@ -68,14 +68,19 @@ class TestReadJob:
         assert response.status_code == 200
         body = response.json()
         assert body['state'] == 'finished'
+        # Absolute, so a caller does not have to know where we live. Built
+        # from the request rather than a configured host, which is what makes
+        # it right behind the reverse proxy.
+        host = 'http://testserver'
         assert body['images'] == {
-            'view': f'/i/{job_id}/view.webp',
-            'thumb': f'/i/{job_id}/thumb.webp',
-            'before': f'/i/{job_id}/before.webp',
-            'full': f'/i/{job_id}/result.png',
+            'view': f'{host}/i/{job_id}/view.webp',
+            'thumb': f'{host}/i/{job_id}/thumb.webp',
+            'before': f'{host}/i/{job_id}/before.webp',
+            'full': f'{host}/i/{job_id}/result.png',
         }
-        assert body['downloads'] == {'png': f'/i/{job_id}/result.png',
-                                     'webp': f'/i/{job_id}/result.webp'}
+        assert body['downloads'] == {'png': f'{host}/i/{job_id}/result.png',
+                                     'webp': f'{host}/i/{job_id}/result.webp'}
+        assert body['share_url'] == f'{host}/s/{job_id}', 'a link worth passing on'
         assert body['expires_at'], 'so a caller knows how long the links last'
         assert 'image' not in body, 'the base64 data URI is gone on purpose'
 

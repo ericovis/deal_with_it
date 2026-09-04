@@ -80,7 +80,7 @@ def create_app() -> FastAPI:
     app = FastAPI(
         title='Deal With It!',
         description='A Python API for creating "Deal With It"-like images.',
-        version='1.0.0',
+        version='2.0.0',
         docs_url='/api/docs',
         openapi_url='/api/openapi.json',
         redoc_url=None,

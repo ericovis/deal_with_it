@@ -81,14 +81,39 @@ def create_job(image: ImageRequest, request: Request) -> JobCreated:
     summary='Read the state, and eventually the result, of a job',
     responses={404: {'description': 'Unknown or expired job id'}},
 )
-def read_job(job_id: str) -> JobResult:
+def read_job(job_id: str, request: Request) -> JobResult:
     result = jobs.result_for(job_id)
     if result is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail='No such job. It may have expired.',
         )
-    return result
+    return _with_absolute_links(result, request)
+
+
+def _with_absolute_links(result: JobResult, request: Request) -> JobResult:
+    """Links a caller can use without knowing where we live.
+
+    From ``request.base_url`` rather than the configured ``public_url``: it is
+    what the client actually asked for, and it is correct behind the reverse
+    proxy because uvicorn runs with ``--proxy-headers``.
+    """
+    base = str(request.base_url).rstrip('/')
+    if not base:  # pragma: no cover - a request always has one
+        return result
+
+    def absolute(url: str | None) -> str | None:
+        return f'{base}{url}' if url and url.startswith('/') else url
+
+    return result.model_copy(update={
+        'images': result.images.model_copy(update={
+            field: absolute(value)
+            for field, value in result.images if isinstance(value, str)
+        }) if result.images else None,
+        'downloads': ({fmt: absolute(url) for fmt, url in result.downloads.items()}
+                      if result.downloads else None),
+        'share_url': absolute(result.share_url),
+    })
 
 
 @router.get('/health', summary='Liveness and broker connectivity')

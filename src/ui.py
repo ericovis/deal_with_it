@@ -834,18 +834,36 @@ def docs_page(theme: str | None, reachable: bool) -> tuple:
                     P(Code('GET'), ' the ', Code('status_url'), ' until ', Code('state'),
                       ' is ', Code('finished'), ' or ', Code('failed'), ':'),
                     snippet('{\n  "job_id": "9f2c...",\n  "state": "finished",\n'
-                            '  "image": "data:image/png;base64,...",\n  "error": null,\n'
+                            '  "images": {\n'
+                            '    "view":   ".../i/9f2c.../view.webp",\n'
+                            '    "thumb":  ".../i/9f2c.../thumb.webp",\n'
+                            '    "before": ".../i/9f2c.../before.webp",\n'
+                            '    "full":   ".../i/9f2c.../result.jpg"\n  },\n'
+                            '  "downloads": {"jpg": "...", "webp": "..."},\n'
+                            '  "share_url": ".../s/9f2c...",\n'
+                            '  "expires_at": "2026-09-04T17:32:00Z",\n'
+                            '  "error": null,\n'
                             '  "progress": 100,\n  "step": "Done",\n'
                             '  "detection": "plain",\n'
                             '  "faces": [{"box": [101, 420, 402, 197], "score": 0.95,\n'
                             '             "points": {"left_eye": [249.7, 225.3], ...},\n'
                             '             "landmarks": [[199.0, 208.0], ...]}]\n}'),
+                    P(Code('images'), ' are links, not bytes. ', Code('view'),
+                      ' is what to show someone -- WebP, 1600px, a fortieth of the '
+                      'full-resolution file -- and ', Code('full'), ' keeps the format '
+                      'the picture was submitted in. ', Code('downloads'),
+                      ' offers the same picture in whichever formats were written for '
+                      'it. Everything under ', Code('/i/'), ' stops existing at ',
+                      Code('expires_at'), ', and so does ', Code('share_url'), '.'),
                     P(Code('state'), ' is one of ', Code('queued'), ', ', Code('started'),
                       ', ', Code('finished'), ' or ', Code('failed'), '. A failed job '
                       'carries a readable ', Code('error'), ': an unreachable URL, an '
                       'undecodable image, or no faces found. An unknown or expired job id '
                       'gives a ', Code('404'), '. The result is a JPEG when the input was '
                       'a JPEG and a PNG otherwise.'),
+                    P('Before version 2, the result came back inline as ', Code('image'),
+                      ': a base64 data URI, megabytes of it, in every poll. That field '
+                      'is gone.'),
                     P('Submissions are limited per client and refused with ', Code('429'),
                       ' (too many in a minute) or ', Code('503'), ' (the queue is full); '
                       'both carry a ', Code('Retry-After'), ' header.'),
