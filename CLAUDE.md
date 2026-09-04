@@ -172,12 +172,33 @@ Invariants worth knowing before editing:
   its hit area back over the whole card -- which is what keeps a click or a
   drop on the padding working. `.pick-row` is `position: relative` so its two
   buttons sit above that overlay, and `order` puts the limits line after them.
+- **The phone's Before/After is a second pair of labels for the same
+  radios**, inside `.frame` as a pill on the picture. The rule that styles
+  the checked one matches through `.result` rather than as `input:checked +
+  label`, so one rule dresses the footer's segmented control, the phone's
+  pill and the overlay's copy of it. The footer's own segmented is
+  `.desktop-only`.
+- **`.card-foot` is `grid-auto-flow: column` on a phone**, so it is equal
+  columns for however many buttons are actually there: `share.js` reveals
+  the Share button only on a browser that can share a file, and a row sized
+  for three would otherwise have a hole in it. The children that do not
+  belong on a phone (`.spacer`, `.open-full`, the desktop segmented) are
+  `display: none`, which takes them out of the grid rather than leaving an
+  empty track.
+- **The safe-area inset is added once, by `env()`, never by a constant.**
+  `--addbar-h` and the bar's own chin are `max(12px,
+  env(safe-area-inset-bottom))`: the 34px that used to stand in for a home
+  indicator counted an iPhone's inset twice under `viewport-fit=cover`. The
+  12px floor is for a device with no inset at all.
 - **Script is only ever an enhancement.** `countdown.js` retimes a sentence
   the server already rendered correctly; `share.js` reveals a Share button
   that starts `hidden`, because only the browser knows whether it can share a
   *file* and a button that half-works is worse than none. Both are delegated
   from the document and re-run on `htmx:afterSwap`, since cards are swapped in
   and out constantly — a held element reference goes stale immediately.
+  Five pieces of script now: the share page's Copy link is the docs page's
+  clipboard one-liner, on `location.href` because `public_url` may be unset
+  in development and a relative path is not a link anyone can paste.
 - **`/llms.txt` is generated, not committed** (`llms_txt()` in `src/ui.py`).
   Half of it is numbers that live in `Settings` — the size cap, the rate
   limit, how long a result survives — and a static file would start lying the

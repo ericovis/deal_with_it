@@ -2,12 +2,13 @@
 
 Two pages: the app at ``/`` and the docs at ``/docs``. Submitting a picture
 swaps a card into ``#queue``; the card polls itself until the worker is done
-and then turns into the result in place. Four pieces of script in the whole
-interface, three of them enhancements the page reads correctly without: the
-clipboard call on the docs page, ``UPLOAD_ONE_BY_ONE`` (which htmx has no
-attribute for), ``countdown.js``, which turns a server-rendered expiry into a
-ticking one, and ``share.js``, which reveals a button that cannot honestly be
-offered until the browser has said it can share a file.
+and then turns into the result in place. Five pieces of script in the whole
+interface, four of them enhancements the page reads correctly without: the
+clipboard call on the docs page and the share page's Copy link, which is the
+same one-liner, ``UPLOAD_ONE_BY_ONE`` (which htmx has no attribute for),
+``countdown.js``, which turns a server-rendered expiry into a ticking one,
+and ``share.js``, which reveals a button that cannot honestly be offered
+until the browser has said it can share a file.
 """
 
 import json
@@ -15,6 +16,7 @@ import logging
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
+from urllib.parse import urlparse
 
 from fasthtml.common import (
     H1,
@@ -56,6 +58,7 @@ from fasthtml.common import (
     fast_app,
     to_xml,
 )
+from fasthtml.svg import Circle, Ellipse, Rect, Svg
 from pydantic import ValidationError
 from starlette.concurrency import run_in_threadpool
 from starlette.responses import HTMLResponse, JSONResponse, Response
@@ -478,6 +481,37 @@ def session_section() -> Section:
     )
 
 
+GLYPH_STROKE = {'fill': 'none', 'stroke': 'currentColor', 'stroke_width': '1.8'}
+
+
+def glyph(name: str) -> Svg:
+    """One of the bar's three icons.
+
+    Drawn from basic shapes in ``currentColor`` rather than pulled from an
+    icon font or a sprite sheet: three glyphs is less markup than either
+    would be a request, and the colour then follows the active state for
+    free.
+    """
+    if name == 'add':
+        shapes = (
+            Rect(x=2, y=2, width=18, height=18, rx=5, **GLYPH_STROKE),
+            Rect(x=10.1, y=6, width=1.8, height=10, rx=.9, fill='currentColor'),
+            Rect(x=6, y=10.1, width=10, height=1.8, rx=.9, fill='currentColor'),
+        )
+    elif name == 'url':
+        shapes = (
+            Circle(cx=11, cy=11, r=8.5, **GLYPH_STROKE),
+            Rect(x=2.5, y=10.1, width=17, height=1.8, rx=.9, fill='currentColor'),
+            Ellipse(cx=11, cy=11, rx=3.6, ry=8.5, **GLYPH_STROKE),
+        )
+    else:
+        shapes = tuple(
+            Rect(x=x, y=y, width=7, height=7, rx=2, fill='currentColor')
+            for x, y in ((2.5, 2.5), (12.5, 2.5), (2.5, 12.5), (12.5, 12.5))
+        )
+    return Svg(*shapes, viewBox='0 0 22 22', width=22, height=22, aria_hidden='true')
+
+
 def addbar() -> Nav:
     """The bar a phone gets once there is something in the list.
 
@@ -488,10 +522,10 @@ def addbar() -> Nav:
     is what the CSS re-lays the URL row or the sample grid over the bar for,
     and #show-none is how a second tap on the open one closes it again.
     """
-    def panel(text: str, target: str) -> Div:
+    def panel(text: str, target: str, icon: str) -> Div:
         return Div(
-            Label(text, fr=target, cls='open'),
-            Label(text, fr='show-none', cls='close'),
+            Label(glyph(icon), Span(text), fr=target, cls='open'),
+            Label(glyph(icon), Span(text), fr='show-none', cls='close'),
             cls=f'addbar-item {target}',
         )
 
@@ -502,9 +536,9 @@ def addbar() -> Nav:
               aria_label='Submit a URL'),
         Input(type='radio', id='show-samples', name='addbar', cls='visually-hidden',
               aria_label='Show the samples'),
-        Label('Add a picture', fr='files', cls='addbar-item add'),
-        panel('URL', 'show-url'),
-        panel('Samples', 'show-samples'),
+        Label(glyph('add'), Span('Add a picture'), fr='files', cls='addbar-item add'),
+        panel('URL', 'show-url', 'url'),
+        panel('Samples', 'show-samples', 'samples'),
         cls='addbar',
     )
 
@@ -671,7 +705,13 @@ def share_page(job_id: str, record: dict, theme: str | None, reachable: bool) ->
             Section(
                 H1('Someone dealt with it'),
                 P(caption, cls='lead'),
-                _result_view(job_id, pictures, downloads, expires_at=expires_at),
+                _result_view(job_id, pictures, downloads, expires_at=expires_at,
+                             copy_link=True),
+                Div(
+                    A('Deal with your own picture', href='/', cls='btn'),
+                    P('Free, no account. ', A('How it works', href='/docs')),
+                    cls='shared-cta',
+                ),
                 cls='shared',
             ),
             cls='container layout',
@@ -741,8 +781,29 @@ def download_menu(job_id: str, downloads: dict[str, str]) -> Details:
     )
 
 
+COPY_LOCATION = 'navigator.clipboard.writeText(location.href)'
+
+
+def copy_link_button(*label, cls: str) -> Span:
+    """Copy the address of the page you are on.
+
+    ``location.href`` rather than an attribute holding the URL, because
+    ``public_url`` may be unset in development and a relative path is not a
+    link anyone can paste. The docs page's clipboard one-liner reused, and
+    its confirmation with it: :active shows "Copied" instantly and letting
+    go starts the delayed fade, so neither needs a timer of our own.
+    """
+    return Span(
+        Button(*label, type='button', cls='copy-link',
+               **{'hx-on:click': COPY_LOCATION}),
+        Span('Copied', cls='copied'),
+        cls=f'copy-wrap {cls}',
+    )
+
+
 def _result_view(job_id: str, pictures: JobImages, downloads: dict[str, str],
-                 share_url: str | None = None, expires_at=None) -> Div:
+                 share_url: str | None = None, expires_at=None,
+                 copy_link: bool = False) -> Div:
     """The finished image, its Before/After toggle, and the full-screen view.
 
     The full-screen view re-lays out the *same* frame rather than a copy, so
@@ -755,8 +816,9 @@ def _result_view(job_id: str, pictures: JobImages, downloads: dict[str, str],
     footer = [
         Span(cls='spacer'),
         Input(type='checkbox', id=toggle, cls='full-toggle visually-hidden'),
-        Label(Span('View full size', cls='desktop-only'),
-              Span('Full size', cls='mobile-only'), fr=toggle, cls='open-full'),
+        # On a phone the control is the pill on the picture, so this
+        # underlined link is the desktop's alone.
+        Label(Span('View full size'), fr=toggle, cls='open-full desktop-only'),
         # Only ever shown inside the overlay, and only on a phone: the frame
         # scrolled at 200% for a picture that fitting to the screen has made
         # too small to read. Native pinch still works either way.
@@ -768,6 +830,12 @@ def _result_view(job_id: str, pictures: JobImages, downloads: dict[str, str],
         # without asking the browser first.
         Button('Share', type='button', cls='share-system', hidden=True,
                data_share=pictures.full, data_name=f'deal-with-it-{job_id[:8]}'),
+        # The phone's copy of "Get a link", which the desktop shows on the
+        # row below instead. Same doubling as the dropzone's copy.
+        *([A('Get a link', href=share_url, cls='share mobile-only')] if share_url else []),
+        # A card says "Get a link"; the share page says "Copy link", because
+        # the link is the page it is already on.
+        *([copy_link_button('Copy link', cls='mobile-only')] if copy_link else []),
         download_menu(job_id, downloads),
     ]
     # Tapping the picture opens it, which is what a phone expects. Sized over
@@ -775,15 +843,29 @@ def _result_view(job_id: str, pictures: JobImages, downloads: dict[str, str],
     # overlay: display:none there, so it cannot swallow the pinch.
     tap = Label(fr=toggle, cls='frame-tap', aria_label='View full size')
 
+    # The phone's controls sit on the picture. Both come after `tap` in the
+    # DOM and are positioned, so they paint over it and take the touch.
+    full_pill = Label('Full size', fr=toggle, cls='open-full-pill mobile-only')
+
     if before is None:
-        frame = Div(Img(src=image, alt='Result'), tap, cls='frame')
+        frame = Div(Img(src=image, alt='Result'), tap, full_pill, cls='frame')
         controls = footer
     else:
         name = f'view-{job_id}'
+        # A second pair of labels for the same radios: the `:has()` rule that
+        # styles the checked one matches through the container, so one rule
+        # dresses the footer's segmented control and this pill both.
+        pill = Div(
+            Label('Before', fr=f'{name}-b', data_view='before'),
+            Label('After', fr=f'{name}-a', data_view='after'),
+            cls='segmented view-pill mobile-only',
+        )
         frame = Div(
             Img(src=before, alt='The picture as submitted', cls='before'),
             Img(src=image, alt='Result', cls='after'),
             tap,
+            pill,
+            full_pill,
             cls='frame',
         )
         controls = [
@@ -792,17 +874,20 @@ def _result_view(job_id: str, pictures: JobImages, downloads: dict[str, str],
                 Label('Before', fr=f'{name}-b', data_view='before'),
                 Input(type='radio', id=f'{name}-a', name=name, value='after', checked=True),
                 Label('After', fr=f'{name}-a', data_view='after'),
-                cls='segmented',
+                cls='segmented desktop-only',
             ),
             *footer,
         ]
 
     below = []
-    if share_url or expires_at:
+    if share_url or expires_at or copy_link:
+        short = urlparse(_absolute(f'/s/{job_id}')).netloc + f'/s/{job_id[:8]}…'
         below.append(Div(
             # Not "Share": the button above already is, and it does a
             # different thing. This one opens a page to send someone.
-            *( [A('Get a link', href=share_url, cls='share')] if share_url else [] ),
+            *( [A('Get a link', href=share_url, cls='share desktop-only')] if share_url else [] ),
+            *( [copy_link_button(Span('Copy link'), Code(short), cls='desktop-only')]
+               if copy_link else [] ),
             *( [expiry_line(expires_at)] if expires_at else [] ),
             cls='card-share',
         ))
@@ -914,8 +999,9 @@ def rejected_card(label: str, kind: SourceKind, message: str) -> Article:
 
 
 def snippet(text: str) -> Div:
-    """A code block with a Copy button. The hx-on:click is the only script
-    this project ships."""
+    """A code block with a Copy button. The hx-on:click is one of the two
+    inline calls this project ships; the share page's Copy link is the
+    other, and it is the same line."""
     return Div(
         Pre(Code(text)),
         Button('Copy', type='button', cls='copy',
