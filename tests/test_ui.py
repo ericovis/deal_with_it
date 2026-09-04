@@ -136,6 +136,10 @@ class TestSharing:
         job_id = self.finished(client, hx)
         body = client.get(f'/jobs/{job_id}', headers=hx).text
         assert f'href="/s/{job_id}"' in body
+        assert '>Get a link</a>' in body, (
+            'the Share button beside it hands the file to the system sheet, '
+            'which is a different thing to offer'
+        )
 
     def test_the_share_page_shows_the_result(self, client, hx):
         job_id = self.finished(client, hx)

@@ -726,7 +726,9 @@ def _result_view(job_id: str, pictures: JobImages, downloads: dict[str, str],
     below = []
     if share_url or expires_at:
         below.append(Div(
-            *( [A('Share', href=share_url, cls='share')] if share_url else [] ),
+            # Not "Share": the button above already is, and it does a
+            # different thing. This one opens a page to send someone.
+            *( [A('Get a link', href=share_url, cls='share')] if share_url else [] ),
             *( [expiry_line(expires_at)] if expires_at else [] ),
             cls='card-share',
         ))
