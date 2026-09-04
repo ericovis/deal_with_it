@@ -77,6 +77,8 @@ def live_server(_needs_the_face_stack):
     import uvicorn
     from fakeredis import FakeStrictRedis
 
+    from src.config import get_settings
+
     # Short, because one hung fetch would block the single worker thread and
     # every job queued behind it.
     #
@@ -88,6 +90,16 @@ def live_server(_needs_the_face_stack):
     pinned = {'DWI_HTTP_TIMEOUT': '1', 'DWI_RATE_LIMIT': '0'}
     previous = {name: os.environ.get(name) for name in pinned}
     os.environ.update(pinned)
+    # Settings are cached and something earlier in the run may have read
+    # them, so prime the cache with these -- and then put the environment
+    # back, because tests/test_throttle.py has its own opinion about both.
+    get_settings.cache_clear()
+    get_settings()
+    for name, value in previous.items():
+        if value is None:
+            del os.environ[name]
+        else:
+            os.environ[name] = value
 
     from src import jobs
     from src.app import app
@@ -112,11 +124,7 @@ def live_server(_needs_the_face_stack):
     server.should_exit = True
     worker.join(timeout=5)
     jobs.reset()
-    for name, value in previous.items():
-        if value is None:
-            os.environ.pop(name, None)
-        else:
-            os.environ[name] = value
+    get_settings.cache_clear()
 
 
 @pytest.fixture(scope='session')
