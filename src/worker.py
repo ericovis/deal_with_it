@@ -17,10 +17,11 @@ import threading
 import time
 
 from rq import SimpleWorker
+from rq.cron import CronScheduler
 from rq.timeouts import TimerDeathPenalty
 from rq.worker import WorkerStatus
 
-from src import jobs
+from src import jobs, tasks
 from src.config import get_settings
 
 logger = logging.getLogger(__name__)
@@ -62,7 +63,32 @@ def build_workers(count: int, queue_name: str, connection) -> list[ThreadWorker]
     ]
 
 
-def serve(workers: list[ThreadWorker], stop: threading.Event, grace: float) -> None:
+class ThreadScheduler(CronScheduler):
+    """A CronScheduler that may run off the main thread.
+
+    Same reason as :class:`ThreadWorker`: ``start()`` installs signal
+    handlers, and those are main-thread-only.
+    """
+
+    def _install_signal_handlers(self) -> None:
+        pass
+
+
+def build_scheduler(queue_name: str, connection, interval: int) -> ThreadScheduler:
+    """The clock behind the blob sweep.
+
+    Nothing on a filesystem expires by itself, so something has to go and
+    look. It is enqueued as an ordinary job rather than done inline here, so
+    it is visible in the queue, bounded by ``job_timeout``, and logged like
+    every other job.
+    """
+    scheduler = ThreadScheduler(connection=connection)
+    scheduler.register(tasks.sweep_blobs, queue_name, interval=interval)
+    return scheduler
+
+
+def serve(workers: list[ThreadWorker], stop: threading.Event, grace: float,
+          scheduler: CronScheduler | None = None) -> None:
     """Run every worker in its own thread until ``stop`` is set, then let
     running jobs finish for up to ``grace`` seconds."""
     threads = [
@@ -70,10 +96,19 @@ def serve(workers: list[ThreadWorker], stop: threading.Event, grace: float) -> N
                          name=worker.name, daemon=True)
         for worker in workers
     ]
-    for thread in threads:
+    # Watched separately from the workers: it fails differently. A dead
+    # worker means nothing is processed, which is loud. A dead scheduler
+    # means jobs keep succeeding while nothing sweeps the store, which on a
+    # host with no swap surfaces as a full disk much later.
+    cron = (threading.Thread(target=scheduler.start, name='cron', daemon=True)
+            if scheduler is not None else None)
+    for thread in ([*threads, cron] if cron else threads):
         thread.start()
     while not stop.wait(1):
-        if not any(thread.is_alive() for thread in threads):
+        if cron is not None and not cron.is_alive():
+            logger.error('the blob sweep scheduler has exited; the store will grow')
+            cron = None
+        if threads and not any(thread.is_alive() for thread in threads):
             logger.error('every worker thread has exited')
             break
 
@@ -95,14 +130,16 @@ def main() -> int:
     settings = get_settings()
     queue = jobs.get_queue()
     workers = build_workers(settings.worker_threads, queue.name, queue.connection)
-    logger.info('starting %s worker threads on %r', len(workers), queue.name)
+    scheduler = build_scheduler(queue.name, queue.connection, settings.blob_sweep_interval)
+    logger.info('starting %s worker threads on %r, sweeping the blob store every %ss',
+                len(workers), queue.name, settings.blob_sweep_interval)
 
     # `kill -USR1 <pid>` prints every thread's stack to stderr.
     faulthandler.register(signal.SIGUSR1, all_threads=True)
     stop = threading.Event()
     for signum in (signal.SIGTERM, signal.SIGINT):
         signal.signal(signum, lambda *_: stop.set())
-    serve(workers, stop, grace=settings.job_timeout)
+    serve(workers, stop, grace=settings.job_timeout, scheduler=scheduler)
     return 0
 
 

@@ -1,5 +1,8 @@
 """The worker's entry point: expected failures must come back as data."""
 
+import os
+import time
+
 import numpy as np
 import pytest
 from PIL import Image
@@ -170,3 +173,41 @@ class TestRecordedFaces:
 
     def test_outside_a_worker_it_is_a_no_op(self):
         tasks.record_faces([], 'plain')
+
+
+class TestSweepingTheStore:
+    """Nothing on a filesystem expires by itself, so a job goes and looks."""
+
+    def test_it_drops_what_is_past_the_ttl(self, blob_root, monkeypatch):
+        monkeypatch.setenv('DWI_BLOB_TTL', '900')
+        tasks.get_settings.cache_clear()
+        blobs.put('old-job-0001', 'view.webp', b'x')
+        blobs.put('new-job-0001', 'view.webp', b'x')
+        stale = time.time() - 7200
+        os.utime(blob_root / 'old-job-0001', (stale, stale))
+
+        assert tasks.sweep_blobs() == {'swept': 1, 'error': None}
+        assert not (blob_root / 'old-job-0001').exists()
+        assert (blob_root / 'new-job-0001').exists()
+
+    def test_it_runs_as_an_ordinary_job(self, async_queue, drain, blob_root, monkeypatch):
+        """The scheduler enqueues it; it is not a side effect of the
+        supervisor loop, so it shows up in the queue like anything else."""
+        monkeypatch.setenv('DWI_BLOB_TTL', '900')
+        tasks.get_settings.cache_clear()
+        blobs.put('old-job-0002', 'view.webp', b'x')
+        stale = time.time() - 7200
+        os.utime(blob_root / 'old-job-0002', (stale, stale))
+
+        job_id, _ = jobs.enqueue({}, meta={})
+        jobs.get_queue().enqueue('src.tasks.sweep_blobs')
+        drain()
+        assert not (blob_root / 'old-job-0002').exists()
+
+    def test_it_will_not_eat_a_job_that_may_still_be_queued(self, blob_root, monkeypatch):
+        monkeypatch.setenv('DWI_BLOB_MAX_BYTES', '1')
+        tasks.get_settings.cache_clear()
+        blobs.put('fresh-job-001', 'source.jpg', b'x' * 500)
+
+        assert tasks.sweep_blobs() == {'swept': 0, 'error': None}
+        assert (blob_root / 'fresh-job-001').exists()

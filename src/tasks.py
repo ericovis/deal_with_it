@@ -9,7 +9,7 @@ from uuid import uuid4
 from PIL import Image
 from rq import get_current_job
 
-from src import derivatives, images
+from src import blobs, derivatives, images
 from src.config import get_settings
 from src.errors import DealWithItError
 from src.processors.deal_with_it import DealWithItProcessor
@@ -42,6 +42,26 @@ def record_faces(faces: list, detection: str) -> None:
     job.meta['landmarks'] = [face.as_record() for face in faces]
     job.meta['detection'] = detection
     job.save_meta()
+
+
+def sweep_blobs() -> dict:
+    """Drop expired job directories, then the oldest until the store fits.
+
+    An ordinary job on the ordinary queue, enqueued by the cron scheduler in
+    ``src/worker.py``: it shows up in the log like any other, is bounded by
+    ``job_timeout``, and can be run by hand. The decision-making is in
+    ``blobs.reap`` so it can be tested without a worker.
+    """
+    settings = get_settings()
+    swept = blobs.reap(
+        ttl=settings.blob_ttl,
+        max_bytes=settings.blob_max_bytes,
+        # Never evict something that may still be queued: a job written
+        # seconds ago has not necessarily been picked up yet, and deleting
+        # its source would fail it.
+        min_age=settings.job_timeout * 2,
+    )
+    return {'swept': len(swept), 'error': None}
 
 
 def _job_id() -> str:
