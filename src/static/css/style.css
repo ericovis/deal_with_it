@@ -2204,3 +2204,51 @@ code {
         width: 96px;
     }
 }
+
+/* ---------------------------------------------------------- shared result --
+   /s/<id>: one result on its own page, for someone who was not here. */
+.shared {
+    flex: 1 1 100%;
+    max-width: 720px;
+    margin: 0 auto;
+    padding: 32px 0 64px;
+    text-align: center;
+}
+
+.shared h1 {
+    margin: 0 0 4px;
+}
+
+.shared .lead {
+    margin: 0 0 22px;
+    color: var(--muted);
+}
+
+.shared .result {
+    text-align: left;
+}
+
+/* The expiry line, on a card and on a shared page. countdown.js rewrites the
+   text; the server-rendered absolute time is what it says without script. */
+.card-share {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    flex-wrap: wrap;
+    padding: 8px 12px 10px;
+    font-size: 0.82rem;
+    color: var(--muted);
+}
+
+.expiry {
+    font-variant-numeric: tabular-nums;
+}
+
+.expiry.gone {
+    color: var(--danger, #c0392b);
+}
+
+.card-share .share {
+    font-weight: 600;
+}

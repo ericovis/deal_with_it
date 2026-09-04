@@ -28,6 +28,7 @@ def written(img_format: str = 'PNG') -> dict:
     whatever DWI_BLOB_DIR the test set -- a manifest pointing at nothing
     would not exercise the paths that matter.
     """
+    import json
     from datetime import UTC, datetime, timedelta
     from uuid import uuid4
 
@@ -44,12 +45,20 @@ def written(img_format: str = 'PNG') -> dict:
         'view': blobs.put(job_id, 'view.webp', PIXELS),
         'thumb': blobs.put(job_id, 'thumb.webp', PIXELS),
         'before': blobs.put(job_id, 'before.webp', PIXELS),
+        'card': blobs.put(job_id, 'card.jpg', PIXELS),
     }
     expires = datetime.now(UTC) + timedelta(seconds=get_settings().blob_ttl)
+    downloads = {native: images['full'],
+                 'webp': blobs.put(job_id, 'result.webp', PIXELS)}
+    # The share page reads this, not Redis, so a stub that skipped it would
+    # leave /s/<id> untested.
+    blobs.put(job_id, 'meta.json', json.dumps({
+        'job_id': job_id, 'images': images, 'downloads': downloads,
+        'expires_at': expires.isoformat(), 'faces': 1, 'detection': 'plain',
+    }).encode())
     return {
         'images': images,
-        'downloads': {native: images['full'],
-                      'webp': blobs.put(job_id, 'result.webp', PIXELS)},
+        'downloads': downloads,
         'expires_at': expires.isoformat(),
         'error': None,
     }

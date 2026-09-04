@@ -1,6 +1,7 @@
 """The unit of work the RQ worker runs: picklable arguments in, a plain
 dict out. Must not import anything web-related."""
 
+import json
 import logging
 import re
 from datetime import UTC, datetime, timedelta
@@ -110,6 +111,17 @@ def process_image(payload: dict) -> dict:
         job_id, processor.output, processor.img_format)
     written |= derivatives.write_before(job_id, Image.fromarray(array))
     expires_at = datetime.now(UTC) + timedelta(seconds=settings.blob_ttl)
+    # Beside the pictures, not in Redis: the job record expires at
+    # `result_ttl` and the pictures at `blob_ttl`, so a share page reading
+    # from Redis would go dark while its own images were still there.
+    blobs.put(job_id, 'meta.json', json.dumps({
+        'job_id': job_id,
+        'images': written,
+        'downloads': downloads,
+        'expires_at': expires_at.isoformat(),
+        'faces': len(processor.faces),
+        'detection': processor.detection,
+    }).encode())
     return {
         'images': written,
         'downloads': downloads,

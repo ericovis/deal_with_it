@@ -10,6 +10,7 @@ which htmx has no attribute for.
 import json
 import logging
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 
 from fasthtml.common import (
@@ -41,9 +42,11 @@ from fasthtml.common import (
     P,
     Pre,
     Progress,
+    Script,
     Section,
     Span,
     Summary,
+    Time,
     Title,
     UploadFile,
     cookie,
@@ -190,9 +193,15 @@ def _theme_colour(theme: str | None) -> tuple:
     )
 
 
-def head_tags(title: str, theme: str | None) -> tuple:
-    """Metadata that belongs in <head>. FastHTML hoists these out of a page."""
-    card = _absolute('/static/img/deal_with_me.png')
+def head_tags(title: str, theme: str | None, image: str | None = None,
+              description: str | None = None) -> tuple:
+    """Metadata that belongs in <head>. FastHTML hoists these out of a page.
+
+    ``image`` overrides the social card, which is what makes a shared result
+    unfurl into the actual picture rather than the site's own artwork.
+    """
+    card = _absolute(image or '/static/img/deal_with_me.png')
+    blurb = description or 'A Python API for creating "Deal With It"-like Images'
     return (
         Title(title),
         # viewport-fit=cover lets the band paint under a phone's status bar;
@@ -200,7 +209,7 @@ def head_tags(title: str, theme: str | None) -> tuple:
         Meta(name='viewport',
              content='width=device-width,initial-scale=1,viewport-fit=cover'),
         Meta(name='author', content='Eric Magalhães'),
-        Meta(name='description', content='A Python API for creating "Deal With It"-like Images'),
+        Meta(name='description', content=blurb),
         Meta(name='application-name', content='Deal With It!'),
         Meta(name='apple-mobile-web-app-title', content='Deal With It!'),
         Meta(name='apple-mobile-web-app-capable', content='yes'),
@@ -211,14 +220,12 @@ def head_tags(title: str, theme: str | None) -> tuple:
         Meta(name='twitter:card', content='summary_large_image'),
         Meta(name='twitter:creator', content='@ericovis'),
         Meta(name='twitter:title', content='Deal with it!'),
-        Meta(name='twitter:description',
-             content='A Python API for creating "Deal With It"-like Images'),
+        Meta(name='twitter:description', content=blurb),
         Meta(name='twitter:image', content=card),
         Meta(property='og:title', content='Deal with it!'),
         Meta(property='og:type', content='website'),
         Meta(property='og:image', content=card),
-        Meta(property='og:description',
-             content='A Python API for creating "Deal With It"-like Images.'),
+        Meta(property='og:description', content=blurb),
         Link(rel='icon', href=asset('/static/img/favicon.png'), type='image/png',
              sizes='16x16'),
         Link(rel='icon', href=asset('/static/img/icons/favicon-64.png'), type='image/png',
@@ -231,6 +238,10 @@ def head_tags(title: str, theme: str | None) -> tuple:
                                     'family=Manrope:wght@400;500;600;700;800&'
                                     'family=Fira+Code:wght@400;500&display=swap'),
         Link(rel='stylesheet', href=asset('/static/css/style.css')),
+        # The one script in the interface that is not htmx wiring: it turns
+        # the server-rendered expiry into a ticking countdown, and the page
+        # reads correctly without it.
+        Script(src=asset('/static/js/countdown.js'), defer=True),
     )
 
 
@@ -516,6 +527,21 @@ def page(theme: str | None, reachable: bool) -> tuple:
     )
 
 
+def expiry_line(expires_at) -> Time:
+    """When this result stops existing.
+
+    The absolute time is the truth and is rendered server-side, so the
+    sentence is correct with JavaScript off. countdown.js turns it into a
+    ticking one; `datetime` is what it reads.
+    """
+    return Time(
+        f'Available until {expires_at:%H:%M} UTC',
+        datetime=expires_at.strftime('%Y-%m-%dT%H:%M:%SZ'),
+        data_expires=True,
+        cls='expiry',
+    )
+
+
 def not_found_page(theme: str | None, reachable: bool,
                    heading: str = 'Nothing here',
                    message: str = 'That page does not exist.',
@@ -554,6 +580,38 @@ def not_found_response(theme: str | None, **kwargs) -> HTMLResponse:
     document = not_found_page(theme, jobs.is_broker_reachable(), **kwargs)
     # to_xml on an Html element emits the doctype itself.
     return HTMLResponse(to_xml(Html(*document)), status_code=404)
+
+
+def share_page(job_id: str, record: dict, theme: str | None, reachable: bool) -> tuple:
+    """One result, standing on its own, for someone who was not here.
+
+    Rendered from the job's own meta.json rather than from Redis: the job
+    record expires at `result_ttl` and the pictures at `blob_ttl`, so a
+    Redis-backed page would go dark while its own images were still up.
+    """
+    pictures = JobImages(**{role: blobs.url(ref) for role, ref in record['images'].items()})
+    downloads = {fmt: blobs.url(ref) for fmt, ref in (record.get('downloads') or {}).items()}
+    expires_at = datetime.fromisoformat(record['expires_at'])
+    faces = record.get('faces') or 0
+    caption = ('Deal With It — glasses on '
+               f'{faces} face{"" if faces == 1 else "s"}')
+    return (
+        *head_tags(f'{caption} | Deal With It', theme,
+                   image=pictures.card or pictures.full, description=caption),
+        site_header('app', theme, reachable),
+        Main(
+            Section(
+                H1('Someone dealt with it'),
+                P(caption, cls='lead'),
+                _result_view(job_id, pictures, downloads, expires_at=expires_at),
+                P(A('Deal with your own picture', href='/', cls='btn'),
+                  cls='lost-actions'),
+                cls='shared',
+            ),
+            cls='container layout',
+        ),
+        site_footer('app'),
+    )
 
 
 EXPIRED_HEADING = 'That one has expired'
@@ -598,7 +656,8 @@ def _subtitle(result: JobResult, source: JobSource) -> str:
     return kind
 
 
-def _result_view(job_id: str, pictures: JobImages, downloads: dict[str, str]) -> Div:
+def _result_view(job_id: str, pictures: JobImages, downloads: dict[str, str],
+                 share_url: str | None = None, expires_at=None) -> Div:
     """The finished image, its Before/After toggle, and the full-screen view.
 
     The full-screen view re-lays out the *same* frame rather than a copy, so
@@ -651,6 +710,14 @@ def _result_view(job_id: str, pictures: JobImages, downloads: dict[str, str]) ->
             *footer,
         ]
 
+    below = []
+    if share_url or expires_at:
+        below.append(Div(
+            *( [A('Share', href=share_url, cls='share')] if share_url else [] ),
+            *( [expiry_line(expires_at)] if expires_at else [] ),
+            cls='card-share',
+        ))
+
     return Div(
         frame,
         # Clicking the space around the image closes it.
@@ -659,6 +726,7 @@ def _result_view(job_id: str, pictures: JobImages, downloads: dict[str, str]) ->
         Label('×', fr=toggle, cls='lightbox-close', title='Close',
               aria_label='Close the full-size view'),
         Div(*controls, cls='card-foot'),
+        *below,
         cls='result',
     )
 
@@ -694,7 +762,8 @@ def card(job_id: str, result: JobResult | None, source: JobSource,
     elif polls:
         body.append(Progress(max=100))
     elif finished and pictures:
-        body.append(_result_view(job_id, pictures, result.downloads or {}))
+        body.append(_result_view(job_id, pictures, result.downloads or {},
+                                 result.share_url, result.expires_at))
     else:
         message = result.error or 'That did not work.'
         retry = [Button('Retry', type='button', cls='retry',
@@ -1160,6 +1229,16 @@ def create_ui():
         return not_found_response(theme_of(request))
 
     app.add_exception_handler(404, _not_found)
+
+    @app.get('/s/{job_id}')
+    def shared(request, job_id: str):
+        """A finished result, by link. Read off disk, so it lives exactly as
+        long as the pictures it shows."""
+        record = jobs.shared_record(job_id)
+        if record is None:
+            return not_found_response(theme_of(request), heading=EXPIRED_HEADING,
+                                      message=EXPIRED_MESSAGE)
+        return share_page(job_id, record, theme_of(request), jobs.is_broker_reachable())
 
     @app.get('/empty')
     def empty():

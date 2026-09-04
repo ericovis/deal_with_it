@@ -391,3 +391,40 @@ class TestTheRestOfTheFurniture:
         page.locator('.snippet .copy').first.click()
         copied = page.evaluate('navigator.clipboard.readText()')
         assert f'"url": "{EXAMPLE_SOURCE}"' in copied
+
+
+class TestTheCountdown:
+    """The one script in the interface that is not htmx wiring."""
+
+    def test_it_counts_down_on_a_finished_card(self, page: Page):
+        card = run(page, 'me')
+        expiry = card.locator('time[data-expires]')
+        expect(expiry).to_be_visible()
+        first = expiry.inner_text()
+        # It starts as the server-rendered absolute time and is rewritten.
+        expect(expiry).to_contain_text('Available for another', timeout=5000)
+        page.wait_for_timeout(2000)
+        assert expiry.inner_text() != first, 'the clock is not moving'
+
+    def test_the_page_still_reads_without_it(self, page: Page, context):
+        """The absolute time is the truth; the ticker is decoration."""
+        context.add_init_script('window.setInterval = () => 0;')
+        card = run(page, 'me')
+        expect(card.locator('time[data-expires]')).to_be_visible()
+
+
+class TestSharing:
+    def test_a_finished_card_links_to_a_page_worth_passing_on(self, page: Page):
+        card = run(page, 'me')
+        card.locator('a.share').click()
+        expect(page.locator('h1')).to_contain_text('Someone dealt with it')
+        expect(page.locator('.frame img.after')).to_be_visible()
+        page.locator('.frame img.after').evaluate('img => img.decode()')
+
+
+class TestNotFound:
+    @pytest.mark.expects_404
+    def test_an_unknown_url_gets_the_page(self, page: Page):
+        page.goto('/no-such-thing')
+        expect(page.locator('h1')).to_contain_text('Nothing here')
+        expect(page.locator('.site-footer')).to_be_visible()

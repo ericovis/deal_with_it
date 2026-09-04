@@ -125,6 +125,70 @@ class TestPage:
         assert client.get(path).status_code == 404
 
 
+class TestSharing:
+    """A finished result, by link, for someone who was not here."""
+
+    def finished(self, client, hx):
+        return job_ids(submit(client, hx, files=[
+            ('image', ('me.png', make_png(), 'image/png'))]).text)[0]
+
+    def test_a_card_offers_a_link_to_pass_on(self, client, hx):
+        job_id = self.finished(client, hx)
+        body = client.get(f'/jobs/{job_id}', headers=hx).text
+        assert f'href="/s/{job_id}"' in body
+
+    def test_the_share_page_shows_the_result(self, client, hx):
+        job_id = self.finished(client, hx)
+        response = client.get(f'/s/{job_id}')
+        assert response.status_code == 200
+        assert f'/i/{job_id}/view.webp' in response.text
+
+    def test_it_unfurls_into_the_picture_not_the_site_artwork(self, client, hx):
+        """The whole point of sharing a meme is the preview."""
+        job_id = self.finished(client, hx)
+        body = client.get(f'/s/{job_id}').text
+        assert f'property="og:image" content="/i/{job_id}/card.jpg"' in body
+        assert 'deal_with_me.png' not in body, 'the default card is for the site itself'
+
+    def test_it_reads_from_disk_not_from_redis(self, client, hx, redis_conn):
+        """Redis forgets a job at result_ttl; the pictures live to blob_ttl.
+        A share link has to last as long as what it shows, not less."""
+        job_id = self.finished(client, hx)
+        redis_conn.flushall()
+        assert client.get(f'/s/{job_id}').status_code == 200
+
+    def test_a_swept_result_says_it_has_expired(self, client, hx):
+        job_id = self.finished(client, hx)
+        blobs.forget(job_id)
+        response = client.get(f'/s/{job_id}')
+        assert response.status_code == 404
+        assert 'expired' in response.text.lower()
+        assert 'Nothing here' not in response.text, 'gone is not the same as never existed'
+
+    def test_an_invented_id_does_not_explode(self, client):
+        assert client.get('/s/../../etc/passwd').status_code == 404
+        assert client.get('/s/nope').status_code == 404
+
+
+class TestTheCountdown:
+    """The expiry is rendered as an absolute time and ticked by script, so
+    the sentence is right either way."""
+
+    def test_a_finished_card_says_when_it_expires(self, client, hx):
+        job_id = job_ids(submit(client, hx, files=[
+            ('image', ('me.png', make_png(), 'image/png'))]).text)[0]
+        body = client.get(f'/jobs/{job_id}', headers=hx).text
+        assert 'data-expires' in body
+        assert 'Available until' in body
+        assert re.search(r'<time[^>]+datetime="\d{4}-\d\d-\d\dT[\d:]+Z"', body)
+
+    def test_the_page_loads_the_ticker(self, client):
+        assert '/static/js/countdown.js' in client.get('/').text
+
+    def test_it_is_deferred_so_it_never_blocks_the_page(self, client):
+        assert re.search(r'<script[^>]*countdown\.js[^>]*defer', client.get('/').text)
+
+
 class TestNotFound:
     """Most of the 404s this app makes are not typos: they are shared links
     whose pictures have been swept."""

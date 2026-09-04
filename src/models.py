@@ -127,6 +127,11 @@ class JobImages(BaseModel):
         default=None, description='The submitted image at viewing size (WebP).')
     full: str = Field(description='The result at full resolution, in the format '
                                   'it was submitted in.')
+    card: str | None = Field(
+        default=None,
+        description='A 1200px JPEG for link previews. JPEG because unfurlers '
+                    'handle WebP poorly.',
+    )
 
 
 class JobResult(BaseModel):

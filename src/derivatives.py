@@ -33,6 +33,11 @@ VIEW_QUALITY = 80
 THUMB_QUALITY = 75
 #: A file someone chose to download. Barely lossy.
 FULL_QUALITY = 92
+#: What a scraper puts in a chat preview when a share link is pasted. JPEG,
+#: not WebP: link unfurlers are years behind browsers. 1200px is what the
+#: large-summary card wants, and it keeps a preview off the 3-8 MB original.
+CARD = 1200
+CARD_QUALITY = 85
 
 
 def _fit(image: Image.Image, longest: int) -> Image.Image:
@@ -68,6 +73,8 @@ def write_result(job_id: str, image: Image.Image,
                        quality=VIEW_QUALITY, method=4),
         'thumb': _write(job_id, 'thumb.webp', _fit(image, THUMB), 'WEBP',
                         quality=THUMB_QUALITY, method=4),
+        'card': _write(job_id, 'card.jpg', _fit(image.convert('RGB'), CARD), 'JPEG',
+                       quality=CARD_QUALITY),
     }
     downloads = {
         native: images['full'],

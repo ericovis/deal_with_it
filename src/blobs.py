@@ -10,6 +10,7 @@ A job owns one directory. That is what makes a job independently deletable,
 which is the whole basis of :func:`reap`.
 """
 
+import json
 import logging
 import os
 import re
@@ -106,6 +107,18 @@ def path(reference: str) -> Path:
 def url(reference: str) -> str:
     """The URL a browser fetches a blob from."""
     return PREFIX + '/'.join(split(reference))
+
+
+def read_json(job_id: str, name: str = 'meta.json') -> dict | None:
+    """A job's own record of itself, or None once it has been swept.
+
+    What the share page renders from: it outlives the Redis job, which
+    expires at ``result_ttl``, and it dies exactly when the pictures do.
+    """
+    try:
+        return json.loads(path(ref(job_id, name)).read_bytes())
+    except (OSError, ValueError, UnsafeReference):
+        return None
 
 
 def exists(reference: str) -> bool:

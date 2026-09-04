@@ -77,6 +77,7 @@ class TestReadJob:
             'thumb': f'{host}/i/{job_id}/thumb.webp',
             'before': f'{host}/i/{job_id}/before.webp',
             'full': f'{host}/i/{job_id}/result.png',
+            'card': f'{host}/i/{job_id}/card.jpg',
         }
         assert body['downloads'] == {'png': f'{host}/i/{job_id}/result.png',
                                      'webp': f'{host}/i/{job_id}/result.webp'}

@@ -74,7 +74,7 @@ def test_writes_the_pictures_and_returns_where_they_went(stub_load, stub_process
     result = tasks.process_image({'url': 'https://example.test/a.png', 'base64': None})
 
     assert result['error'] is None
-    assert set(result['images']) == {'full', 'view', 'thumb', 'before'}
+    assert set(result['images']) == {'full', 'view', 'thumb', 'before', 'card'}
     for reference in result['images'].values():
         assert blobs.path(reference).is_file(), reference
     assert result['downloads']['png'] == result['images']['full']

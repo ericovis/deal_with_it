@@ -61,6 +61,7 @@ addopts = "--strict-markers"
 markers = [
     "faces: needs the optional detector stack (install the 'worker' extra)",
     "e2e: drives a real browser against a real server (install the 'e2e' group)",
+    "expects_404: navigates to a missing page on purpose, so the browser logs its status",
 ]
 filterwarnings = [
     "error::DeprecationWarning:src.*",

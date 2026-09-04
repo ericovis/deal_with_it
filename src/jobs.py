@@ -315,6 +315,17 @@ def _finished_result(job: Job) -> JobResult:
     )
 
 
+def shared_record(job_id: str) -> dict | None:
+    """What a share page renders from: the job's own file, not Redis.
+
+    Redis forgets a job at ``result_ttl``; the pictures live until
+    ``blob_ttl``. Reading from disk is what makes a shared link last exactly
+    as long as what it shows.
+    """
+    record = blobs.read_json(job_id)
+    return record if record and record.get('images') else None
+
+
 def is_broker_reachable() -> bool:
     try:
         return bool(get_queue().connection.ping())
