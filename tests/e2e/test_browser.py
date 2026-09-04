@@ -476,6 +476,59 @@ class TestTheCountdown:
         expect(card.locator('time[data-expires]')).to_contain_text('will be deleted at')
 
 
+class TestTheDownloadMenu:
+    def test_the_formats_are_behind_one_button(self, page: Page):
+        card = run(page, 'me')
+        menu = card.locator('.download-menu')
+        expect(menu.locator('summary')).to_have_text('Download')
+        expect(menu.locator('.formats')).to_be_hidden()
+        menu.locator('summary').click()
+        expect(menu.locator('.formats')).to_be_visible()
+        assert menu.locator('.formats a').count() >= 2
+
+    def test_a_format_link_points_at_the_full_resolution_file(self, page: Page):
+        card = run(page, 'me')
+        card.locator('.download-menu summary').click()
+        link = card.locator('.download-menu .formats a').first
+        assert re.search(r'/i/[0-9a-f-]+/result\.\w+$', link.get_attribute('href'))
+        assert link.get_attribute('download').startswith('deal-with-it-')
+
+
+class TestTheSystemShareButton:
+    def test_it_stays_hidden_where_files_cannot_be_shared(self, page: Page):
+        """Headless chromium has no share sheet, which is the case the
+        button has to survive: it must not be offered half-working."""
+        card = run(page, 'me')
+        expect(card.locator('button.share-system')).to_be_hidden()
+
+    def test_it_appears_once_the_browser_says_it_can(self, page: Page, context):
+        context.add_init_script(
+            'navigator.share = () => Promise.resolve();'
+            'navigator.canShare = () => true;'
+        )
+        card = run(page, 'me')
+        expect(card.locator('button.share-system')).to_be_visible()
+
+    def test_it_hands_the_picture_to_the_system(self, page: Page, context):
+        """What a phone does with it -- Photos, WhatsApp -- is the system's
+        business; ours is handing over a real file."""
+        context.add_init_script("""
+            window.__shared = null;
+            navigator.canShare = () => true;
+            navigator.share = (data) => {
+                window.__shared = data.files.map(f => [f.name, f.type, f.size]);
+                return Promise.resolve();
+            };
+        """)
+        card = run(page, 'me')
+        card.locator('button.share-system').click()
+        page.wait_for_function('window.__shared !== null', timeout=15000)
+        [[name, kind, size]] = page.evaluate('window.__shared')
+        assert name.startswith('deal-with-it-')
+        assert kind.startswith('image/')
+        assert size > 0
+
+
 class TestSharing:
     def test_a_finished_card_links_to_a_page_worth_passing_on(self, page: Page):
         card = run(page, 'me')

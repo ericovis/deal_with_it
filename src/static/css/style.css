@@ -2224,3 +2224,74 @@ code {
 .card-share .share {
     font-weight: 600;
 }
+
+/* --------------------------------------------------- download and share --
+   One Download that opens the formats, rather than one link per format:
+   which formats exist depends on what was submitted, so the row used to be
+   two items wide sometimes and three others. */
+.download-menu {
+    position: relative;
+}
+
+.download-menu > summary {
+    list-style: none;
+    cursor: pointer;
+}
+
+.download-menu > summary::-webkit-details-marker {
+    display: none;
+}
+
+/* The arrow, and which way it points. */
+.download-menu > summary::after {
+    content: '';
+    display: inline-block;
+    width: 0;
+    height: 0;
+    margin-left: 7px;
+    vertical-align: middle;
+    border-left: 4px solid transparent;
+    border-right: 4px solid transparent;
+    border-top: 5px solid currentColor;
+    transition: transform 0.12s ease;
+}
+
+.download-menu[open] > summary::after {
+    transform: rotate(180deg);
+}
+
+.download-menu .formats {
+    position: absolute;
+    right: 0;
+    bottom: calc(100% + 6px);
+    z-index: 3;
+    display: flex;
+    flex-direction: column;
+    min-width: 100%;
+    padding: 4px;
+    border: 1px solid var(--border-strong);
+    border-radius: 10px;
+    background: var(--surface);
+    box-shadow: 0 8px 24px rgb(0 0 0 / 18%);
+}
+
+.download-menu .formats a {
+    padding: 7px 14px;
+    border-radius: 6px;
+    font-size: 0.82rem;
+    font-weight: 600;
+    text-decoration: none;
+    color: var(--text);
+    white-space: nowrap;
+}
+
+.download-menu .formats a:hover {
+    background: var(--bg);
+    color: var(--accent);
+}
+
+/* Hidden until share.js has asked the browser whether it can share a file.
+   `[hidden]` alone loses to the flex display the footer gives its children. */
+.card-foot .share-system[hidden] {
+    display: none;
+}

@@ -567,14 +567,15 @@ class TestCards:
         job_id = self.start(client, hx)
         body = client.get(f'/jobs/{job_id}', headers=hx).text
         assert f'download="deal-with-it-{job_id[:8]}.png"' in body
-        assert 'Download PNG' in body
+        assert '<summary class="download">Download</summary>' in body
 
     def test_a_jpeg_result_downloads_as_a_jpeg(self, client, hx, stub_task):
         stub_task(support.SUCCEEDS_AS_JPEG)
         job_id = self.start(client, hx)
         body = client.get(f'/jobs/{job_id}', headers=hx).text
         assert f'download="deal-with-it-{job_id[:8]}.jpg"' in body
-        assert 'Download JPG' in body
+        assert '>JPG</a>' in body, 'the format is a choice inside the menu now'
+        assert 'Download JPG' not in body, 'the button is just "Download"'
 
     def test_the_full_size_view_is_an_overlay_not_a_link(self, client, hx):
         """A data: URI cannot be navigated to -- browsers block it -- so the
@@ -721,11 +722,24 @@ class TestResultPictures:
         assert f'src="/i/{job_id}/thumb.webp" alt="" class="thumb"' in body
 
     def test_every_format_the_worker_wrote_is_offered(self, client, hx):
+        """One Download that opens the formats: which ones exist depends on
+        what was submitted, so a row of links was a different width each
+        time."""
         job_id = self.upload(client, hx)
         body = client.get(f'/jobs/{job_id}', headers=hx).text
-        assert 'Download PNG' in body and 'Download WEBP' in body
+        assert body.count('<summary class="download">Download</summary>') == 1
+        assert '>PNG</a>' in body and '>WEBP</a>' in body
         assert f'download="deal-with-it-{job_id[:8]}.png"' in body
         assert f'download="deal-with-it-{job_id[:8]}.webp"' in body
+
+    def test_the_share_button_waits_to_be_told_it_will_work(self, client, hx):
+        """A browser that can only share links must not be offered a button
+        that half-works, and only the browser knows."""
+        job_id = self.upload(client, hx)
+        body = client.get(f'/jobs/{job_id}', headers=hx).text
+        button = re.search(r'<button[^>]*class="share-system"[^>]*>', body).group()
+        assert 'hidden' in button
+        assert f'data-share="/i/{job_id}/result.png"' in button
 
     def test_the_pictures_a_card_points_at_are_all_fetchable(self, client, hx):
         job_id = self.upload(client, hx)

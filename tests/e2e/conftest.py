@@ -168,10 +168,10 @@ _NAVIGATION_404 = 'the server responded with a status of 404'
 def quiet_console(page, request):
     """No test may leave the browser complaining.
 
-    The interface ships three lines of script -- the clipboard call, the
-    one-file-per-request upload, and the expiry countdown -- so anything in
-    the console is almost always htmx failing, one of those three, or markup
-    we got wrong. This is what says so.
+    The interface ships four pieces of script -- the clipboard call, the
+    one-file-per-request upload, the expiry countdown and the share button --
+    so anything in the console is almost always htmx failing, one of those
+    four, or markup we got wrong. This is what says so.
 
     A test marked ``expects_404`` is visiting a missing page deliberately and
     the browser logs the navigation's own status; that one line is allowed,

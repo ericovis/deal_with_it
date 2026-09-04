@@ -2,10 +2,12 @@
 
 Two pages: the app at ``/`` and the docs at ``/docs``. Submitting a picture
 swaps a card into ``#queue``; the card polls itself until the worker is done
-and then turns into the result in place. Three lines of script in the whole
-interface: the clipboard call on the docs page, ``UPLOAD_ONE_BY_ONE`` (which
-htmx has no attribute for), and ``countdown.js``, which turns a
-server-rendered expiry into a ticking one and is pure decoration without it.
+and then turns into the result in place. Four pieces of script in the whole
+interface, three of them enhancements the page reads correctly without: the
+clipboard call on the docs page, ``UPLOAD_ONE_BY_ONE`` (which htmx has no
+attribute for), ``countdown.js``, which turns a server-rendered expiry into a
+ticking one, and ``share.js``, which reveals a button that cannot honestly be
+offered until the browser has said it can share a file.
 """
 
 import json
@@ -239,10 +241,12 @@ def head_tags(title: str, theme: str | None, image: str | None = None,
                                     'family=Manrope:wght@400;500;600;700;800&'
                                     'family=Fira+Code:wght@400;500&display=swap'),
         Link(rel='stylesheet', href=asset('/static/css/style.css')),
-        # The one script in the interface that is not htmx wiring: it turns
-        # the server-rendered expiry into a ticking countdown, and the page
-        # reads correctly without it.
+        # The two scripts that are not htmx wiring. Both are enhancements:
+        # the countdown turns a server-rendered expiry into a ticking one, and
+        # share.js reveals a button that cannot be offered without first
+        # asking the browser whether it can share a file at all.
         Script(src=asset('/static/js/countdown.js'), defer=True),
+        Script(src=asset('/static/js/share.js'), defer=True),
     )
 
 
@@ -644,6 +648,25 @@ def _subtitle(result: JobResult, source: JobSource) -> str:
     return kind
 
 
+def download_menu(job_id: str, downloads: dict[str, str]) -> Details:
+    """One Download control that opens the formats.
+
+    A `<details>` because it needs no script and closes on click-away with
+    `::details-content`; the same element the docs contents list uses. The
+    formats are whichever ones the worker wrote, which depends on what was
+    submitted, so the list is never longer than it is useful.
+    """
+    return Details(
+        Summary('Download', cls='download'),
+        Div(
+            *[A(fmt.upper(), href=url, download=f'deal-with-it-{job_id[:8]}.{fmt}')
+              for fmt, url in sorted(downloads.items())],
+            cls='formats',
+        ),
+        cls='download-menu',
+    )
+
+
 def _result_view(job_id: str, pictures: JobImages, downloads: dict[str, str],
                  share_url: str | None = None, expires_at=None) -> Div:
     """The finished image, its Before/After toggle, and the full-screen view.
@@ -665,11 +688,13 @@ def _result_view(job_id: str, pictures: JobImages, downloads: dict[str, str],
         # too small to read. Native pinch still works either way.
         Input(type='checkbox', id=zoom, cls='zoom-toggle visually-hidden'),
         Label(Span('Zoom', cls='in'), Span('Fit', cls='out'), fr=zoom, cls='zoom'),
-        # Full resolution, straight off disk. The `download` attribute names
-        # the saved file; nothing server-side is involved.
-        *[A(f'Download {fmt.upper()}', href=url,
-            download=f'deal-with-it-{job_id[:8]}.{fmt}', cls='download')
-          for fmt, url in sorted(downloads.items())],
+        # Hidden until a browser says it can actually share a file, which
+        # share.js does. On a phone this is the system sheet -- save to
+        # Photos, send on WhatsApp -- and there is no way to offer that
+        # without asking the browser first.
+        Button('Share', type='button', cls='share-system', hidden=True,
+               data_share=pictures.full, data_name=f'deal-with-it-{job_id[:8]}'),
+        download_menu(job_id, downloads),
     ]
     # Tapping the picture opens it, which is what a phone expects. Sized over
     # the frame rather than wrapping it, because the frame is also the

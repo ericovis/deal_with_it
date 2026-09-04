@@ -73,7 +73,7 @@ Invariants worth knowing before editing:
 - **The dropzone posts one file per request** (`UPLOAD_ONE_BY_ONE` in
   `src/ui.py`): a plain `hx-post` on a multiple file input sends the whole
   selection in one body, so nothing appears until the last picture has
-  uploaded. It is one of the three lines of script in the interface — htmx has
+  uploaded. It is one of the four pieces of script in the interface — htmx has
   no attribute that splits a file input. A file post therefore answers with
   the card alone: the script empties the input itself, and an out-of-band
   form swap would tear out the element the rest of the batch posts from.
@@ -172,6 +172,12 @@ Invariants worth knowing before editing:
   its hit area back over the whole card -- which is what keeps a click or a
   drop on the padding working. `.pick-row` is `position: relative` so its two
   buttons sit above that overlay, and `order` puts the limits line after them.
+- **Script is only ever an enhancement.** `countdown.js` retimes a sentence
+  the server already rendered correctly; `share.js` reveals a Share button
+  that starts `hidden`, because only the browser knows whether it can share a
+  *file* and a button that half-works is worse than none. Both are delegated
+  from the document and re-run on `htmx:afterSwap`, since cards are swapped in
+  and out constantly — a held element reference goes stale immediately.
 - **The docs contents list is a `<details>`.** Above 860px it is forced open
   with `::details-content { content-visibility: visible }` and the summary is
   made inert, so the sidebar is the label and links it always was.
