@@ -77,6 +77,45 @@ Before results matched the input format, a 36 MP job returned a 22.5 MB PNG
 data URI and the encode alone took 7.3 s, longer than detection. A JPEG at
 quality 90 encodes in 0.16 s.
 
+## On two cores
+
+Measured 2026-09-04 against the live deployment: a 2 vCPU, 3.8 GB VPS with
+no swap, running Redis, uvicorn, the worker (`DWI_WORKER_THREADS=2`) and
+Caddy as rootless containers on the same two cores. The load generator ran
+off-host over the internet, so every submit latency below includes the
+upload; the worker numbers come from its own log and do not.
+
+| run                       | throughput | end-to-end p50 | poll p50 / p95 |
+|---------------------------|------------|----------------|----------------|
+| 24 samples, concurrency 8 | 175/min    | 2.3 s          | 0.17 / 0.96 s  |
+| 2 x 36 MP, concurrency 2  | —          | 18.5 s         | 0.16 / 16.5 s  |
+
+The sample burst put 8.8 seconds of work through the worker (mean 0.37 s a
+job, p90 0.58 s) in about seven seconds of wall time, and `vmstat` showed
+both cores pinned throughout — 87-90% user, 4-6% idle. The worker's own
+8.8 thread-seconds are roughly 60% of the fourteen core-seconds that burst
+had to spend: on a host this size **the web tier is not free**. Caddy's
+TLS and compression and uvicorn's enqueue path take the rest, and they take
+it from detection.
+
+Which is why two threads is the ceiling here rather than the three that
+"cores plus one" would suggest. There is no idle CPU left for a third to
+use, and the cost of trying is paid in poll latency, by the person
+watching a card.
+
+Two things worth fixing rather than measuring around:
+
+- **Compression on a result is pure waste.** A finished job is base64
+  JPEG or PNG. Fetched through Caddy's `encode zstd gzip`, a 0.37 MB
+  result was 0.37 MB on the wire — nothing saved — and 0.2 s slower than
+  the same fetch with `Accept-Encoding: identity`. Exclude the job
+  endpoints from compression and that CPU goes back to detection.
+- **Nothing must be allowed to grow without a ceiling** on a host with no
+  swap. The worker peaked at 850 MB with two 36 MP jobs in flight, against
+  677 MB idle, which is fine; Redis holding queued payloads and results is
+  the one that is not, and its `maxmemory` is worth checking rather than
+  assuming (see below).
+
 ## What the abuse run checks
 
 All of these pass against the live stack, with zero tracebacks in the worker
@@ -119,7 +158,15 @@ At the defaults the worst case in Redis is 50 queued payloads of 13 MB plus
 results at 900 s: well over 1 GB if every submission is a 10 MB image. With
 `noeviction`, Redis then refuses writes and submissions fail with a 500
 rather than losing queued jobs silently. Lower `DWI_RESULT_TTL` or raise
-`maxmemory` to taste.
+`maxmemory` to taste. Keep the queue cap and the ceiling in step with each
+other: `DWI_MAX_QUEUE_DEPTH` payloads must fit inside `maxmemory`, or the
+backpressure that was meant to answer 503 arrives as a 500 instead.
+
+Confirm the ceiling is real rather than configured — `redis-cli config get
+maxmemory` on the running container. It was 0 in production for a while:
+the argument list said otherwise, but podman's quadlet generator drops an
+empty `""` argument and everything after it, so `--save "" --maxmemory 1gb`
+reached Redis as `--save`.
 
 The rate limit keys on `request.client.host`. Behind a proxy, run uvicorn
 with `--proxy-headers --forwarded-allow-ips <proxy>` (the `web` image
