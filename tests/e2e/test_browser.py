@@ -1,5 +1,7 @@
 """The interface, driven by a browser, against the whole real stack."""
 
+import re
+
 import pytest
 from playwright.sync_api import Page, expect
 
@@ -16,6 +18,17 @@ def try_sample(page: Page, name: str) -> None:
     adding a sample used to silently repoint these at the wrong picture.
     """
     page.locator('.sample', has_text=SAMPLES[name].filename).click()
+
+
+#: Drops a <time data-expires> on the page with a chosen number of seconds
+#: left, so the units can be checked without waiting an hour for a real one.
+SPAWN_EXPIRY = """(seconds) => {
+    const t = document.createElement('time');
+    t.id = 'probe';
+    t.setAttribute('data-expires', '');
+    t.setAttribute('datetime', new Date(Date.now() + seconds * 1000).toISOString());
+    document.body.appendChild(t);
+}"""
 
 
 def first_card(page: Page):
@@ -396,21 +409,45 @@ class TestTheRestOfTheFurniture:
 class TestTheCountdown:
     """The one script in the interface that is not htmx wiring."""
 
-    def test_it_counts_down_on_a_finished_card(self, page: Page):
+    def test_it_rewrites_the_server_sentence(self, page: Page):
+        """The server renders an absolute time; the script makes it relative."""
         card = run(page, 'me')
         expiry = card.locator('time[data-expires]')
         expect(expiry).to_be_visible()
-        first = expiry.inner_text()
-        # It starts as the server-rendered absolute time and is rewritten.
-        expect(expiry).to_contain_text('Available for another', timeout=5000)
-        page.wait_for_timeout(2000)
-        assert expiry.inner_text() != first, 'the clock is not moving'
+        expect(expiry).to_contain_text('This image will be deleted in', timeout=5000)
 
-    def test_the_page_still_reads_without_it(self, page: Page, context):
-        """The absolute time is the truth; the ticker is decoration."""
-        context.add_init_script('window.setInterval = () => 0;')
+    def test_the_clock_actually_moves(self, page: Page):
+        """Injected with seconds left, because at minute granularity a real
+        card would take a minute to visibly change."""
+        page.goto('/')
+        page.evaluate(SPAWN_EXPIRY, 40)
+        page.wait_for_timeout(1200)
+        first = page.locator('#probe').inner_text()
+        page.wait_for_timeout(2500)
+        assert page.locator('#probe').inner_text() != first, f'stuck on {first!r}'
+
+    @pytest.mark.parametrize('seconds, pattern', [
+        (40, r'deleted in \d+ s$'),
+        (150, r'deleted in 2 min$'),
+        (7300, r'deleted in \d+ h \d+ min$'),
+        (-5, r'has been deleted$'),
+    ])
+    def test_it_picks_a_unit_worth_reading(self, page: Page, seconds, pattern):
+        page.goto('/')
+        page.evaluate(SPAWN_EXPIRY, seconds)
+        page.wait_for_timeout(1200)
+        assert re.search(pattern, page.locator('#probe').inner_text())
+
+    def test_the_page_still_reads_without_it(self, page: Page):
+        """The absolute time is the truth; the ticker is decoration. Blocking
+        the file with an empty one, not setInterval -- the script ticks once
+        directly on load, so stubbing the timer would still let it rewrite the
+        sentence. Empty rather than aborted, so the console stays clean."""
+        page.route('**/countdown.js*',
+                   lambda route: route.fulfill(status=200, content_type='text/javascript',
+                                               body=''))
         card = run(page, 'me')
-        expect(card.locator('time[data-expires]')).to_be_visible()
+        expect(card.locator('time[data-expires]')).to_contain_text('will be deleted at')
 
 
 class TestSharing:

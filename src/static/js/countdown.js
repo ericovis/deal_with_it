@@ -1,7 +1,7 @@
 /* Turns a server-rendered expiry time into a live countdown.
  *
  * Progressive enhancement, deliberately: the server writes the truth into the
- * element as an absolute time ("Available until 17:32"), which is correct with
+ * element as an absolute time ("deleted at 17:32"), which is correct with
  * or without this file. All this does is keep it counting.
  *
  * The DOM is walked on every tick rather than cached, because htmx swaps cards
@@ -11,12 +11,12 @@
 (function () {
     'use strict';
 
+    /* Rounded down, so it never promises time the picture does not have. */
     function remaining(seconds) {
-        var h = Math.floor(seconds / 3600);
-        var m = Math.floor((seconds % 3600) / 60);
-        var s = Math.floor(seconds % 60);
-        var pad = function (n) { return n < 10 ? '0' + n : String(n); };
-        return h > 0 ? h + ':' + pad(m) + ':' + pad(s) : m + ':' + pad(s);
+        if (seconds < 60) { return Math.floor(seconds) + ' s'; }
+        var minutes = Math.floor(seconds / 60);
+        if (minutes < 60) { return minutes + ' min'; }
+        return Math.floor(minutes / 60) + ' h ' + (minutes % 60) + ' min';
     }
 
     function tick() {
@@ -26,11 +26,11 @@
             if (isNaN(at)) { return; }
             var left = (at - now) / 1000;
             if (left <= 0) {
-                el.textContent = 'This one has expired';
+                el.textContent = 'This image has been deleted';
                 el.classList.add('gone');
                 return;
             }
-            el.textContent = 'Available for another ' + remaining(left);
+            el.textContent = 'This image will be deleted in ' + remaining(left);
         });
     }
 

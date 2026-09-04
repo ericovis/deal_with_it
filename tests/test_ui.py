@@ -179,7 +179,7 @@ class TestTheCountdown:
             ('image', ('me.png', make_png(), 'image/png'))]).text)[0]
         body = client.get(f'/jobs/{job_id}', headers=hx).text
         assert 'data-expires' in body
-        assert 'Available until' in body
+        assert 'This image will be deleted at' in body
         assert re.search(r'<time[^>]+datetime="\d{4}-\d\d-\d\dT[\d:]+Z"', body)
 
     def test_the_page_loads_the_ticker(self, client):

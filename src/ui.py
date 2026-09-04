@@ -536,7 +536,7 @@ def expiry_line(expires_at) -> Time:
     ticking one; `datetime` is what it reads.
     """
     return Time(
-        f'Available until {expires_at:%H:%M} UTC',
+        f'This image will be deleted at {expires_at:%H:%M} UTC',
         datetime=expires_at.strftime('%Y-%m-%dT%H:%M:%SZ'),
         data_expires=True,
         cls='expiry',
