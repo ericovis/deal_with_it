@@ -1,12 +1,13 @@
 """The FastHTML interface, over a test client."""
 
+import base64
 import re
 
 import pytest
 
 from src import blobs, jobs
 from src.models import JobResult, JobSource, JobState, SourceKind
-from src.ui import THEME_COOKIE
+from src.ui import IMG_DIR, THEME_COOKIE
 from tests import support
 from tests.conftest import make_png
 
@@ -353,10 +354,21 @@ class TestSamples:
         assert payload['url'] is None
         assert payload['base64'].startswith('data:image/jpeg;base64,')
 
-    def test_a_sample_card_shows_the_static_file_rather_than_the_data_uri(self, client, hx):
-        """It is the same picture at a thousandth of the bytes."""
+    def test_a_sample_card_shows_a_tile_rather_than_the_full_size_file(self, client, hx):
+        """It is the same picture at a fortieth of the bytes."""
         body = submit(client, hx, sample='group').text
-        assert 'src="/static/img/multiple_people.jpg?v=' in body
+        assert 'src="/static/img/tiles/multiple_people.webp?v=' in body
+
+    def test_a_sample_is_submitted_at_its_original_size(self, client, hx):
+        """The tile is for looking at. What goes to the worker must stay the
+        committed full-resolution file: SAMPLE_FACES pins a face count per
+        sample and those counts move when the width does. Point submission at
+        a derivative and every caption on the page quietly becomes wrong.
+        """
+        job_id = job_ids(submit(client, hx, sample='group').text)[0]
+        submitted = jobs.payload_for(job_id)['base64']
+        original = (IMG_DIR / 'multiple_people.jpg').read_bytes()
+        assert base64.b64decode(submitted.split(',', 1)[1]) == original
 
     def test_an_unknown_sample_is_refused(self, client, hx):
         response = submit(client, hx, sample='../../etc/passwd')

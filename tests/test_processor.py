@@ -245,6 +245,25 @@ def test_every_sample_has_the_faces_its_caption_claims(filename, claimed):
     assert len(find_faces(small)) == claimed
 
 
+def test_every_sample_has_a_tile_to_show():
+    """The grid shows `tiles/<stem>.webp`, not the sample itself: sixteen
+    full-size JPEGs was 4.0 MB inside ~92 px squares. Add a sample without
+    running scripts/make_tiles.py and the grid gets a broken image.
+    """
+    from PIL import Image
+
+    from src.ui import SAMPLES
+    from tests.conftest import STATIC_IMG
+
+    for sample in SAMPLES.values():
+        tile = STATIC_IMG / 'tiles' / f'{Path(sample.filename).stem}.webp'
+        assert tile.is_file(), f'no tile for {sample.filename}'
+        assert tile.stat().st_size < (STATIC_IMG / sample.filename).stat().st_size
+        with Image.open(tile) as image:
+            assert image.format == 'WEBP'
+            assert image.size[0] == image.size[1], 'the CSS crops it square anyway'
+
+
 def test_every_sample_is_credited():
     """These are other people's pictures. Shipping one without an attribution
     line is the kind of omission nobody notices until it matters."""

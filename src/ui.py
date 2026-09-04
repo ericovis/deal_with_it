@@ -410,10 +410,19 @@ def upload_form(replace: bool = False) -> Form:
     )
 
 
+def tile_url(sample: Sample) -> str:
+    """The picture the grid shows. Never the one it submits: the counts in
+    the captions depend on the original's width, so display and submission
+    must not share a file. ``scripts/make_tiles.py`` writes these."""
+    return asset(f'/static/img/tiles/{Path(sample.filename).stem}.webp')
+
+
 def sample_tile(name: str) -> Button:
     sample = SAMPLES[name]
     return Button(
-        Img(src=asset(f'/static/img/{sample.filename}'), alt=''),
+        # Square because the CSS crops it square anyway; width and height so
+        # the grid does not reflow as sixteen of them arrive.
+        Img(src=tile_url(sample), alt='', width=200, height=200),
         Span(B(sample.title), Span(sample.filename), cls='caption'),
         type='button',
         cls='sample',
@@ -727,7 +736,12 @@ def snippet(text: str) -> Div:
 
 
 def figure(src: str, alt: str, caption: str) -> Figure:
-    return Figure(Img(src=asset(src), alt=alt), Figcaption(caption))
+    """A docs illustration, shown at about 372 CSS px. The WebP beside the
+    original is what gets sent; the original stays because it is the file the
+    prose is about, and `deal_with_me.png` is also the og:image, which
+    scrapers want as a PNG."""
+    derived = f'/static/img/figures/{Path(src).stem}.webp'
+    return Figure(Img(src=asset(derived), alt=alt, loading='lazy'), Figcaption(caption))
 
 
 def tile(name: str, description: str) -> Div:
@@ -984,7 +998,7 @@ def create_ui():
         # Samples do not reset the form: the buttons sit outside it.
         return _enqueue(
             {'url': None, 'base64': sample_data_uri(name)},
-            SourceKind.SAMPLE, sample.filename, asset(f'/static/img/{sample.filename}'), client,
+            SourceKind.SAMPLE, sample.filename, tile_url(sample), client,
         )
 
     async def _submit_file(upload: UploadFile, client: str | None):
