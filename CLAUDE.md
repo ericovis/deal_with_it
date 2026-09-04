@@ -29,12 +29,15 @@ the job (`meta['landmarks']`) and returned by the API as `faces`.
 browser ───────────────► web (FastAPI+FastHTML) ──────► worker (rq)
         ◄─────────────── 202 {job_id}                     │
         GET  /api/jobs/{id}  (htmx polls every 1s)         │ fetch, detect, paste
-        ◄─────────────── {state, image}  ◄─────────────────┘
+        ◄─────────────── {state, images}  ◄────────────────┘   write derivatives
+                                    │                          │
+        GET /i/{job}/view.webp ─────┴──► Caddy, off the shared blob directory
 ```
 
-The web tier never touches an image: it validates the request shape, puts a
-payload on the queue and reads job state back. The task is enqueued **by
-name** (`src/jobs.py:TASK`) so the web process never imports OpenCV.
+The web tier never *decodes* an image: it validates the request shape, writes
+the submitted bytes to the blob store, puts a path on the queue and reads job
+state back. The task is enqueued **by name** (`src/jobs.py:TASK`) so the web
+process never imports OpenCV.
 
 ```
 src/app.py          Composition root: FastAPI outer app, FastHTML mounted at /
@@ -48,11 +51,14 @@ src/images.py       Fetching (SSRF-guarded) and decoding into a numpy array
 src/models.py       Pydantic v2 request/response schemas. Shape only
 src/config.py       Settings, all DWI_-prefixed env vars
 src/errors.py       DealWithItError: failures whose message is safe to show
+src/blobs.py        The blob store. Web-safe: no imaging library, ever
+src/derivatives.py  Pixels to files. Worker-only; all the Pillow lives here
 src/assets.py       Content-hashed /static URLs and their cache headers
 src/processors/     BaseProcessor + DealWithItProcessor
 src/static/         style.css, the sample photos, glasses.svg, the app
                     icons and the web manifest
-tests/              Hermetic: no network, no Redis server, no fixtures on disk
+tests/              Hermetic: no network, no Redis server, no committed
+                    fixtures; blobs go to a per-test tmp_path
 ```
 
 Invariants worth knowing before editing:
@@ -67,21 +73,39 @@ Invariants worth knowing before editing:
 - **The dropzone posts one file per request** (`UPLOAD_ONE_BY_ONE` in
   `src/ui.py`): a plain `hx-post` on a multiple file input sends the whole
   selection in one body, so nothing appears until the last picture has
-  uploaded. It is one of the two lines of script in the interface — htmx has
+  uploaded. It is one of the three lines of script in the interface — htmx has
   no attribute that splits a file input. A file post therefore answers with
   the card alone: the script empties the input itself, and an out-of-band
   form swap would tear out the element the rest of the batch posts from.
   `/submit` still takes a list, because the submit button can post one.
-- **No card carries a data URI, polling or finished.** A finished upload used
-  to inline the submitted image and the result, twice each, in the poll that
-  swapped the card in: a 7.9 MB upload came back as a 42 MB fragment, down a
-  phone connection and off the same two cores the worker detects on. Both
-  halves are URLs now — `/jobs/{id}/source` and `/jobs/{id}/result`, served
-  from the job by `jobs.source_image` / `jobs.result_image` — so a poll stays
-  a few KB and the browser fetches each picture once, in parallel, and caches
-  it. `JobSource.thumb` is still a remote URL or a `/static` path when the
-  submission had one. `JobResult.image` stays the data URI: that is the
-  published API.
+- **Nothing multi-megabyte goes through Redis, and no card carries a
+  picture.** A submission is written to the blob store and the queue carries a
+  path; the worker writes sized derivatives there and the result is a map of
+  URLs. A finished card fetches ~320 KB where it once fetched 15.8 MB as URLs,
+  or 42 MB inlined. `JobResult.image` is gone — that is API 2.0.
+- **`src/blobs.py` is web-safe and `src/derivatives.py` is not.** blobs imports
+  no imaging library, which is what lets the web tier mint paths and store
+  opaque bytes without gaining the ability to decode an attacker's image; a
+  subprocess test pins it. All the Pillow lives in derivatives, which only the
+  worker imports. The web tier never *decodes* an image — writing bytes to a
+  file is strictly less than the base64 encode it replaced.
+- **A job owns one directory**, which is what makes it independently
+  deletable and is the whole basis of the sweep. Writes are temp-file plus
+  `os.replace` inside it, so a reader sees a whole file or nothing; the temp
+  name is dot-prefixed and both servers refuse to serve one. A retry
+  hard-links rather than sharing a directory.
+- **`view.webp` is one size for the card *and* the lightbox, on purpose.**
+  `_result_view` reuses the same `<img>` for both and the lightbox is a CSS
+  `:has(:checked)` state, so no `srcset`/`sizes` pair can describe it —
+  `sizes` cannot see a sibling checkbox. Download is the escape hatch for
+  full resolution. Do not "fix" this with srcset.
+- **A sample is displayed from `tiles/` and submitted from the original.**
+  `SAMPLE_FACES` pins a face count per sample and those counts move with the
+  width, so pointing submission at a tile would quietly make every caption on
+  the page wrong. A test asserts the submitted bytes equal the committed file.
+- **The share page reads `meta.json` off disk, not Redis.** Redis forgets a
+  job at `result_ttl`; the pictures live to `blob_ttl`. A Redis-backed page
+  would go dark while its own images were still up.
 - **A started job past its deadline is reported failed** (`_abandoned` in
   `src/jobs.py`). A worker killed mid-job — a deploy, a crash in native code,
   the OOM killer, all of which this deployment restarts from — leaves its job

@@ -130,11 +130,44 @@ byte count: the card arrives in 3.2 KB and flips to Done immediately, and the
 pictures stream in afterwards as ordinary images, in parallel and cached,
 without the card's *state* waiting on them.
 
-Still on the table, and worth more than everything above: **the card shows a
-full-resolution result**. It is displayed about 500 px wide and weighs 3.07 MB
-(36 MP JPEG) or 7.77 MB (11 MP PNG). A downscaled preview in the card, with
-the full-size file kept behind Download and View full size, would take a
-finished card from megabytes to a few hundred KB.
+### Sized derivatives, and the store behind them
+
+Done. The worker writes what each place needs instead of one full-resolution
+file: a 160 px thumbnail, a 1600 px viewing copy used by both the card and the
+full-screen view, the same for the submitted image, a 1200 px JPEG for link
+previews, and the full-resolution file for download.
+
+| upload | full-res result | what a finished card fetches |
+|--------|-----------------|------------------------------|
+| 3.2 MB 36 MP JPEG | 3.09 MB | **318 KB** (thumb 3.9 + view 157 + before 157) |
+| 7.9 MB 11 MP PNG | 7.71 MB | **320 KB** |
+
+Against 15.8 MB as URLs, or 42 MB inlined. The derivatives cost about 0.9 s of
+worker time per job, against removing the base64 encode and megabytes of Redis
+traffic.
+
+The static side went the same way: 200 px WebP centre crops for the sample
+grid (exactly what `object-fit: cover` was already showing) and 760 px figures
+for the docs.
+
+| page | before | after |
+|------|--------|-------|
+| `/` | 4.0 MB | **175 KB** |
+| `/docs` | ~1.7 MB | **190 KB** |
+
+Images no longer travel through Redis at all. A submission is written to a
+directory both tiers mount and the queue carries a path, so `DWI_MAX_QUEUE_DEPTH`
+is no longer bounded by the Redis ceiling — it is bounded by how long a queue
+is worth watching.
+
+**Disk is now the thing that fills.** Roughly 12 MB per finished job (the
+full-resolution result, its WebP and JPEG siblings, and the derivatives;
+the submitted source is deleted on success). At the 170 jobs/min above that is
+~2 GB a minute, so on this host `DWI_BLOB_MAX_BYTES` (1 GB), not
+`DWI_BLOB_TTL` (1 hour), is what binds under load — the TTL is what binds
+under ordinary traffic. The sweep runs as an ordinary job on the queue every
+30 s, oldest first, and will not evict anything younger than two job timeouts
+in case it is still queued.
 
 ## On two cores
 

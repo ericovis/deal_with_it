@@ -2,9 +2,10 @@
 
 Two pages: the app at ``/`` and the docs at ``/docs``. Submitting a picture
 swaps a card into ``#queue``; the card polls itself until the worker is done
-and then turns into the result in place. Two lines of script in the whole
-interface: the clipboard call on the docs page, and ``UPLOAD_ONE_BY_ONE``,
-which htmx has no attribute for.
+and then turns into the result in place. Three lines of script in the whole
+interface: the clipboard call on the docs page, ``UPLOAD_ONE_BY_ONE`` (which
+htmx has no attribute for), and ``countdown.js``, which turns a
+server-rendered expiry into a ticking one and is pure decoration without it.
 """
 
 import json
@@ -924,7 +925,7 @@ def docs_page(theme: str | None, reachable: bool) -> tuple:
                       A('FastHTML', href='https://fastht.ml'), ' + htmx, the REST API is ',
                       A('FastAPI', href='https://fastapi.tiangolo.com'), '.'),
                     Div(
-                        tile('web', 'Serves the page and the JSON API. Never touches an image.'),
+                        tile('web', 'Serves the page and the JSON API. Never decodes an image.'),
                         tile('worker', 'Pulls jobs off the queue, fetches and decodes the '
                                        'image, draws the glasses.'),
                         tile('redis', 'The queue, and where results wait to be collected.'),
