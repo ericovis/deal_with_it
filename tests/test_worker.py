@@ -67,7 +67,11 @@ class TestThreadWorker:
         supervisor.join(timeout=10)
         for job_id in ids:
             job = Job.fetch(job_id, connection=async_queue.connection)
-            assert job.meta == {'progress': 42, 'step': 'Halfway up the stairs'}
+            assert job.meta['progress'] == 42
+            assert job.meta['step'] == 'Halfway up the stairs'
+            assert job.meta['thumb'] == f'/i/{job_id}/thumb.webp', (
+                'the thumbnail is written per job too, and must not cross over'
+            )
 
 
 class TestServe:

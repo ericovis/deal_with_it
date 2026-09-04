@@ -122,7 +122,10 @@ class JobImages(BaseModel):
 
     view: str = Field(description='The result at viewing size (WebP, 1600px). '
                                   'What the card and the full-screen view show.')
-    thumb: str = Field(description='The result as a thumbnail (WebP, 160px).')
+    thumb: str = Field(
+        description='The submitted picture as a thumbnail (WebP, 160px). '
+                    'Written before detection starts, so a card can show it '
+                    'while the job is still running.')
     before: str | None = Field(
         default=None, description='The submitted image at viewing size (WebP).')
     full: str = Field(description='The result at full resolution, in the format '

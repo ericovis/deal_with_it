@@ -180,7 +180,9 @@ class TestMetadata:
         _, source = jobs.describe(job_id)
         assert source.kind == 'url'
         assert source.label == 'example.test/a.png'
-        assert source.thumb == PAYLOAD['url']
+        assert source.thumb == f'/i/{job_id}/thumb.webp', (
+            'a URL job carries no meta, so the worker writes it one'
+        )
 
     def test_an_upload_with_no_meta_gets_a_stand_in_name(self, sync_queue, stub_task):
         stub_task(support.SUCCESS)
@@ -188,9 +190,9 @@ class TestMetadata:
         _, source = jobs.describe(job_id)
         assert source.kind == 'upload'
         assert source.label == 'Uploaded image'
-        assert source.thumb is None, (
-            'an upload arrives with nothing to show; the card takes the '
-            'thumbnail off the finished result instead'
+        assert source.thumb == f'/i/{job_id}/thumb.webp', (
+            'an upload arrives with nothing to show, so the worker writes a '
+            'thumbnail of it before detection even starts'
         )
 
     @pytest.mark.parametrize('url,expected', [

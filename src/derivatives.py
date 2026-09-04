@@ -71,8 +71,6 @@ def write_result(job_id: str, image: Image.Image,
                        **({'quality': FULL_QUALITY} if native == 'jpg' else {})),
         'view': _write(job_id, 'view.webp', _fit(image, VIEW), 'WEBP',
                        quality=VIEW_QUALITY, method=4),
-        'thumb': _write(job_id, 'thumb.webp', _fit(image, THUMB), 'WEBP',
-                        quality=THUMB_QUALITY, method=4),
         'card': _write(job_id, 'card.jpg', _fit(image.convert('RGB'), CARD), 'JPEG',
                        quality=CARD_QUALITY),
     }
@@ -86,6 +84,19 @@ def write_result(job_id: str, image: Image.Image,
         downloads['jpg'] = _write(job_id, 'result.jpg', image.convert('RGB'), 'JPEG',
                                   quality=FULL_QUALITY)
     return images, downloads
+
+
+def write_thumb(job_id: str, image: Image.Image) -> dict[str, str]:
+    """The submitted picture, small, written before anything else happens.
+
+    First, always, whatever the job goes on to do. It costs about 10 ms and it
+    is what lets a card show the picture it is working on instead of a grey
+    box -- an upload arrives with nothing to display, unlike a sample or a
+    URL, which already have something. A job that finds no faces still leaves
+    this behind, which is why it is not part of the result.
+    """
+    return {'thumb': _write(job_id, 'thumb.webp', _fit(image, THUMB), 'WEBP',
+                            quality=THUMB_QUALITY, method=4)}
 
 
 def write_before(job_id: str, image: Image.Image) -> dict[str, str]:

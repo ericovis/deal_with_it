@@ -175,6 +175,68 @@ class TestRecordedFaces:
         tasks.record_faces([], 'plain')
 
 
+class TestTheThumbnailComesFirst:
+    """A card should show what it is working on, not a grey box."""
+
+    def test_the_thumbnail_is_written_before_detection(
+            self, stub_load, stub_processor, blob_root):
+        """Written from the *submitted* picture, so it does not need the
+        glasses -- or a face."""
+        stub_load(np.zeros((4, 4, 3), dtype=np.uint8))
+
+        seen = {}
+
+        class Watching:
+            img_format = 'PNG'
+            faces: list = []
+            detection = 'plain'
+
+            def __init__(self, array, **kwargs):
+                self.output = None
+
+            def call(self):
+                seen['thumb_existed'] = any(
+                    (blob_root / d / 'thumb.webp').is_file() for d in os.listdir(blob_root))
+                self.output = Image.new('RGB', (8, 8), 'red')
+
+        monkeypatch = pytest.MonkeyPatch()
+        monkeypatch.setattr(tasks, 'DealWithItProcessor', Watching)
+        try:
+            tasks.process_image({'url': 'https://example.test/a.png', 'blob': None})
+        finally:
+            monkeypatch.undo()
+        assert seen['thumb_existed'], 'the card had nothing to show while it worked'
+
+    def test_a_picture_with_no_faces_still_leaves_a_thumbnail(
+            self, stub_load, stub_processor, blob_root):
+        stub_load(np.zeros((4, 4, 3), dtype=np.uint8))
+        stub_processor(NoFacesFound('No faces were found in this image.'))
+
+        result = tasks.process_image({'url': 'https://example.test/a.png', 'blob': None})
+        assert result['images'] is None
+        thumbs = list(blob_root.glob('*/thumb.webp'))
+        assert thumbs, 'the thumbnail is not part of the result, so it survives one'
+
+    def test_the_thumbnail_reaches_a_polling_card(
+            self, async_queue, stub_task, drain, blob_root):
+        """It goes on job.meta, which a poll already fetches."""
+        stub_task(support.SUCCESS)
+        job_id, _ = jobs.enqueue({'url': None, 'blob': 'x/source.png'}, meta={})
+        drain()
+        _, source = jobs.describe(job_id)
+        assert source.thumb == f'/i/{job_id}/thumb.webp'
+
+    def test_it_does_not_replace_a_thumbnail_the_card_already_had(
+            self, async_queue, stub_task, drain):
+        """A sample has its tile and a URL has itself; both are already up."""
+        stub_task(support.SUCCESS)
+        job_id, _ = jobs.enqueue({'url': None, 'blob': 'x/source.png'},
+                                 meta={'thumb': '/static/img/tiles/me.webp'})
+        drain()
+        _, source = jobs.describe(job_id)
+        assert source.thumb == '/static/img/tiles/me.webp'
+
+
 class TestSweepingTheStore:
     """Nothing on a filesystem expires by itself, so a job goes and looks."""
 

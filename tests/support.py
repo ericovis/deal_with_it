@@ -39,6 +39,7 @@ def written(img_format: str = 'PNG') -> dict:
 
     job = get_current_job()
     job_id = job.id if job is not None else f'detached-{uuid4().hex}'
+    from src.tasks import show_thumbnail
     native = 'jpg' if img_format == 'JPEG' else 'png'
     images = {
         'full': blobs.put(job_id, f'result.{native}', PIXELS),
@@ -47,6 +48,7 @@ def written(img_format: str = 'PNG') -> dict:
         'before': blobs.put(job_id, 'before.webp', PIXELS),
         'card': blobs.put(job_id, 'card.jpg', PIXELS),
     }
+    show_thumbnail(images['thumb'])
     expires = datetime.now(UTC) + timedelta(seconds=get_settings().blob_ttl)
     downloads = {native: images['full'],
                  'webp': blobs.put(job_id, 'result.webp', PIXELS)}

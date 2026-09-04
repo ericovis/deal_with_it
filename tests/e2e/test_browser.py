@@ -406,6 +406,29 @@ class TestTheRestOfTheFurniture:
         assert f'"url": "{EXAMPLE_SOURCE}"' in copied
 
 
+class TestTheSampleGrid:
+    def test_the_tiles_are_square(self, page: Page):
+        """They are square files and the CSS crops square; a width/height
+        attribute pair once quietly overrode the aspect-ratio and made them
+        tall, which no unit test can see."""
+        page.goto('/')
+        for tile in page.locator('.sample img').all()[:4]:
+            box = tile.bounding_box()
+            assert abs(box['width'] - box['height']) <= 1, (
+                f'{box["width"]}x{box["height"]} is not square'
+            )
+
+    def test_a_tile_is_small(self, page: Page):
+        """Sixteen full-size JPEGs was 4 MB of landing page."""
+        page.goto('/')
+        page.wait_for_load_state('networkidle')
+        sizes = page.evaluate("""() => performance.getEntriesByType('resource')
+            .filter(r => r.name.includes('/static/img/tiles/'))
+            .map(r => r.encodedBodySize)""")
+        assert sizes, 'no tiles were fetched'
+        assert max(sizes) < 40_000, f'largest tile is {max(sizes)} bytes'
+
+
 class TestTheCountdown:
     """The one script in the interface that is not htmx wiring."""
 

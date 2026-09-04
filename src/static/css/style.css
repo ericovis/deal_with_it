@@ -606,6 +606,12 @@ input[type="text"]:focus {
 
 .sample img {
     width: 100%;
+    /* `height: auto` is load-bearing, not tidiness: the tag carries width and
+       height attributes (so the grid does not reflow as sixteen tiles land),
+       and those become a presentational `height: 200px`. aspect-ratio only
+       governs when height is auto, so without this the tile renders one
+       column wide and 200px tall. */
+    height: auto;
     aspect-ratio: 1;
     object-fit: cover;
     display: block;
