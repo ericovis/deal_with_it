@@ -1727,42 +1727,8 @@ code {
         padding: 22px 18px 18px;
     }
 
-    /* The buttons sit between the sub-heading and the limits line, which
-       `order` puts back after them -- they are the card's children, not the
-       label's. `position` lifts them over the label's hit overlay. */
-    .pick-row {
-        position: relative;
-        order: 1;
-        display: flex;
-        gap: 8px;
-        width: 100%;
-        margin-top: 8px;
-    }
-
     .dropzone .limits {
-        order: 2;
         margin-top: 4px;
-    }
-
-    .pick-row .btn {
-        flex: 1;
-        display: inline-flex;
-        align-items: center;
-        justify-content: center;
-        padding: 0 14px;
-        cursor: pointer;
-    }
-
-    .pick-row .ghost {
-        background: var(--surface);
-        border: 1px solid var(--border-strong);
-        color: var(--text);
-    }
-
-    .pick-row .ghost:hover {
-        border-color: var(--accent);
-        color: var(--accent);
-        background: var(--surface);
     }
 
     .url-row .btn {
@@ -1784,7 +1750,6 @@ code {
 
     body:has(#queue article) .lede,
     body:has(#queue article) .dropzone,
-    body:has(#queue article) .pick-row,
     body:has(#queue article) .divider,
     body:has(#queue article) .sample-strip,
     body:has(#queue article) #form > .url-row,
@@ -1792,8 +1757,9 @@ code {
         display: none;
     }
 
-    /* #form itself is never display:none. The camera and library inputs are
-       in it, and a label cannot open a file picker for an input with no box. */
+    /* #form itself is never display:none. The file input is in it, and a
+       label cannot open a picker for an input with no box -- which is what
+       the bar's "Add a picture" is. */
     body:has(#queue article) #form {
         gap: 0;
     }

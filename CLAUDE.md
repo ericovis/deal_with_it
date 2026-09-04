@@ -152,14 +152,20 @@ Invariants worth knowing before editing:
   states and the CSS reads which one from the list itself: with nothing in
   `#queue` the input pane is the page, and `body:has(#queue article)` moves
   it into a fixed bar (`nav.addbar` in `src/ui.py`). The URL and Samples
-  panels over that bar are three radios (`#show-url`, `#show-samples`,
+  panel over that bar is three radios (`#show-url`, `#show-samples`,
   `#show-none`); the swipe-to-remove gesture is a scroll-snap strip of
   `.card-body` and `.card-remove`; the copy that differs between a desktop
   and a phone ships twice, as `.desktop-only` / `.mobile-only`. No endpoint,
   no cookie and no script knows about any of it.
-- **`#form` is never `display: none`.** The camera and library file inputs
-  live in it, and a label cannot open a picker for an input with no box, so
-  results mode hides the form's children instead.
+- **`#form` is never `display: none`.** The file input lives in it, and a
+  label cannot open a picker for an input with no box — which is what the
+  phone bar's "Add a picture" is — so results mode hides the form's children
+  instead.
+- **One file input, one dropzone, both devices.** A phone's picker already
+  offers the camera beside the library; a second `capture` input only made the
+  same sheet open from two places, and `capture` *hides* the library, which is
+  the opposite of what its button promised. Only the wording differs between
+  a phone and a desktop, through `.desktop-only` / `.mobile-only`.
 - **The dropzone card is a `<div>`, not the label.** On a phone the card also
   holds a "Take a photo" label, and a label cannot nest in a label, so the
   label is `.dropzone-face` inside it and `.dropzone-face::before` stretches

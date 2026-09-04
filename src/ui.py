@@ -364,6 +364,11 @@ def upload_form(replace: bool = False) -> Form:
 
     The file input sits before the card on purpose: the card is the file
     input's label, and dropping onto a file input's label counts as choosing.
+
+    One input for every device. A phone's picker already offers the camera
+    beside the library, so a second `capture` input only made the same sheet
+    open from two places -- and `capture` actively *hides* the library, which
+    was the opposite of what the second button promised.
     """
     return Form(
         Input(type='file', id='files', name='image', accept='image/*', multiple=True,
@@ -378,31 +383,12 @@ def upload_form(replace: bool = False) -> Form:
                 Span('Drop pictures here', cls='title desktop-only'),
                 Span('Add a picture', cls='title mobile-only'),
                 Span('or ', Em('browse your computer'), cls='sub desktop-only'),
-                Span('Take one now, or pick from your library', cls='sub mobile-only'),
+                Span('Camera or library, whichever you like', cls='sub mobile-only'),
                 fr='files', cls='dropzone-face',
-            ),
-            # Inside the card, where the design puts them -- but beside the
-            # label rather than in it, because a label cannot nest in a
-            # label. `.dropzone-face::before` covers the rest of the card, so
-            # tapping or dropping anywhere else still reaches the input.
-            Div(
-                Label('Take a photo', fr='camera', cls='btn camera'),
-                Label('Choose from library', fr='files', cls='btn ghost'),
-                cls='pick-row mobile-only',
             ),
             Span('PNG or JPEG, up to 10 MB each. Several at once is fine.', cls='limits'),
             cls='dropzone',
         ),
-        # After the card, so `#files + .dropzone` still reaches it. `capture`
-        # makes a phone open the camera instead of the picker, and it takes
-        # one picture at a time, so it posts for itself rather than going
-        # through UPLOAD_ONE_BY_ONE. A desktop browser ignores the attribute,
-        # and nothing points at this input above 600px.
-        Input(type='file', id='camera', name='image', accept='image/*',
-              capture='environment', cls='visually-hidden',
-              hx_post='/submit', hx_trigger='change',
-              hx_encoding='multipart/form-data',
-              hx_target='#queue', hx_swap='afterbegin'),
         Div('or a URL', cls='divider'),
         Div(
             Input(type='text', id='url', name='url',
@@ -491,10 +477,12 @@ def session_section() -> Section:
 def addbar() -> Nav:
     """The bar a phone gets once there is something in the list.
 
-    Camera and Library are labels for the form's two file inputs. URL and
-    Samples are labels for radios: checking one is what the CSS re-lays the
-    URL row or the sample grid over the bar for, and #show-none is how a
-    second tap on the open one closes it again.
+    "Add a picture" is a label for the one file input, which is the same
+    control the dropzone card is. A phone's picker already offers the camera
+    alongside the library, so splitting it in two only made the same sheet
+    open from two places. URL and Samples are labels for radios: checking one
+    is what the CSS re-lays the URL row or the sample grid over the bar for,
+    and #show-none is how a second tap on the open one closes it again.
     """
     def panel(text: str, target: str) -> Div:
         return Div(
@@ -510,8 +498,7 @@ def addbar() -> Nav:
               aria_label='Submit a URL'),
         Input(type='radio', id='show-samples', name='addbar', cls='visually-hidden',
               aria_label='Show the samples'),
-        Label('Camera', fr='camera', cls='addbar-item'),
-        Label('Library', fr='files', cls='addbar-item'),
+        Label('Add a picture', fr='files', cls='addbar-item add'),
         panel('URL', 'show-url'),
         panel('Samples', 'show-samples'),
         cls='addbar',

@@ -39,7 +39,7 @@ class TestPage:
     @pytest.mark.parametrize('needle', [
         'id="queue"', 'class="dropzone"', 'id="files"', 'id="url"', 'id="url-hint"',
         'id="health"', 'id="theme"', 'id="theme-state"', 'class="empty"',
-        'id="camera"', 'class="addbar"', 'class="nav-links"',
+        'class="addbar"', 'class="nav-links"',
     ])
     def test_the_furniture_is_all_there(self, client, needle):
         assert needle in client.get('/').text
@@ -233,19 +233,22 @@ class TestOnAPhone:
     has a route or a line of script behind it.
     """
 
-    def test_the_camera_is_its_own_input(self, client):
-        """A phone opens the camera for `capture`; a desktop ignores the
-        attribute, and nothing above 600px points at the input anyway."""
+    def test_there_is_one_file_input_for_everything(self, client):
+        """A phone's picker already offers the camera beside the library, so a
+        separate capture input only made the same sheet open from two
+        places."""
         body = client.get('/').text
-        field = re.search(r'<input type="file"[^>]*id="camera"[^>]*>', body).group()
-        assert 'capture="environment"' in field
-        assert 'hx-post="/submit"' in field, 'one picture at a time posts for itself'
-        assert 'hx-target="#queue"' in field
+        fields = re.findall(r'<input type="file"[^>]*>', body)
+        assert len(fields) == 1, f'{len(fields)} file inputs: {fields}'
+        assert 'id="files"' in fields[0]
+        assert 'capture=' not in body, 'capture forces the camera and hides the library'
 
-    def test_both_ways_of_adding_a_picture_are_offered(self, client):
+    def test_the_card_is_the_only_way_in(self, client):
+        """One dropzone, worded for whichever device is reading it."""
         body = client.get('/').text
-        assert '<label for="camera" class="btn camera">Take a photo</label>' in body
-        assert '<label for="files" class="btn ghost">Choose from library</label>' in body
+        assert 'Take a photo' not in body
+        assert 'Choose from library' not in body
+        assert body.count('class="dropzone"') == 1
 
     def test_the_dropzone_says_it_twice(self, client):
         """Dropping is a desktop idea and a phone has no computer to browse."""
@@ -253,10 +256,10 @@ class TestOnAPhone:
         assert '<span class="title desktop-only">Drop pictures here</span>' in body
         assert '<span class="title mobile-only">Add a picture</span>' in body
 
-    def test_the_bar_reaches_both_file_inputs_and_both_panels(self, client):
+    def test_the_bar_reaches_the_file_input_and_both_panels(self, client):
         body = client.get('/').text
         bar = re.search(r'<nav class="addbar">.*?</nav>', body, re.S).group()
-        for target in ('camera', 'files', 'show-url', 'show-samples'):
+        for target in ('files', 'show-url', 'show-samples'):
             assert f'for="{target}"' in bar
         assert bar.count('for="show-none"') == 2, 'a second tap closes what is open'
 

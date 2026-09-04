@@ -265,7 +265,7 @@ class TestOnAPhone:
     def test_the_input_is_the_whole_page_until_there_is_a_result(self, page: Page):
         page.goto('/')
         expect(page.locator('.lede')).to_be_visible()
-        expect(page.locator('.pick-row')).to_be_visible()
+        expect(page.locator('.dropzone')).to_be_visible()
         expect(page.locator('.addbar')).to_be_hidden()
 
     def test_a_result_takes_the_screen_and_the_input_moves_to_the_bar(self, page: Page):
@@ -295,24 +295,27 @@ class TestOnAPhone:
         expect(page.locator('.sample-strip')).to_be_visible()
         expect(page.locator('#url')).to_be_hidden(), 'one panel at a time'
 
-    def test_the_two_buttons_reach_the_two_inputs(self, page: Page):
-        """They sit inside the card, beside the label rather than in it."""
+    def test_the_card_opens_the_one_picker(self, page: Page):
+        """One input for both devices: a phone's picker already offers the
+        camera beside the library."""
         page.goto('/')
-        with page.expect_file_chooser() as camera:
-            page.locator('.pick-row .camera').click()
-        assert not camera.value.is_multiple(), 'one photo at a time'
-        with page.expect_file_chooser() as library:
-            page.locator('.pick-row .ghost').click()
-        assert library.value.is_multiple()
+        with page.expect_file_chooser() as chooser:
+            page.locator('.dropzone-face').click()
+        assert chooser.value.is_multiple(), 'several at once is fine'
 
-    def test_a_picture_from_the_camera_becomes_a_card(self, page: Page, tmp_path):
-        """The camera input posts for itself, so a phone gets one card and
-        the typed URL beside it is left alone."""
+    def test_the_bar_opens_the_same_picker(self, page: Page):
+        run(page, 'me')
+        with page.expect_file_chooser() as chooser:
+            page.locator('.addbar-item.add').click()
+        assert chooser.value.is_multiple()
+
+    def test_a_picture_becomes_a_card_without_disturbing_a_typed_url(
+            self, page: Page, tmp_path):
         picture = tmp_path / 'snap.png'
         picture.write_bytes(make_png())
         page.goto('/')
         page.locator('#url').fill('https://example.test/later.png')
-        page.locator('#camera').set_input_files(picture)
+        page.locator('#files').set_input_files(picture)
         expect(page.locator('#queue article')).to_have_count(1, timeout=TIMEOUT)
         expect(first_card(page).locator('.card-id b')).to_have_text('snap.png')
         expect(page.locator('#url')).to_have_value('https://example.test/later.png')
