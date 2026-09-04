@@ -23,6 +23,49 @@ logging.basicConfig(
     format='%(asctime)s %(levelname)s %(name)s %(message)s',
 )
 
+API_DESCRIPTION = """
+Puts the "Deal With It" sunglasses on every face in a picture.
+
+## How it works
+
+Processing is asynchronous, because detection takes seconds and a request
+should not.
+
+1. `POST /api/jobs` with **either** a `url` **or** a `base64` data URI.
+   You get `202` and a `job_id` straight away.
+2. `GET /api/jobs/{job_id}` until `state` is `finished` or `failed`.
+   Polling once a second is plenty.
+
+## What you get back
+
+A finished job returns **links, not bytes**. Pick the one that fits:
+
+| field | what it is | when to use it |
+|---|---|---|
+| `images.view` | WebP, 1600px | showing the result to a person |
+| `images.thumb` | WebP, 160px | a list or a preview |
+| `images.before` | WebP, 1600px | the submitted picture, for a comparison |
+| `images.full` | full resolution, as submitted | handing over the file |
+| `images.card` | JPEG, 1200px | `og:image`, where WebP is not safe |
+| `downloads` | full resolution, by format | letting someone choose |
+
+`images.thumb` appears **before** the job finishes — it is written from the
+submitted picture as soon as it is decoded, so a UI can show something while
+the work is still going.
+
+## Everything expires
+
+Pictures are deleted after `expires_at`, and `share_url` dies with them.
+Fetch what you want to keep; nothing here is durable storage.
+
+## Failures
+
+A `failed` job carries a readable `error`: an unreachable URL, an undecodable
+image, or no faces found. Submissions are rate limited per client and answer
+`429` (too many) or `503` (queue full), both with `Retry-After`. An unknown or
+expired `job_id` is a `404`.
+"""
+
 SECURITY_HEADERS = {
     b'x-content-type-options': b'nosniff',
     b'x-frame-options': b'DENY',
@@ -79,8 +122,14 @@ class BodyLimit:
 def create_app() -> FastAPI:
     app = FastAPI(
         title='Deal With It!',
-        description='A Python API for creating "Deal With It"-like images.',
+        description=API_DESCRIPTION,
         version='2.0.0',
+        openapi_tags=[
+            {'name': 'jobs',
+             'description': 'Submit a picture and collect the result.'},
+            {'name': 'health',
+             'description': 'Is the service up, and can it reach its queue.'},
+        ],
         docs_url='/api/docs',
         openapi_url='/api/openapi.json',
         redoc_url=None,

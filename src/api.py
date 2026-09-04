@@ -27,9 +27,13 @@ def client_of(request: Request) -> str | None:
     response_model=JobCreated,
     status_code=status.HTTP_202_ACCEPTED,
     summary='Queue an image for processing',
+    tags=['jobs'],
     responses={
-        429: {'description': 'Too many submissions from this client'},
-        503: {'description': 'The queue is full'},
+        202: {'description': 'Accepted. Poll `status_url` for the result.'},
+        422: {'description': 'Neither a url nor a base64 image, or both at once'},
+        429: {'description': 'Too many submissions from this client. '
+                             'Carries `Retry-After`.'},
+        503: {'description': 'The queue is full. Carries `Retry-After`.'},
     },
 )
 def create_job(image: ImageRequest, request: Request) -> JobCreated:
@@ -79,7 +83,13 @@ def create_job(image: ImageRequest, request: Request) -> JobCreated:
     response_model=JobResult,
     name='read_job',
     summary='Read the state, and eventually the result, of a job',
-    responses={404: {'description': 'Unknown or expired job id'}},
+    tags=['jobs'],
+    responses={
+        200: {'description': 'The job. `images` is populated once it is '
+                             '`finished`.'},
+        404: {'description': 'Unknown job id, or one whose pictures have '
+                             'already been deleted'},
+    },
 )
 def read_job(job_id: str, request: Request) -> JobResult:
     result = jobs.result_for(job_id)
@@ -116,6 +126,6 @@ def _with_absolute_links(result: JobResult, request: Request) -> JobResult:
     })
 
 
-@router.get('/health', summary='Liveness and broker connectivity')
+@router.get('/health', summary='Liveness and broker connectivity', tags=['health'])
 def health() -> dict:
     return {'status': 'ok', 'redis': jobs.is_broker_reachable()}

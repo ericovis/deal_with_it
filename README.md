@@ -100,6 +100,10 @@ Responds `202` with a job to poll:
 }
 ```
 
+There is an [`/llms.txt`](https://deal-with-it.asrv.click/llms.txt) for agents,
+generated from the running configuration so its limits cannot drift, and the
+OpenAPI schema is at `/api/openapi.json`.
+
 `GET /api/jobs/{job_id}` returns the state, and links to the pictures once it
 is done:
 

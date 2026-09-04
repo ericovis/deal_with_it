@@ -243,3 +243,86 @@ class TestJobMetadata:
         body = client.get(f'/jobs/{job_id}', headers=hx).text
         assert 'example.test/a.png' in body
         assert 'src="https://example.test/a.png" alt="" class="thumb"' in body
+
+
+class TestTheOpenAPISchema:
+    """The schema is the documentation, for a person reading /api/docs and for
+    an agent reading the JSON. Neither is served by `additionalProp1`."""
+
+    def schema(self, client):
+        return client.get('/api/openapi.json').json()
+
+    def test_downloads_shows_real_formats_not_additionalprop(self, client):
+        """A bare dict[str, str] renders as additionalProp1/2/3 in Swagger,
+        which tells a reader nothing about what the keys are."""
+        field = self.schema(client)['components']['schemas']['JobResult']['properties']
+        [example] = field['downloads']['examples']
+        assert set(example) == {'jpg', 'webp'}
+        assert all(url.startswith('http') for url in example.values())
+
+    def test_a_finished_job_has_a_whole_worked_example(self, client):
+        example = self.schema(client)['components']['schemas']['JobResult']['example']
+        assert example['state'] == 'finished'
+        assert set(example['images']) == {'view', 'thumb', 'before', 'full', 'card'}
+        assert example['expires_at'] and example['share_url']
+        assert example['faces'][0]['landmarks'], 'the shape of a face, not just its box'
+
+    def test_every_endpoint_is_described_and_grouped(self, client):
+        schema = self.schema(client)
+        assert {tag['name'] for tag in schema['tags']} == {'jobs', 'health'}
+        for path, operations in schema['paths'].items():
+            for verb, operation in operations.items():
+                assert operation.get('summary'), f'{verb} {path} has no summary'
+                assert operation.get('tags'), f'{verb} {path} is in no group'
+
+    def test_the_failure_codes_say_what_they_mean(self, client):
+        responses = self.schema(client)['paths']['/api/jobs']['post']['responses']
+        assert 'Retry-After' in responses['429']['description']
+        assert 'Retry-After' in responses['503']['description']
+
+    def test_the_description_explains_the_two_step_flow(self, client):
+        """An agent reads this before anything else."""
+        description = self.schema(client)['info']['description']
+        assert 'POST /api/jobs' in description
+        assert 'GET /api/jobs/{job_id}' in description
+        assert 'expires_at' in description, 'nothing here is durable storage'
+
+
+class TestLLMsTxt:
+    """https://llmstxt.org: what an agent reads before trying to use this."""
+
+    def test_it_is_served_at_the_root_as_plain_text(self, client):
+        response = client.get('/llms.txt')
+        assert response.status_code == 200
+        assert response.headers['content-type'].startswith('text/plain')
+
+    def test_it_opens_the_way_the_convention_asks(self, client):
+        lines = client.get('/llms.txt').text.splitlines()
+        assert lines[0] == '# Deal With It!'
+        assert any(line.startswith('> ') for line in lines[:6]), 'a summary blockquote'
+
+    def test_it_carries_the_limits_from_the_settings(self, client, monkeypatch):
+        """Generated, not committed, so a changed limit cannot leave it
+        lying."""
+        monkeypatch.setenv('DWI_RATE_LIMIT', '7')
+        monkeypatch.setenv('DWI_BLOB_TTL', '1800')
+        jobs.get_settings.cache_clear()
+        body = client.get('/llms.txt').text
+        assert '7 submissions' in body
+        assert 'deleted after\n30 minutes' in body or '30 minutes' in body
+
+    def test_it_points_at_the_machine_readable_contract(self, client):
+        body = client.get('/llms.txt').text
+        assert '/api/openapi.json' in body
+        assert '/api/docs' in body
+
+    def test_it_says_what_each_picture_is_for(self, client):
+        body = client.get('/llms.txt').text
+        for field in ('images.view', 'images.thumb', 'images.full', 'downloads',
+                      'expires_at', 'share_url'):
+            assert field in body, f'{field} is undocumented'
+
+    def test_it_warns_that_nothing_is_private_or_durable(self, client):
+        body = client.get('/llms.txt').text.lower()
+        assert 'no authentication' in body
+        assert 'durable storage' in body

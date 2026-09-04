@@ -534,6 +534,82 @@ def expiry_line(expires_at) -> Time:
     )
 
 
+def llms_txt() -> str:
+    """The /llms.txt an agent reads before trying to use this.
+
+    Generated rather than committed, because half of it is numbers that live
+    in Settings -- a static file would quietly start lying the first time
+    someone changed a limit. Follows llmstxt.org: a title, a summary
+    blockquote, then sections of links.
+    """
+    settings = get_settings()
+    base = settings.public_url.rstrip('/') or 'http://localhost:5000'
+    megabytes = settings.max_image_bytes // 1024 // 1024
+    minutes = settings.blob_ttl // 60
+    return f"""# Deal With It!
+
+> Puts the "Deal With It" sunglasses on every face in a picture. Submit an
+> image by URL or as base64, poll a job id, and get back links to the result
+> in several sizes and formats. Free, unauthenticated, and rate limited.
+
+Processing is asynchronous: detection takes a few seconds, so a submission
+returns a job id and you poll for the result. Results are deleted after
+{minutes} minutes -- fetch anything you want to keep.
+
+## Using the API
+
+- [OpenAPI schema]({base}/api/openapi.json): the machine-readable contract.
+- [Interactive docs]({base}/api/docs): the same, with a try-it button.
+- [How it works]({base}/docs): prose, with the detection pipeline explained.
+
+Two calls, in order:
+
+```
+POST {base}/api/jobs      {{"url": "https://example.com/photo.jpg"}}
+                          -> 202 {{"job_id": "...", "status_url": "..."}}
+
+GET  {base}/api/jobs/ID   -> {{"state": "queued"|"started"|"finished"|"failed"}}
+```
+
+Poll once a second. When `state` is `finished`:
+
+- `images.view` -- WebP, 1600px. Show this to a person.
+- `images.thumb` -- WebP, 160px. Appears *before* the job finishes.
+- `images.before` -- the submitted picture, same size as `view`.
+- `images.full` -- full resolution, in the format it was submitted in.
+- `images.card` -- JPEG, 1200px, for `og:image` where WebP is not safe.
+- `downloads` -- the full-resolution result keyed by format.
+- `faces` -- a box, a score and 68 landmarks per face, in submitted-image
+  coordinates. Useful if you want to draw something else instead.
+- `expires_at` -- when every link above stops working.
+- `share_url` -- a page showing the result, safe to hand to someone.
+
+## Limits
+
+- One image per request, up to {megabytes} MB and {settings.max_image_pixels:,} pixels.
+- {settings.rate_limit} submissions per {settings.rate_window} seconds per client;
+  over that is `429` with `Retry-After`.
+- A full queue is `503`, also with `Retry-After`.
+- A job is given {settings.job_timeout} seconds before it is abandoned.
+- URLs must be public: private and loopback addresses are refused.
+
+## Notes
+
+- A `failed` job carries a readable `error` -- an unreachable URL, an
+  undecodable image, or no faces found. Those are outcomes, not bugs.
+- The detector finds dogs sometimes. The score does not separate them from
+  people, so there is no threshold that would.
+- Nothing here is durable storage, and there is no authentication. Do not
+  submit anything you would mind a stranger seeing at an unguessable URL.
+
+## Optional
+
+- [Source]({REPO}): MIT licensed.
+- [Load and limits]({REPO}/blob/master/docs/LOAD.md): measured throughput,
+  memory and abuse behaviour.
+"""
+
+
 def not_found_page(theme: str | None, reachable: bool,
                    heading: str = 'Nothing here',
                    message: str = 'That page does not exist.',
@@ -1252,6 +1328,12 @@ def create_ui():
             return not_found_response(theme_of(request), heading=EXPIRED_HEADING,
                                       message=EXPIRED_MESSAGE)
         return share_page(job_id, record, theme_of(request), jobs.is_broker_reachable())
+
+    @app.get('/llms.txt')
+    def llms(request):
+        """What an agent reads before trying to use this. Plain text, because
+        that is what llmstxt.org asks for and what a fetch tool expects."""
+        return Response(llms_txt(), media_type='text/plain; charset=utf-8')
 
     @app.get('/empty')
     def empty():

@@ -540,6 +540,12 @@ input[type="text"]:focus {
 }
 
 .btn {
+    /* inline-flex, not the button element's own centring: an <a class="btn">
+       is a button too, and without this its text sits at the top of the
+       44px box. */
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
     height: 44px;
     padding: 0 18px;
     border: none;
@@ -548,8 +554,22 @@ input[type="text"]:focus {
     color: var(--primary-fg);
     font-weight: 700;
     font-size: 14px;
+    text-decoration: none;
     cursor: pointer;
     white-space: nowrap;
+}
+
+/* The second button in a pair, where one of them has to be the quieter one. */
+.btn.ghost {
+    background: var(--surface);
+    border: 1px solid var(--border-strong);
+    color: var(--text);
+}
+
+.btn.ghost:hover {
+    border-color: var(--accent);
+    color: var(--accent);
+    background: var(--surface);
 }
 
 .btn:hover {

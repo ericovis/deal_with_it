@@ -178,6 +178,11 @@ Invariants worth knowing before editing:
   *file* and a button that half-works is worse than none. Both are delegated
   from the document and re-run on `htmx:afterSwap`, since cards are swapped in
   and out constantly — a held element reference goes stale immediately.
+- **`/llms.txt` is generated, not committed** (`llms_txt()` in `src/ui.py`).
+  Half of it is numbers that live in `Settings` — the size cap, the rate
+  limit, how long a result survives — and a static file would start lying the
+  first time one of those changed. Same reasoning as the API description
+  carrying the flow rather than a README no one fetches.
 - **The docs contents list is a `<details>`.** Above 860px it is forced open
   with `::details-content { content-visibility: visible }` and the summary is
   made inert, so the sidebar is the label and links it always was.
