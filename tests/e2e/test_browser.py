@@ -32,6 +32,32 @@ SPAWN_EXPIRY = """(seconds) => {
 }"""
 
 
+#: Tells share.js whether this browser can hand a *file* to a share sheet.
+#: Headless Chromium on Linux cannot, so the button that the phone footer is
+#: sized around has to be asked for; forcing it off is how the row without it
+#: gets tested on the same browser.
+def pretend_sharing(page: Page, works: bool) -> None:
+    value = '() => true' if works else 'undefined'
+    page.add_init_script(f"""
+        Object.defineProperty(navigator, 'canShare',
+            {{value: {value}, configurable: true}});
+        Object.defineProperty(navigator, 'share',
+            {{value: {value}, configurable: true}});
+    """)
+
+
+def boxes(page: Page, selector: str) -> list[dict]:
+    """The laid-out rectangle of everything matching, in DOM order."""
+    return page.evaluate(
+        """(selector) => [...document.querySelectorAll(selector)]
+               .map(el => {
+                   const r = el.getBoundingClientRect();
+                   return {top: r.top, width: r.width, height: r.height};
+               })""",
+        selector,
+    )
+
+
 def first_card(page: Page):
     return page.locator('#queue article').first
 
@@ -197,11 +223,11 @@ class TestComparingBeforeAndAfter:
         expect(card.locator('.frame img.after')).to_be_visible()
         expect(card.locator('.frame img.before')).to_be_hidden()
 
-        card.locator('label[data-view="before"]').click()
+        card.locator('.card-foot label[data-view="before"]').click()
         expect(card.locator('.frame img.before')).to_be_visible()
         expect(card.locator('.frame img.after')).to_be_hidden()
 
-        card.locator('label[data-view="after"]').click()
+        card.locator('.card-foot label[data-view="after"]').click()
         expect(card.locator('.frame img.after')).to_be_visible()
 
 
@@ -235,12 +261,60 @@ class TestTheFullSizeView:
         """The overlay reuses the card's own radios rather than a second set."""
         card = run(page, 'me')
         card.locator('.open-full').click()
-        card.locator('label[data-view="before"]').click()
+        card.locator('.card-foot label[data-view="before"]').click()
         expect(card.locator('.frame img.before')).to_be_visible()
         expect(card.locator('.frame img.after')).to_be_hidden()
 
         card.locator('.lightbox-close').click()
         expect(card.locator('.frame img.before')).to_be_visible(), 'and the card agrees'
+
+
+class TestTheDesktopCardIsUnchanged:
+    """The phone got a new footer; the desktop keeps the one it had.
+
+    Written as the shape of the row rather than a screenshot: one line, the
+    segmented control first and Download last, and neither of the phone's
+    pills anywhere on the picture.
+    """
+
+    def test_the_footer_is_still_one_flex_row_in_the_old_order(self, page: Page):
+        pretend_sharing(page, True)
+        card = run(page, 'me')
+        foot = card.locator('.card-foot')
+        assert foot.evaluate('el => getComputedStyle(el).display') == 'flex'
+        order = foot.evaluate(
+            """el => [...el.children]
+                   .filter(child => getComputedStyle(child).display !== 'none'
+                                    && !child.classList.contains('visually-hidden'))
+                   .map(child => child.className.split(' ')[0])""")
+        assert order == ['segmented', 'spacer', 'open-full', 'share-system', 'download-menu']
+        # The row is align-items: center, so one line means one shared centre
+        # rather than one shared top -- the controls are different heights.
+        centres = {round(box['top'] + box['height'] / 2)
+                   for box in boxes(page, '.card-foot > *:not(.visually-hidden)')
+                   if box['height']}
+        assert len(centres) == 1, f'nothing wrapped, got {centres}'
+        assert boxes(page, '.card-foot .download')[0]['height'] == 34, 'the old height'
+
+    def test_the_phone_pills_are_not_on_the_desktop_picture(self, page: Page):
+        card = run(page, 'me')
+        expect(card.locator('.frame .segmented.view-pill')).to_be_hidden()
+        expect(card.locator('.open-full-pill')).to_be_hidden()
+        expect(card.locator('.open-full')).to_be_visible()
+
+    def test_the_share_page_offers_one_copy_link_not_two(self, page: Page):
+        """The footer's copy is the phone's. `.copy-wrap` sets no display of
+        its own for exactly this reason: a rule that late in the file would
+        beat `.mobile-only` and leave both on the row."""
+        card = run(page, 'me')
+        page.goto(card.locator('.card-share a.share').get_attribute('href'))
+        expect(page.locator('.card-share .copy-link')).to_be_visible()
+        expect(page.locator('.card-foot .copy-link')).to_be_hidden()
+
+    def test_the_link_is_still_beside_the_expiry_line(self, page: Page):
+        card = run(page, 'me')
+        expect(card.locator('.card-share a.share')).to_be_visible()
+        expect(card.locator('.card-foot a.share')).to_be_hidden()
 
 
 class TestClearingUp:
@@ -365,6 +439,102 @@ class TestOnAPhone:
         assert picture.bounding_box()['width'] > fitted
         card.locator('.zoom').click()
         assert picture.bounding_box()['width'] == fitted
+
+    def test_the_footer_is_one_row_of_equal_buttons(self, page: Page):
+        """Share, Get a link and Download, one row, nothing wrapped."""
+        pretend_sharing(page, True)
+        run(page, 'me')
+        share, link, download = boxes(page, '.card-foot .share-system, '
+                                            '.card-foot a.share, .card-foot .download')
+        assert share['top'] == link['top'] == download['top'], 'one row, not two'
+        assert share['height'] == link['height'] == download['height'] == 44
+        widths = {round(box['width']) for box in (share, link, download)}
+        assert len(widths) == 1, f'equal columns, got {widths}'
+
+    def test_the_row_closes_up_when_the_browser_cannot_share(self, page: Page):
+        """grid-auto-flow: column, so a hidden Share leaves two equal buttons
+        rather than a row sized for three with a hole in it."""
+        pretend_sharing(page, False)
+        card = run(page, 'me')
+        expect(card.locator('.share-system')).to_be_hidden()
+        link, download = boxes(page, '.card-foot a.share, .card-foot .download')
+        assert link['top'] == download['top']
+        assert round(link['width']) == round(download['width'])
+
+    def test_nothing_in_the_footer_wraps_on_the_smallest_phone(self, page: Page):
+        """320px is an iPhone SE, and it is the width the row has to survive."""
+        pretend_sharing(page, True)
+        page.set_viewport_size({'width': 320, 'height': 568})
+        run(page, 'me')
+        rows = {box['top'] for box in boxes(page, '.card-foot .share-system, '
+                                                  '.card-foot a.share, .card-foot .download')}
+        assert len(rows) == 1, 'the three buttons are still on one line'
+
+    def test_before_and_after_is_a_pill_on_the_picture(self, page: Page):
+        card = run(page, 'me')
+        pill = card.locator('.frame .segmented.view-pill')
+        expect(pill).to_be_visible()
+        expect(card.locator('.card-foot .segmented')).to_be_hidden()
+
+        pill.locator('label[data-view="before"]').click()
+        expect(card.locator('.frame img.before')).to_be_visible()
+        expect(card.locator('.frame img.after')).to_be_hidden()
+
+        pill.locator('label[data-view="after"]').click()
+        expect(card.locator('.frame img.after')).to_be_visible()
+
+    def test_full_size_is_a_pill_and_the_view_lifts_it_over_the_footer(self, page: Page):
+        card = run(page, 'me')
+        opener = card.locator('.open-full-pill')
+        expect(opener).to_be_visible()
+        expect(card.locator('.open-full')).to_be_hidden(), 'the link is the desktop control'
+
+        opener.click()
+        expect(card.locator('.lightbox-close')).to_be_visible()
+        expect(opener).to_be_hidden(), 'it is already open'
+        pill = card.locator('.frame .segmented.view-pill')
+        expect(pill).to_be_visible()
+        assert pill.evaluate('el => getComputedStyle(el).position') == 'fixed'
+        foot = card.locator('.card-foot').bounding_box()
+        box = pill.bounding_box()
+        assert box['y'] + box['height'] <= foot['y'], (
+            'the pill sits above the buttons, not on them'
+        )
+        pill.locator('label[data-view="before"]').click()
+        expect(card.locator('.frame img.before')).to_be_visible()
+
+    def test_the_bar_is_a_tab_bar_and_the_open_tab_is_the_accent(self, page: Page):
+        run(page, 'me')
+        expect(page.locator('.addbar svg')).to_have_count(5)
+        accent = page.evaluate("""() => {
+            const probe = document.createElement('span');
+            probe.style.color = 'var(--accent)';
+            const bar = document.querySelector('.addbar');
+            bar.appendChild(probe);
+            const colour = getComputedStyle(probe).color;
+            probe.remove();
+            return colour;
+        }""")
+        tab = page.locator('.addbar-item.show-url')
+        assert tab.evaluate('el => getComputedStyle(el).color') != accent
+        page.locator('.addbar-item.show-url .open').click()
+        assert tab.evaluate('el => getComputedStyle(el).color') == accent
+
+    def test_the_site_footer_is_centred(self, page: Page):
+        run(page, 'me')
+        container = page.locator('.site-footer .container')
+        assert container.evaluate('el => getComputedStyle(el).textAlign') == 'center'
+
+    def test_the_share_page_leads_back_into_the_app(self, page: Page):
+        card = run(page, 'me')
+        page.goto(card.locator('a.share').first.get_attribute('href'))
+        cta = page.locator('.shared-cta .btn')
+        expect(cta).to_be_visible()
+        assert round(cta.bounding_box()['width']) == 350, 'full width inside the padding'
+        expect(page.locator('.card-foot .copy-link')).to_be_visible()
+        expect(page.locator('.card-share .copy-wrap')).to_be_hidden()
+        cta.click()
+        expect(page.locator('.dropzone')).to_be_visible()
 
     def test_the_contents_list_on_the_docs_page_starts_closed(self, page: Page):
         page.goto('/docs')
@@ -548,7 +718,8 @@ class TestTheSystemShareButton:
 class TestSharing:
     def test_a_finished_card_links_to_a_page_worth_passing_on(self, page: Page):
         card = run(page, 'me')
-        card.locator('a.share').click()
+        # Two of them now: the desktop's is the one beside the expiry line.
+        card.locator('.card-share a.share').click()
         expect(page.locator('h1')).to_contain_text('Someone dealt with it')
         expect(page.locator('.frame img.after')).to_be_visible()
         page.locator('.frame img.after').evaluate('img => img.decode()')

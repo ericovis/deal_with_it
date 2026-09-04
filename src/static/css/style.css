@@ -945,6 +945,15 @@ body:has(#queue article) .clear {
     color: var(--text);
 }
 
+/* The phone's copy of Before/After, which lives on the picture. Not `.pill`:
+   that is the band's worker-status pill, and its ::before would put a green
+   dot inside this one. Off here by its own selector, because `.mobile-only`
+   alone would lose to `.segmented` above -- same specificity, comes later. */
+.segmented.view-pill,
+.open-full-pill {
+    display: none;
+}
+
 /* Matched through the container rather than as `input:checked + label`, so
    the same rule can style a control that is not a sibling of its radios --
    which is what lets the overlay reuse them. */
@@ -1645,8 +1654,10 @@ code {
    any of this. */
 @media (max-width: 600px) {
     body {
-        /* The bar: 6px above 50px of items above 34px of chin. */
-        --addbar-h: calc(90px + env(safe-area-inset-bottom));
+        /* The bar: 6px above 52px of items above the chin. The chin is the
+           safe-area inset itself, floored at 12px for a device that has
+           none -- adding a constant to it counted an iPhone's 34px twice. */
+        --addbar-h: calc(58px + max(12px, env(safe-area-inset-bottom)));
     }
 
     .container {
@@ -1799,34 +1810,45 @@ code {
         z-index: 40;
         background: var(--band);
         color: var(--band-fg);
-        padding: 6px 8px calc(34px + env(safe-area-inset-bottom));
+        padding: 6px 8px max(12px, env(safe-area-inset-bottom));
     }
 
+    /* A tab bar: the glyph over the word, and the open one in --accent. */
     .addbar-item {
         flex: 1;
         display: flex;
+        flex-direction: column;
         align-items: center;
         justify-content: center;
-        height: 50px;
-        border-top: 2px solid transparent;
+        gap: 4px;
+        height: 52px;
         color: var(--band-muted);
         font-size: 11px;
-        font-weight: 800;
-        letter-spacing: .08em;
-        text-transform: uppercase;
+        font-weight: 700;
         cursor: pointer;
     }
 
-    /* Each panel item carries the same word twice: one label opens it, the
-       other checks #show-none, so a second tap closes what is open. */
+    .addbar-item:hover {
+        color: var(--band-fg);
+    }
+
+    /* Each panel item carries the same glyph and word twice: one label opens
+       it, the other checks #show-none, so a second tap closes what is open. */
+    .addbar-item .open,
+    .addbar-item .close {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 4px;
+    }
+
     .addbar-item .close {
         display: none;
     }
 
     body:has(#show-url:checked) .addbar-item.show-url,
     body:has(#show-samples:checked) .addbar-item.show-samples {
-        color: var(--band-fg);
-        border-top-color: var(--accent);
+        color: var(--accent);
     }
 
     body:has(#show-url:checked) .addbar-item.show-url .open,
@@ -1836,7 +1858,7 @@ code {
 
     body:has(#show-url:checked) .addbar-item.show-url .close,
     body:has(#show-samples:checked) .addbar-item.show-samples .close {
-        display: block;
+        display: flex;
     }
 
     /* The URL panel is the page's own form, re-laid over the bar. A second
@@ -1976,28 +1998,105 @@ code {
         display: block;
     }
 
+    /* One row of equal buttons. `grid-auto-flow: column` is the load-bearing
+       part: before share.js runs, or on a browser that cannot share a file,
+       the row is two equal buttons rather than three with a hole in it. */
     .card-foot {
-        gap: 10px;
+        display: grid;
+        grid-auto-flow: column;
+        grid-auto-columns: 1fr;
+        gap: 8px;
     }
 
-    /* 38px tall, which is the floor for a control you tap. */
-    .segmented label {
-        padding: 9px 14px;
+    /* Out of the grid, not just invisible: a display:none child takes no
+       track, which is what keeps the columns equal. */
+    .card-foot .spacer,
+    .card-foot .open-full,
+    .card-foot .segmented.desktop-only {
+        display: none;
     }
 
-    .open-full {
-        padding: 8px 0;
+    .download-menu {
+        display: flex;
     }
 
     .download {
-        height: 38px;
+        flex: 1;
+        justify-content: center;
+        height: 44px;
+        padding: 0 10px;
+        border-radius: 9px;
+    }
+
+    .card-share .share.desktop-only,
+    .card-share .copy-wrap.desktop-only {
+        display: none;
+    }
+
+    /* The wrap is the grid cell; the button has to fill it. */
+    .card-foot .copy-wrap {
+        display: flex;
+    }
+
+    .card-foot .copy-wrap .copy-link {
+        flex: 1;
+    }
+
+    /* ----- the controls on the picture ----- */
+
+    .frame .segmented.view-pill {
+        display: inline-flex;
+        position: absolute;
+        left: 10px;
+        bottom: 10px;
+        z-index: 2;
+        padding: 3px;
+        border: 0;
+        border-radius: 999px;
+        /* Dark glass in both themes, like the overlay: the thing behind it
+           is a photograph, not a surface. */
+        background: rgba(15, 16, 12, .72);
+        backdrop-filter: blur(8px);
+        font-size: 12px;
+    }
+
+    .frame .segmented.view-pill label {
+        padding: 5px 12px;
+        border-radius: 999px;
+        background: transparent;
+        color: #f9f8f6;
+    }
+
+    .result:has([value="before"]:checked) .view-pill label[data-view="before"],
+    .result:has([value="after"]:checked) .view-pill label[data-view="after"] {
+        background: #f9f8f6;
+        color: #24261F;
+    }
+
+    .open-full-pill {
+        display: inline-flex;
+        align-items: center;
+        position: absolute;
+        right: 10px;
+        bottom: 10px;
+        z-index: 2;
+        height: 32px;
+        padding: 0 12px;
+        border-radius: 999px;
+        background: rgba(15, 16, 12, .72);
+        backdrop-filter: blur(8px);
+        color: #f9f8f6;
+        font-family: 'Fira Code', ui-monospace, monospace;
+        font-size: 11px;
+        cursor: zoom-in;
     }
 
     /* ----- the full-size view ----- */
 
+    /* The footer is two rows here: the Before/After pill over the buttons. */
     .result:has(.full-toggle:checked) .frame {
         padding: calc(env(safe-area-inset-top) + 64px) 16px
-                 calc(env(safe-area-inset-bottom) + 90px);
+                 calc(env(safe-area-inset-bottom) + 150px);
     }
 
     /* Open, it is the picture itself; a tap target over it would swallow the
@@ -2012,7 +2111,57 @@ code {
     }
 
     .result:has(.full-toggle:checked) .card-foot {
+        display: grid;
+        grid-auto-flow: column;
+        grid-auto-columns: 1fr;
+        gap: 8px;
         padding: 14px 20px calc(env(safe-area-inset-bottom) + 20px);
+    }
+
+    /* A link is not one of the things to do to a picture you are looking at. */
+    .result:has(.full-toggle:checked) .card-foot a.share,
+    .result:has(.full-toggle:checked) .card-foot .copy-wrap {
+        display: none;
+    }
+
+    .result:has(.full-toggle:checked) .zoom,
+    .result:has(.full-toggle:checked) .share-system {
+        justify-content: center;
+        height: 44px;
+        padding: 0 10px;
+        border: 1px solid rgba(249, 248, 246, .28);
+        border-radius: 9px;
+        background: rgba(249, 248, 246, .08);
+        color: #f9f8f6;
+        font-weight: 700;
+    }
+
+    .result:has(.full-toggle:checked) .download {
+        background: #f9f8f6;
+        color: #24261F;
+    }
+
+    /* The picture's pill moves up over the footer. It has to be fixed rather
+       than absolute: the frame it sits in is pointer-events:none up there, so
+       the pill takes its own back. */
+    .result:has(.full-toggle:checked) .frame .segmented.view-pill {
+        position: fixed;
+        left: 50%;
+        /* 14 + 44 + 20 of footer, then a 10px gap. */
+        bottom: calc(env(safe-area-inset-bottom) + 88px);
+        transform: translateX(-50%);
+        z-index: 103;
+        pointer-events: auto;
+        background: rgba(249, 248, 246, .1);
+        backdrop-filter: none;
+    }
+
+    .result:has(.full-toggle:checked) .frame .segmented.view-pill label {
+        padding: 6px 14px;
+    }
+
+    .result:has(.full-toggle:checked) .open-full-pill {
+        display: none;
     }
 
     .result:has(.full-toggle:checked) .zoom-hint {
@@ -2029,13 +2178,8 @@ code {
     .result:has(.full-toggle:checked) .zoom {
         display: inline-flex;
         align-items: center;
-        height: 38px;
-        padding: 0 14px;
-        border: 1px solid rgba(249, 248, 246, .28);
-        border-radius: 8px;
         color: #f9f8f6;
         font-size: 13px;
-        font-weight: 600;
         cursor: pointer;
     }
 
@@ -2141,8 +2285,19 @@ code {
 
     .site-footer .container {
         flex-direction: column;
-        align-items: flex-start;
+        align-items: center;
+        text-align: center;
         gap: 6px;
+    }
+
+    /* ----- the shared page ----- */
+
+    .shared-cta {
+        margin-top: 20px;
+    }
+
+    .shared-cta .btn {
+        width: 100%;
     }
 }
 
@@ -2218,6 +2373,78 @@ code {
 
 .shared .result {
     text-align: left;
+}
+
+/* The way back into the app for someone who arrived on a shared link and
+   has never seen the front page. */
+.shared-cta {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 10px;
+    margin-top: 28px;
+    padding-top: 24px;
+    border-top: 1px solid var(--border);
+}
+
+.shared-cta p {
+    margin: 0;
+    font-size: 13px;
+    color: var(--muted);
+}
+
+/* "Copy link" rather than "Get a link": the link is the page you are on.
+   No `display` here: this rule comes after `.mobile-only`, and one on the
+   wrap would beat it and leave the phone's copy on the desktop row. Each
+   place the wrap appears lays it out itself. */
+.copy-wrap {
+    position: relative;
+}
+
+.card-share .copy-wrap {
+    display: inline-flex;
+}
+
+.card-share .copy-link {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    height: 34px;
+    padding: 0 14px;
+    border: 1px solid var(--border-strong);
+    border-radius: 8px;
+    background: var(--surface);
+    color: var(--text);
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+}
+
+.card-share .copy-link:hover {
+    border-color: var(--accent);
+    color: var(--accent);
+}
+
+.card-share .copy-link code {
+    padding: 0;
+    background: none;
+    font-size: 11px;
+    color: var(--muted);
+}
+
+/* Over the button, not beside it: the phone's row has no width to spare. */
+.copy-wrap .copied {
+    top: auto;
+    right: auto;
+    bottom: calc(100% + 6px);
+    left: 50%;
+    transform: translateX(-50%);
+    height: auto;
+}
+
+.copy-link:active + .copied {
+    opacity: 1;
+    transition: none;
 }
 
 /* The expiry line, on a card and on a shared page. countdown.js rewrites the
@@ -2312,8 +2539,91 @@ code {
     color: var(--accent);
 }
 
+/* Given the footer's own size, so a desktop browser that can share a file
+   does not draw the native button next to the styled Download. */
+.card-foot .share-system {
+    display: inline-flex;
+    align-items: center;
+    height: 34px;
+    padding: 0 14px;
+    border: 1px solid var(--border-strong);
+    border-radius: 8px;
+    background: var(--surface);
+    color: var(--text);
+    font-size: 13px;
+    font-weight: 700;
+    cursor: pointer;
+}
+
+.card-foot .share-system:hover {
+    border-color: var(--accent);
+    color: var(--accent);
+}
+
+/* On the dark overlay, where the theme's surfaces do not apply. */
+.result:has(.full-toggle:checked) .share-system {
+    border-color: rgba(249, 248, 246, .28);
+    background: rgba(249, 248, 246, .08);
+    color: #f9f8f6;
+}
+
 /* Hidden until share.js has asked the browser whether it can share a file.
    `[hidden]` alone loses to the flex display the footer gives its children. */
 .card-foot .share-system[hidden] {
     display: none;
+}
+
+/* The phone's own sizes for the three sections above. They are down here
+   rather than up in the phone layout because that block comes first in the
+   file, and these override rules of the same specificity: source order is
+   what decides, so the override has to be the later one. */
+@media (max-width: 600px) {
+    /* One row of equal buttons, all 44px: the size a thumb needs. */
+    .card-foot .share-system,
+    .card-foot a.share,
+    .card-foot .copy-link {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        height: 44px;
+        padding: 0 10px;
+        border: 1px solid var(--border-strong);
+        border-radius: 9px;
+        background: var(--surface);
+        color: var(--text);
+        font-size: 13px;
+        font-weight: 700;
+        text-decoration: none;
+        white-space: nowrap;
+    }
+
+    .card-foot .share-system:hover,
+    .card-foot a.share:hover,
+    .card-foot .copy-link:hover {
+        border-color: var(--accent);
+        color: var(--accent);
+    }
+
+    /* The expiry line, under the row rather than beside anything. */
+    .card-share {
+        padding: 0;
+        margin-top: -4px;
+        font-family: 'Fira Code', ui-monospace, monospace;
+        font-size: 12px;
+    }
+
+    /* Over the Download cell rather than the right edge of the row. */
+    .download-menu .formats {
+        left: 0;
+        right: 0;
+        min-width: 0;
+    }
+
+    .download-menu .formats a {
+        display: flex;
+        align-items: center;
+        height: 40px;
+        padding: 0 14px;
+        font-size: 14px;
+    }
 }

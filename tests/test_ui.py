@@ -3,8 +3,9 @@
 import re
 
 import pytest
+from fasthtml.common import to_xml
 
-from src import blobs, jobs
+from src import blobs, jobs, ui
 from src.models import JobImages, JobResult, JobSource, JobState, SourceKind
 from src.ui import IMG_DIR, THEME_COOKIE
 from tests import support
@@ -141,6 +142,22 @@ class TestSharing:
             'which is a different thing to offer'
         )
 
+    def test_the_link_is_offered_twice_for_the_two_layouts(self, client, hx):
+        """On a phone it is a button in the footer row; on a desktop it is
+        the text link beside the expiry line."""
+        job_id = self.finished(client, hx)
+        body = client.get(f'/jobs/{job_id}', headers=hx).text
+        assert f'<a href="/s/{job_id}" class="share mobile-only">' in body
+        assert f'<a href="/s/{job_id}" class="share desktop-only">' in body
+
+    def test_a_result_with_no_link_leaves_the_slot_empty(self):
+        """The footer is a column grid: an absent button is one fewer equal
+        column, not a hole in a row sized for three."""
+        pictures = JobImages(view='/v.webp', thumb='/t.webp', full='/f.png')
+        view = to_xml(ui._result_view('abc', pictures, {}))
+        assert 'class="share mobile-only"' not in view
+        assert 'class="copy-wrap' not in view
+
     def test_the_share_page_shows_the_result(self, client, hx):
         job_id = self.finished(client, hx)
         response = client.get(f'/s/{job_id}')
@@ -153,6 +170,26 @@ class TestSharing:
         body = client.get(f'/s/{job_id}').text
         assert f'property="og:image" content="/i/{job_id}/card.jpg"' in body
         assert 'deal_with_me.png' not in body, 'the default card is for the site itself'
+
+    def test_the_share_page_invites_you_to_have_a_go(self, client, hx):
+        """Whoever follows the link may never have seen the front page."""
+        job_id = self.finished(client, hx)
+        body = client.get(f'/s/{job_id}').text
+        cta = re.search(r'<div class="shared-cta">.*?</div>', body, re.S).group()
+        assert '<a href="/" class="btn">Deal with your own picture</a>' in cta
+        assert 'href="/docs"' in cta
+
+    def test_the_share_page_copies_its_own_address(self, client, hx):
+        """A card says "Get a link"; here the link is the page you are on,
+        so it says "Copy link" and reuses the docs page's clipboard call."""
+        job_id = self.finished(client, hx)
+        body = client.get(f'/s/{job_id}').text
+        buttons = re.findall(r'<button[^>]*class="copy-link"[^>]*>', body)
+        assert len(buttons) == 2, 'one in the footer row, one beside the expiry'
+        for button in buttons:
+            assert 'hx-on:click="navigator.clipboard.writeText(location.href)"' in button
+        assert '>Get a link<' not in body, 'there is no other page to get a link to'
+        assert f'/s/{job_id[:8]}' in body, 'the desktop button shows the short URL'
 
     def test_it_reads_from_disk_not_from_redis(self, client, hx, redis_conn):
         """Redis forgets a job at result_ttl; the pictures live to blob_ttl.
@@ -293,6 +330,40 @@ class TestOnAPhone:
     def test_the_note_mentions_the_swipe_only_where_it_works(self, client):
         assert '<span class="mobile-only"> Swipe a card left to remove it.</span>' in (
             client.get('/').text
+        )
+
+    def test_the_bar_is_a_tab_bar_with_a_glyph_per_item(self, client):
+        """Three glyphs, drawn inline in currentColor so the open one turns
+        --accent with the word under it."""
+        body = client.get('/').text
+        bar = re.search(r'<nav class="addbar">.*?</nav>', body, re.S).group()
+        assert len(re.findall(r'<label\b', bar)) == 5, (
+            'Add a picture, then open/close for each panel'
+        )
+        assert bar.count('<svg') == 5, 'every item carries its glyph'
+        assert bar.count('viewbox="0 0 22 22"') == 5
+        assert 'stroke="currentColor"' in bar and 'fill="currentColor"' in bar
+
+    def test_the_before_after_pill_is_a_second_pair_of_labels(self, client, hx):
+        """On a phone Before/After sits on the picture. Two labels for the
+        same radios rather than a second control: the :has() rule that
+        styles the checked one matches through .result either way."""
+        job_id = job_ids(submit(client, hx, url='https://example.test/a.png').text)[0]
+        body = client.get(f'/jobs/{job_id}', headers=hx).text
+        frame = re.search(r'<div class="frame">.*?</div>\s*<label[^>]*class="backdrop"',
+                          body, re.S).group()
+        pill = re.search(r'<div class="segmented view-pill mobile-only">.*?</div>',
+                         frame, re.S).group()
+        assert f'for="view-{job_id}-b"' in pill and f'for="view-{job_id}-a"' in pill
+        assert 'data-view="before"' in pill and 'data-view="after"' in pill
+        assert body.count('data-view="before"') == 2, 'the footer keeps the desktop one'
+
+    def test_full_size_is_a_pill_on_the_picture(self, client, hx):
+        job_id = job_ids(submit(client, hx, url='https://example.test/a.png').text)[0]
+        body = client.get(f'/jobs/{job_id}', headers=hx).text
+        assert f'<label for="full-{job_id}" class="open-full-pill mobile-only">' in body
+        assert 'class="open-full desktop-only"' in body, (
+            'the underlined link is the desktop control now'
         )
 
 
@@ -565,7 +636,7 @@ class TestCards:
         body = client.get(f'/jobs/{job_id}', headers=hx).text
         assert 'class="before"' in body and 'class="after"' in body
         assert f'value="after" checked id="view-{job_id}-a"' in body
-        assert 'class="segmented"' in body
+        assert 'class="segmented desktop-only"' in body
 
     def test_each_result_can_be_downloaded(self, client, hx):
         job_id = self.start(client, hx)
@@ -588,8 +659,9 @@ class TestCards:
         body = client.get(f'/jobs/{job_id}', headers=hx).text
         assert 'target="_blank"' not in body
         assert f'id="full-{job_id}"' in body
-        assert body.count(f'for="full-{job_id}"') == 4, (
-            'open, the picture itself on a phone, the backdrop and close'
+        assert body.count(f'for="full-{job_id}"') == 5, (
+            'open, the picture itself on a phone, the phone pill, the '
+            'backdrop and close'
         )
         assert 'class="lightbox-close"' in body
 
