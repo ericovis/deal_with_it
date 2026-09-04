@@ -5,6 +5,7 @@ import re
 import pytest
 from playwright.sync_api import Page, expect
 
+from src.config import get_settings
 from src.ui import EXAMPLE_SOURCE, SAMPLES
 from tests.conftest import make_png
 from tests.e2e.conftest import TIMEOUT
@@ -42,6 +43,21 @@ def run(page: Page, name: str, outcome: str = 'done'):
     card = first_card(page)
     expect(card.locator(f'.chip.{outcome}')).to_be_visible(timeout=TIMEOUT)
     return card
+
+
+def test_the_pins_took(live_server):
+    """The settings this suite depends on are actually in force.
+
+    Not paranoia: the rate limit silently reverted to thirty a minute for a
+    long time, and because this suite submits far more than that from one
+    address, the symptom was a card coming back Failed in whichever test
+    happened to cross the line -- a different one each run, and only sometimes.
+    Cheaper to assert the cause than to keep diagnosing the symptom.
+    """
+    settings = get_settings()
+    assert settings.rate_limit == 0, 'the suite would throttle itself'
+    assert settings.http_timeout == 1, 'one hung fetch would block the worker'
+    assert settings.blob_dir, 'the store must not land next to the checkout'
 
 
 class TestSubmitting:

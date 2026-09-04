@@ -105,22 +105,20 @@ def live_server(_needs_the_face_stack, blob_root):
     # test passed depended on how many of its submissions landed inside the
     # same fixed window. Being refused is worth a test, but a deterministic
     # one -- tests/test_throttle.py has it.
-    pinned = {'DWI_HTTP_TIMEOUT': '1', 'DWI_RATE_LIMIT': '0',
-              'DWI_BLOB_DIR': os.environ['DWI_BLOB_DIR']}
-    previous = {name: os.environ.get(name) for name in pinned}
-    os.environ.update(pinned)
-    # Settings are cached and something earlier in the run may have read
-    # them, so prime the cache with these -- and then put the environment
-    # back, because tests/test_throttle.py has its own opinion about both.
+    # Set for the session and left set. Priming the settings cache and then
+    # putting the environment back does not work: `clean_settings_cache` in
+    # tests/conftest.py clears that cache before every test, and the next read
+    # goes back to the environment -- where the pins are gone. The rate limit
+    # would quietly return to thirty a minute, the suite submits far more than
+    # that from 127.0.0.1, and cards start coming back Failed at random. Which
+    # is exactly what happened, intermittently, until `test_the_pins_took`
+    # below started saying so.
+    #
+    # Safe to leave set: this runs as its own pytest session (its own CI job),
+    # and tests/test_throttle.py does not read the environment -- its `limits`
+    # fixture monkeypatches get_settings directly.
+    os.environ.update({'DWI_HTTP_TIMEOUT': '1', 'DWI_RATE_LIMIT': '0'})
     get_settings.cache_clear()
-    get_settings()
-    for name, value in previous.items():
-        if name == 'DWI_BLOB_DIR':
-            continue  # Session-scoped: the server keeps writing there.
-        if value is None:
-            del os.environ[name]
-        else:
-            os.environ[name] = value
 
     from src import jobs
     from src.app import app
