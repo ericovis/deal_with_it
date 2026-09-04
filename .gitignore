@@ -109,3 +109,9 @@ dlib
 .data
 .requirements.zip
 .pytest_cache
+
+# Deployment (Ansible, quadlets) is kept out of the repo.
+deploy/
+
+# A local Claude skill for driving the deploy; same reason as deploy/.
+.claude/skills/deploy/
