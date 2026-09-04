@@ -79,8 +79,15 @@ def live_server(_needs_the_face_stack):
 
     # Short, because one hung fetch would block the single worker thread and
     # every job queued behind it.
-    previous = os.environ.get('DWI_HTTP_TIMEOUT')
-    os.environ['DWI_HTTP_TIMEOUT'] = '1'
+    #
+    # No rate limit, because the whole suite submits from 127.0.0.1 and the
+    # default is thirty a minute: the run is already past that, so whether a
+    # test passed depended on how many of its submissions landed inside the
+    # same fixed window. Being refused is worth a test, but a deterministic
+    # one -- tests/test_throttle.py has it.
+    pinned = {'DWI_HTTP_TIMEOUT': '1', 'DWI_RATE_LIMIT': '0'}
+    previous = {name: os.environ.get(name) for name in pinned}
+    os.environ.update(pinned)
 
     from src import jobs
     from src.app import app
@@ -105,10 +112,11 @@ def live_server(_needs_the_face_stack):
     server.should_exit = True
     worker.join(timeout=5)
     jobs.reset()
-    if previous is None:
-        os.environ.pop('DWI_HTTP_TIMEOUT', None)
-    else:
-        os.environ['DWI_HTTP_TIMEOUT'] = previous
+    for name, value in previous.items():
+        if value is None:
+            os.environ.pop(name, None)
+        else:
+            os.environ[name] = value
 
 
 @pytest.fixture(scope='session')
