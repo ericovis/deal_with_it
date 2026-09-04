@@ -263,9 +263,27 @@ the argument list said otherwise, but podman's quadlet generator drops an
 empty `""` argument and everything after it, so `--save "" --maxmemory 1gb`
 reached Redis as `--save`.
 
-The rate limit keys on `request.client.host`. Behind a proxy, run uvicorn
-with `--proxy-headers --forwarded-allow-ips <proxy>` (the `web` image
-target already does) or every client shares one budget.
+The rate limit keys on `request.client.host`, which behind a proxy means
+whatever the proxy says. **Getting that wrong is a bypass, not a nuisance**,
+and it was wrong here until 2026-09-04:
+
+- uvicorn ran with `--forwarded-allow-ips "*"`, whose always-trust path takes
+  the **first** entry of `X-Forwarded-For`.
+- Both Caddy and Cloudflare *append* to a client-supplied header rather than
+  replacing it. `X-Forwarded-For: 1.2.3.4` arrived as `1.2.3.4,<real>`, and
+  the first entry is the client's own invention.
+
+So anyone could pick their own bucket. Measured: forty submissions each
+claiming a different address were all accepted, against a limit of thirty a
+minute. The fix is to make the proxy work the client out and hand the app a
+single value it did not get from the client — Caddy `trusted_proxies` with
+Cloudflare's ranges plus `header_up X-Forwarded-For {client_ip}`, and uvicorn
+trusting only the container subnet. The same forty now get 29 accepted and 11
+refused, sharing one bucket as they should, and an ordinary submission is
+unaffected.
+
+A stale Cloudflare range list fails the safe way: visitors get bucketed as
+Cloudflare, which over-limits rather than under-limits.
 
 A crash inside native code takes the whole worker process down, threads
 and all.
