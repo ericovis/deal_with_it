@@ -2,6 +2,7 @@
 
 from functools import lru_cache
 
+from pydantic import model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -32,6 +33,19 @@ class Settings(BaseSettings):
     rate_limit: int = 30
     rate_window: int = 60
 
+    #: Where a job's pictures are written. Both tiers mount the same
+    #: directory and the reverse proxy serves it. Empty means ``.data/blobs``
+    #: beside the checkout, which is gitignored and fine for development.
+    blob_dir: str = ''
+    #: How long a result stays fetchable, and therefore shareable. This is
+    #: the number the card counts down to.
+    blob_ttl: int = 3600
+    #: Ceiling on the whole store. Under a flood this, not the TTL, is what
+    #: keeps a host with no swap alive: the oldest jobs go first.
+    blob_max_bytes: int = 1024 ** 3
+    #: How often the sweep runs, as a job on the ordinary queue.
+    blob_sweep_interval: int = 30
+
     #: Largest image we are willing to download or decode.
     max_image_bytes: int = 10 * 1024 * 1024
     #: Decompression-bomb guard: refuse images with more pixels than this.
@@ -50,6 +64,19 @@ class Settings(BaseSettings):
     #: Allow fetching from loopback/private/link-local addresses. Off by
     #: default: on, the API is an SSRF proxy into the container network.
     allow_private_addresses: bool = False
+
+    @model_validator(mode='after')
+    def a_result_must_outlive_the_job_that_reports_it(self) -> 'Settings':
+        """A finished job whose pictures have been swept is a card full of
+        broken images. The store has to outlast the job record, not the other
+        way round."""
+        if self.blob_ttl < self.result_ttl:
+            raise ValueError(
+                f'DWI_BLOB_TTL ({self.blob_ttl}) must be at least '
+                f'DWI_RESULT_TTL ({self.result_ttl}), or a job still reported '
+                'as finished would point at pictures that are already gone.'
+            )
+        return self
 
     @property
     def max_request_bytes(self) -> int:
