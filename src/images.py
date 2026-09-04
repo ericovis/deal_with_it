@@ -19,6 +19,7 @@ from numpy.typing import NDArray
 from PIL import Image, ImageOps, UnidentifiedImageError
 from requests.adapters import HTTPAdapter
 
+from src import blobs
 from src.config import Settings, get_settings
 from src.errors import DealWithItError
 
@@ -267,9 +268,22 @@ def decode(data: bytes, settings: Settings | None = None) -> tuple[NDArray[np.ui
 
 
 def load(url: str | None = None, base64_data: str | None = None,
+         blob: str | None = None,
          settings: Settings | None = None) -> tuple[NDArray[np.uint8], str]:
-    """Resolve either source into pixels, plus the source format."""
+    """Resolve any of the three sources into pixels, plus the source format.
+
+    ``blob`` is how a submission normally arrives: the web tier writes the
+    bytes to the shared store and puts a path on the queue, so nothing
+    multi-megabyte rides through Redis. ``base64_data`` remains for a job
+    enqueued by an older release that is still waiting to be picked up.
+    """
     settings = settings or get_settings()
+    if blob is not None:
+        try:
+            data = blobs.path(blob).read_bytes()
+        except (OSError, blobs.UnsafeReference) as exc:
+            raise ImageSourceError('The submitted image is no longer available.') from exc
+        return decode(data, settings)
     if base64_data is not None:
         return decode(decode_data_uri(base64_data), settings)
     if url is not None:

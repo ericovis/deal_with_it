@@ -37,6 +37,27 @@ _SAFE_ID = re.compile(r'\A[A-Za-z0-9][A-Za-z0-9_-]{0,63}\Z')
 _SAFE_NAME = re.compile(r'\A[a-z0-9_]+\.[a-z0-9]{2,4}\Z')
 
 
+#: What a submitted media type is stored as. Never the client's own string:
+#: these files are served straight off disk, so a `.svg` or an `.html` that
+#: talked its way in would be served as itself. Anything unrecognised lands
+#: as `.bin`, which is inert -- the worker decodes by content anyway.
+EXTENSIONS = {
+    'image/jpeg': 'jpg',
+    'image/jpg': 'jpg',
+    'image/png': 'png',
+    'image/webp': 'webp',
+    'image/gif': 'gif',
+    'image/bmp': 'bmp',
+    'image/tiff': 'tiff',
+}
+OPAQUE_EXTENSION = 'bin'
+
+
+def extension_for(media_type: str | None) -> str:
+    return EXTENSIONS.get((media_type or '').split(';')[0].strip().lower(),
+                          OPAQUE_EXTENSION)
+
+
 class UnsafeReference(ValueError):
     """A job id or file name that will not be turned into a path."""
 

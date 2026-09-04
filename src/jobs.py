@@ -7,6 +7,7 @@ ids and :class:`~src.models.JobResult`.
 import logging
 from datetime import UTC, datetime
 from urllib.parse import urlparse
+from uuid import uuid4
 
 from redis import Redis
 from redis.exceptions import RedisError
@@ -80,7 +81,14 @@ def get_queue() -> Queue:
     return _queue if _queue is not None else configure()
 
 
-def enqueue(payload: dict, meta: dict | None = None) -> tuple[str, JobState]:
+def new_id() -> str:
+    """An id minted before the job exists, so its pictures have a directory
+    to go in before anything is queued. RQ takes it verbatim."""
+    return str(uuid4())
+
+
+def enqueue(payload: dict, meta: dict | None = None,
+            job_id: str | None = None) -> tuple[str, JobState]:
     """Hand an image payload to the workers.
 
     ``meta`` rides along on the job and comes back through :func:`describe`;
@@ -94,6 +102,7 @@ def enqueue(payload: dict, meta: dict | None = None) -> tuple[str, JobState]:
     job = get_queue().enqueue(
         TASK,
         payload,
+        job_id=job_id,
         meta=dict(meta or {}),
         job_timeout=settings.job_timeout,
         result_ttl=settings.result_ttl,
@@ -221,11 +230,23 @@ def resubmit(job_id: str) -> tuple[str, JobState] | None:
 
     A fresh job rather than RQ's requeue: the failures worth retrying are the
     ones the task *returned*, which are finished jobs to the queue.
+
+    An upload's picture is hard-linked into the new job's directory rather
+    than shared from the old one, so both stay independently deletable --
+    which is what the sweep assumes. If it has already been swept there is
+    nothing to retry.
     """
     job = _fetch(job_id)
     if job is None or not job.args:
         return None
-    return enqueue(job.args[0], meta={
+    payload = dict(job.args[0])
+    fresh = new_id()
+    if reference := payload.get('blob'):
+        if not blobs.exists(reference):
+            logger.info('cannot retry %s: its picture has expired', job_id)
+            return None
+        payload['blob'] = blobs.link(reference, fresh, blobs.split(reference)[1])
+    return enqueue(payload, job_id=fresh, meta={
         key: value for key, value in (job.meta or {}).items()
         if key in ('kind', 'label', 'thumb')
     })

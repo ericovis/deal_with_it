@@ -15,7 +15,7 @@ def stub_load(monkeypatch):
     """Replace image loading so these tests need neither network nor pixels."""
 
     def install(result, source_format='PNG'):
-        def fake_load(url=None, base64_data=None, settings=None):
+        def fake_load(url=None, base64_data=None, blob=None, settings=None):
             if isinstance(result, Exception):
                 raise result
             return result, source_format
@@ -117,11 +117,9 @@ def test_unexpected_errors_propagate(stub_load, stub_processor):
         tasks.process_image({'url': 'https://example.test/a.png', 'base64': None})
 
 
-def test_revalidates_the_payload_it_was_given():
-    from pydantic import ValidationError
-
-    with pytest.raises(ValidationError):
-        tasks.process_image({'url': None, 'base64': None})
+def test_refuses_a_payload_that_names_no_source():
+    with pytest.raises(ValueError, match='must be passed'):
+        tasks.process_image({'url': None, 'blob': None})
 
 
 class TestFaceCount:

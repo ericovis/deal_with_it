@@ -12,7 +12,6 @@ from rq import get_current_job
 from src import derivatives, images
 from src.config import get_settings
 from src.errors import DealWithItError
-from src.models import ImageRequest
 from src.processors.deal_with_it import DealWithItProcessor
 
 logger = logging.getLogger(__name__)
@@ -60,12 +59,14 @@ def process_image(payload: dict) -> dict:
     ``error`` string; anything else raises and lands in RQ's failed registry.
     """
     settings = get_settings()
-    request = ImageRequest.model_validate(payload)
+    if not any(payload.get(key) for key in ('url', 'blob', 'base64')):
+        raise ValueError('An url, a blob or a base64 string must be passed.')
     try:
         report_progress(10, 'Fetching the image')
         array, source_format = images.load(
-            url=str(request.url) if request.url else None,
-            base64_data=request.base64,
+            url=payload.get('url'),
+            base64_data=payload.get('base64'),
+            blob=payload.get('blob'),
             settings=settings,
         )
         processor = DealWithItProcessor(

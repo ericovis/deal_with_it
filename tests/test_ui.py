@@ -1,6 +1,5 @@
 """The FastHTML interface, over a test client."""
 
-import base64
 import re
 
 import pytest
@@ -273,7 +272,9 @@ class TestSubmit:
     def test_an_upload_starts_a_job(self, client, hx):
         response = submit(client, hx, files=[('image', ('me.png', make_png(), 'image/png'))])
         [job_id] = job_ids(response.text)
-        assert jobs.payload_for(job_id)['base64'].startswith('data:image/png;base64,')
+        payload = jobs.payload_for(job_id)
+        assert payload['blob'] == f'{job_id}/source.png', 'on disk, not through Redis'
+        assert blobs.path(payload['blob']).read_bytes() == make_png()
         assert 'me.png' in response.text
 
     def test_several_files_become_several_jobs(self, client, hx):
@@ -346,13 +347,14 @@ class TestSubmit:
 
 
 class TestSamples:
-    def test_a_sample_is_queued_as_base64_not_as_a_url(self, client, hx):
-        """The worker's SSRF guard would refuse to fetch our own host."""
+    def test_a_sample_is_queued_as_a_blob_not_as_a_url(self, client, hx):
+        """The worker's SSRF guard would refuse to fetch our own host, so the
+        picture is copied into the job's directory instead."""
         response = submit(client, hx, sample='me')
         [job_id] = job_ids(response.text)
         payload = jobs.payload_for(job_id)
         assert payload['url'] is None
-        assert payload['base64'].startswith('data:image/jpeg;base64,')
+        assert payload['blob'] == f'{job_id}/source.jpg'
 
     def test_a_sample_card_shows_a_tile_rather_than_the_full_size_file(self, client, hx):
         """It is the same picture at a fortieth of the bytes."""
@@ -366,9 +368,8 @@ class TestSamples:
         a derivative and every caption on the page quietly becomes wrong.
         """
         job_id = job_ids(submit(client, hx, sample='group').text)[0]
-        submitted = jobs.payload_for(job_id)['base64']
-        original = (IMG_DIR / 'multiple_people.jpg').read_bytes()
-        assert base64.b64decode(submitted.split(',', 1)[1]) == original
+        submitted = blobs.path(jobs.payload_for(job_id)['blob']).read_bytes()
+        assert submitted == (IMG_DIR / 'multiple_people.jpg').read_bytes()
 
     def test_an_unknown_sample_is_refused(self, client, hx):
         response = submit(client, hx, sample='../../etc/passwd')
@@ -770,7 +771,12 @@ class TestRetry:
         [new_id] = job_ids(response.text)
 
         assert new_id != job_id, 'a retry is a new job, not a resurrected one'
-        assert jobs.payload_for(new_id) == original
+        retried = jobs.payload_for(new_id)
+        assert retried['blob'] == f'{new_id}/source.jpg', 'in its own directory'
+        assert (blobs.path(retried['blob']).stat().st_ino
+                == blobs.path(original['blob']).stat().st_ino), (
+            'hard-linked, so either job can be swept without taking the other'
+        )
         assert 'socks_the_cat.jpg' in response.text, 'and it remembers what it was called'
 
     def test_retrying_an_expired_job_says_so(self, client, hx):

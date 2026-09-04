@@ -9,7 +9,8 @@ import logging
 
 from fastapi import APIRouter, HTTPException, Request, status
 
-from src import jobs, throttle
+from src import blobs, images, jobs, throttle
+from src.errors import DealWithItError
 from src.models import ImageRequest, JobCreated, JobResult, SourceKind
 
 logger = logging.getLogger(__name__)
@@ -45,7 +46,23 @@ def create_job(image: ImageRequest, request: Request) -> JobCreated:
             headers={'Retry-After': str(exc.retry_after)},
         ) from exc
     payload = image.as_payload()
-    job_id, state = jobs.enqueue(payload, meta={
+    job_id = jobs.new_id()
+    if payload['base64'] is not None:
+        # base64-decoding a string, not decoding an image: the bytes go
+        # straight to disk and the queue carries a path. `base64` stays in
+        # the published request contract; it just stops riding through Redis.
+        try:
+            data = images.decode_data_uri(payload['base64'])
+        except DealWithItError as exc:
+            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                                detail=str(exc)) from exc
+        media_type = payload['base64'][len('data:'):payload['base64'].index(';')]
+        queued = {'url': None,
+                  'blob': blobs.put(job_id, f'source.{blobs.extension_for(media_type)}', data)}
+    else:
+        queued = {'url': payload['url'], 'blob': None}
+
+    job_id, state = jobs.enqueue(queued, job_id=job_id, meta={
         'kind': str(SourceKind.URL if payload['url'] else SourceKind.UPLOAD),
         'label': jobs.label_for(payload),
         'thumb': payload['url'],

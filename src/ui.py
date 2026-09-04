@@ -7,11 +7,9 @@ interface: the clipboard call on the docs page, and ``UPLOAD_ONE_BY_ONE``,
 which htmx has no attribute for.
 """
 
-import base64
 import json
 import logging
 from dataclasses import dataclass
-from functools import cache
 from pathlib import Path
 
 from fasthtml.common import (
@@ -54,7 +52,7 @@ from pydantic import ValidationError
 from starlette.concurrency import run_in_threadpool
 from starlette.responses import Response
 
-from src import images, jobs, throttle
+from src import blobs, images, jobs, throttle
 from src.assets import asset
 from src.config import get_settings
 from src.models import (
@@ -138,16 +136,15 @@ EXAMPLE_SAMPLE = 'apollo'
 EXAMPLE_SOURCE = 'https://upload.wikimedia.org/wikipedia/commons/3/3d/Apollo_11_Crew.jpg'
 
 
-@cache
-def sample_data_uri(name: str) -> str:
-    """A sample picture as a data URI, read once per process.
+def sample_source(name: str) -> bytes:
+    """A sample picture as submitted: the committed file, at full size.
 
-    Base64 rather than a ``/static`` URL: the worker's SSRF guard refuses to
-    fetch our own, non-public host.
+    Copied into the job's directory rather than fetched from our own
+    ``/static``, because the worker's SSRF guard refuses our own non-public
+    host. Never the tile: SAMPLE_FACES pins a face count per sample and those
+    counts move when the width does.
     """
-    sample = SAMPLES[name]
-    payload = base64.b64encode((IMG_DIR / sample.filename).read_bytes()).decode()
-    return f'data:{sample.media_type};base64,{payload}'
+    return (IMG_DIR / SAMPLES[name].filename).read_bytes()
 
 
 def _first_message(exc: ValidationError) -> str:
@@ -891,8 +888,14 @@ def docs_page(theme: str | None, reachable: bool) -> tuple:
 # ---------------------------------------------------------------- handlers
 
 
-async def _upload_payload(upload: UploadFile) -> str:
-    """Read an upload into a data URI, or say why it cannot be used."""
+async def _store_upload(job_id: str, upload: UploadFile) -> str:
+    """Put an upload in the job's directory, or say why it cannot be used.
+
+    Bytes, not an image: nothing here opens the file, so the web tier still
+    never runs an attacker-supplied decoder. It is strictly less work than
+    the base64 encode this replaced, and the picture no longer travels
+    through Redis at all.
+    """
     settings = get_settings()
     content_type = upload.content_type or ''
     if not content_type.startswith('image/'):
@@ -904,22 +907,31 @@ async def _upload_payload(upload: UploadFile) -> str:
         )
     if not payload:
         raise ValueError('That file is empty.')
-    return f'data:{content_type};base64,{base64.b64encode(payload).decode()}'
+    # The extension comes from an allowlist, never from the client's own
+    # string: these files are served straight off disk.
+    name = f'source.{blobs.extension_for(content_type)}'
+    return await run_in_threadpool(blobs.put, job_id, name, payload)
 
 
 def _enqueue(payload: dict, kind: SourceKind, label: str,
-             thumb: str | None = None, client: str | None = None) -> Article:
+             thumb: str | None = None, client: str | None = None,
+             job_id: str | None = None) -> Article:
     """Validate, queue, and hand back the card for whatever state it is in."""
-    try:
-        request = ImageRequest.model_validate(payload)
-    except ValidationError as exc:
-        return rejected_card(label, kind, _first_message(exc))
+    if payload.get('url') is not None:
+        try:
+            request = ImageRequest.model_validate(
+                {'url': payload['url'], 'base64': None})
+        except ValidationError as exc:
+            return rejected_card(label, kind, _first_message(exc))
+        payload = {'url': str(request.url), 'blob': None}
+    elif not payload.get('blob'):
+        return rejected_card(label, kind, NOTHING_SUBMITTED)
     try:
         throttle.admit(client)
     except throttle.Throttled as exc:
         return rejected_card(label, kind, str(exc))
     job_id, _ = jobs.enqueue(
-        request.as_payload(),
+        payload, job_id=job_id,
         meta={'kind': str(kind), 'label': label, 'thumb': thumb},
     )
     return card_for(job_id)
@@ -982,20 +994,28 @@ def create_ui():
         if name not in SAMPLES:
             return rejected_card(name, SourceKind.SAMPLE, NOTHING_SUBMITTED)
         sample = SAMPLES[name]
+        job_id = jobs.new_id()
+        reference = blobs.put(job_id, f'source.{Path(sample.filename).suffix[1:]}',
+                              sample_source(name))
         # Samples do not reset the form: the buttons sit outside it.
         return _enqueue(
-            {'url': None, 'base64': sample_data_uri(name)},
-            SourceKind.SAMPLE, sample.filename, tile_url(sample), client,
+            {'url': None, 'blob': reference},
+            SourceKind.SAMPLE, sample.filename, tile_url(sample), client, job_id,
         )
 
     async def _submit_file(upload: UploadFile, client: str | None):
         label = upload.filename or 'Uploaded image'
+        job_id = jobs.new_id()
         try:
-            payload = await _upload_payload(upload)
+            reference = await _store_upload(job_id, upload)
         except ValueError as exc:
             return rejected_card(label, SourceKind.UPLOAD, str(exc))
+        except OSError:
+            logger.exception('could not store an upload for job %s', job_id)
+            return rejected_card(label, SourceKind.UPLOAD, 'Could not store that image.')
         return await run_in_threadpool(
-            _enqueue, {'url': None, 'base64': payload}, SourceKind.UPLOAD, label, None, client)
+            _enqueue, {'url': None, 'blob': reference},
+            SourceKind.UPLOAD, label, None, client, job_id)
 
     def _submit_url(url: str, client: str | None):
         """A bad URL answers in the hint, not with a card: no job was created,
