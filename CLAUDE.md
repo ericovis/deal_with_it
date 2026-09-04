@@ -49,7 +49,8 @@ src/models.py       Pydantic v2 request/response schemas. Shape only
 src/config.py       Settings, all DWI_-prefixed env vars
 src/errors.py       DealWithItError: failures whose message is safe to show
 src/processors/     BaseProcessor + DealWithItProcessor
-src/static/         style.css, the sample photos, glasses.svg
+src/static/         style.css, the sample photos, glasses.svg, the app
+                    icons and the web manifest
 tests/              Hermetic: no network, no Redis server, no fixtures on disk
 ```
 
@@ -96,6 +97,25 @@ Invariants worth knowing before editing:
   `tests/test_processor.py`. YuNet finds every human face in the samples at
   `SCORE_THRESHOLD` and never a cat, but it does find dogs (three poker
   players, Nelson), and the captions say so.
+- **The phone layout has no server side.** Below 600px the page has two
+  states and the CSS reads which one from the list itself: with nothing in
+  `#queue` the input pane is the page, and `body:has(#queue article)` moves
+  it into a fixed bar (`nav.addbar` in `src/ui.py`). The URL and Samples
+  panels over that bar are three radios (`#show-url`, `#show-samples`,
+  `#show-none`); the swipe-to-remove gesture is a scroll-snap strip of
+  `.card-body` and `.card-remove`; the copy that differs between a desktop
+  and a phone ships twice, as `.desktop-only` / `.mobile-only`. No endpoint,
+  no cookie and no script knows about any of it.
+- **`#form` is never `display: none`.** The camera and library file inputs
+  live in it, and a label cannot open a picker for an input with no box, so
+  results mode hides the form's children instead.
+- **The docs contents list is a `<details>`.** Above 860px it is forced open
+  with `::details-content { content-visibility: visible }` and the summary is
+  made inert, so the sidebar is the label and links it always was.
+- **`head_tags` takes the theme.** With no cookie it emits both `theme-color`
+  values behind `prefers-color-scheme`; with one it emits a single
+  unconditional tag, so the browser chrome follows the chosen theme. The
+  colours are the band's, because a translucent status bar sits on the band.
 - The session list is DOM-only. Reloading loses it, on purpose.
 
 ## Running it

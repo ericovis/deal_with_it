@@ -229,6 +229,99 @@ class TestClearingUp:
         expect(page.locator('.clear')).to_be_visible()
 
 
+class TestOnAPhone:
+    """The whole phone layout, at 390x844.
+
+    None of it has a route or a line of script: which state the page is in is
+    `:has(#queue article)`, and the two panels over the bar are radios.
+    """
+
+    @pytest.fixture(autouse=True)
+    def phone(self, page: Page):
+        page.set_viewport_size({'width': 390, 'height': 844})
+
+    def test_the_input_is_the_whole_page_until_there_is_a_result(self, page: Page):
+        page.goto('/')
+        expect(page.locator('.lede')).to_be_visible()
+        expect(page.locator('.pick-row')).to_be_visible()
+        expect(page.locator('.addbar')).to_be_hidden()
+
+    def test_a_result_takes_the_screen_and_the_input_moves_to_the_bar(self, page: Page):
+        run(page, 'me')
+        expect(page.locator('.lede')).to_be_hidden()
+        expect(page.locator('.dropzone')).to_be_hidden()
+        expect(page.locator('.addbar')).to_be_visible()
+
+    def test_clearing_the_list_gives_the_input_back(self, page: Page):
+        run(page, 'me')
+        page.locator('.clear').click()
+        expect(page.locator('.addbar')).to_be_hidden()
+        expect(page.locator('.lede')).to_be_visible()
+
+    def test_the_url_tab_brings_the_field_back_and_a_second_tap_closes_it(self, page: Page):
+        run(page, 'me')
+        expect(page.locator('#url')).to_be_hidden()
+        page.locator('.addbar-item.show-url .open').click()
+        expect(page.locator('#url')).to_be_visible()
+        page.locator('.addbar-item.show-url .close').click()
+        expect(page.locator('#url')).to_be_hidden()
+
+    def test_the_samples_tab_brings_the_samples_back(self, page: Page):
+        run(page, 'me')
+        expect(page.locator('.sample-strip')).to_be_hidden()
+        page.locator('.addbar-item.show-samples .open').click()
+        expect(page.locator('.sample-strip')).to_be_visible()
+        expect(page.locator('#url')).to_be_hidden(), 'one panel at a time'
+
+    def test_a_picture_from_the_camera_becomes_a_card(self, page: Page, tmp_path):
+        """The camera input posts for itself, so a phone gets one card and
+        the typed URL beside it is left alone."""
+        picture = tmp_path / 'snap.png'
+        picture.write_bytes(make_png())
+        page.goto('/')
+        page.locator('#url').fill('https://example.test/later.png')
+        page.locator('#camera').set_input_files(picture)
+        expect(page.locator('#queue article')).to_have_count(1, timeout=TIMEOUT)
+        expect(first_card(page).locator('.card-id b')).to_have_text('snap.png')
+        expect(page.locator('#url')).to_have_value('https://example.test/later.png')
+
+    def test_a_card_swipes_left_onto_a_remove_panel(self, page: Page):
+        card = run(page, 'me')
+        remove = card.locator('.card-remove')
+        expect(remove).not_to_be_in_viewport()
+        # The card is the scroll container, so it must have stopped growing
+        # before it is scrolled: a re-layout puts a snap container back on
+        # the panel it was showing, which is the card body.
+        card.locator('.frame img.after').evaluate('img => img.decode()')
+        card.evaluate('el => el.scrollTo({left: el.scrollWidth, behavior: "instant"})')
+        expect(remove).to_be_in_viewport()
+        remove.locator('button').click()
+        expect(page.locator('#queue article')).to_have_count(0)
+
+    def test_tapping_the_picture_opens_it_full_size(self, page: Page):
+        card = run(page, 'me')
+        card.locator('.frame-tap').click()
+        expect(card.locator('.lightbox-close')).to_be_visible()
+        expect(card.locator('.zoom')).to_be_visible()
+
+    def test_the_full_size_view_zooms_and_fits_again(self, page: Page):
+        card = run(page, 'me')
+        card.locator('.frame-tap').click()
+        picture = card.locator('.frame img.after')
+        fitted = picture.bounding_box()['width']
+        card.locator('.zoom').click()
+        expect(card.locator('.zoom .out')).to_have_text('Fit')
+        assert picture.bounding_box()['width'] > fitted
+        card.locator('.zoom').click()
+        assert picture.bounding_box()['width'] == fitted
+
+    def test_the_contents_list_on_the_docs_page_starts_closed(self, page: Page):
+        page.goto('/docs')
+        expect(page.locator('.toc a').first).to_be_hidden()
+        page.locator('.toc summary').click()
+        expect(page.locator('.toc a').first).to_be_visible()
+
+
 class TestTheTheme:
     #: --bg in each palette, as a browser reports it.
     LIGHT = 'rgb(249, 248, 246)'

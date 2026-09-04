@@ -24,6 +24,7 @@ from fasthtml.common import (
     B,
     Button,
     Code,
+    Details,
     Div,
     Em,
     Figcaption,
@@ -43,6 +44,7 @@ from fasthtml.common import (
     Progress,
     Section,
     Span,
+    Summary,
     Title,
     UploadFile,
     cookie,
@@ -67,6 +69,10 @@ IMG_DIR = Path(__file__).resolve().parent / 'static' / 'img'
 THEME_COOKIE = 'dwi_theme'
 #: A year. The cookie carries a preference, not a session.
 THEME_MAX_AGE = 60 * 60 * 24 * 365
+
+#: The band colour in each palette. The band is what a translucent status
+#: bar sits on, so it is also what ``theme-color`` reports.
+BAND_COLOURS = {'light': '#24261F', 'dark': '#0f100c'}
 
 EXPIRED = 'That job has expired. Try again?'
 NOTHING_SUBMITTED = 'No image or URL was provided!'
@@ -160,14 +166,41 @@ def _example_url() -> str:
 # --------------------------------------------------------------- the shell
 
 
-def head_tags(title: str) -> tuple:
+def _theme_colour(theme: str | None) -> tuple:
+    """``theme-color``: once when the theme is known, twice when it is not.
+
+    With no cookie the OS decides, so both colours go out behind a ``media``
+    query. With one, a single unconditional tag makes the browser chrome
+    follow the chosen theme instead of the OS.
+    """
+    if theme in BAND_COLOURS:
+        return (Meta(name='theme-color', content=BAND_COLOURS[theme]),)
+    return (
+        Meta(name='theme-color', content=BAND_COLOURS['light'],
+             media='(prefers-color-scheme: light)'),
+        Meta(name='theme-color', content=BAND_COLOURS['dark'],
+             media='(prefers-color-scheme: dark)'),
+    )
+
+
+def head_tags(title: str, theme: str | None) -> tuple:
     """Metadata that belongs in <head>. FastHTML hoists these out of a page."""
     card = _absolute('/static/img/deal_with_me.png')
     return (
         Title(title),
-        Meta(name='viewport', content='width=device-width,initial-scale=1'),
+        # viewport-fit=cover lets the band paint under a phone's status bar;
+        # the safe-area insets in style.css keep its contents clear of it.
+        Meta(name='viewport',
+             content='width=device-width,initial-scale=1,viewport-fit=cover'),
         Meta(name='author', content='Eric Magalhães'),
         Meta(name='description', content='A Python API for creating "Deal With It"-like Images'),
+        Meta(name='application-name', content='Deal With It!'),
+        Meta(name='apple-mobile-web-app-title', content='Deal With It!'),
+        Meta(name='apple-mobile-web-app-capable', content='yes'),
+        Meta(name='mobile-web-app-capable', content='yes'),
+        Meta(name='apple-mobile-web-app-status-bar-style', content='black-translucent'),
+        Meta(name='color-scheme', content='light dark'),
+        *_theme_colour(theme),
         Meta(name='twitter:card', content='summary_large_image'),
         Meta(name='twitter:creator', content='@ericovis'),
         Meta(name='twitter:title', content='Deal with it!'),
@@ -180,6 +213,11 @@ def head_tags(title: str) -> tuple:
         Meta(property='og:description',
              content='A Python API for creating "Deal With It"-like Images.'),
         Link(rel='icon', href='/static/img/favicon.png', type='image/png', sizes='16x16'),
+        Link(rel='icon', href='/static/img/icons/favicon-64.png', type='image/png',
+             sizes='64x64'),
+        Link(rel='apple-touch-icon', href='/static/img/icons/apple-touch-icon.png',
+             sizes='180x180'),
+        Link(rel='manifest', href='/static/manifest.webmanifest'),
         Link(rel='preconnect', href='https://fonts.googleapis.com'),
         Link(rel='stylesheet', href='https://fonts.googleapis.com/css2?'
                                     'family=Manrope:wght@400;500;600;700;800&'
@@ -232,9 +270,15 @@ def site_header(active: str, theme: str | None, reachable: bool) -> Header:
             A(Img(src='/static/img/glasses.svg', alt=''), Span('Deal With It!'),
               href='/', cls='brand'),
             Nav(
-                nav_link('App', '/', 'app'),
-                nav_link('Docs', '/docs', 'docs'),
-                nav_link('GitHub ↗', REPO),
+                # Wrapped so the mobile grid can place the three of them as
+                # one cell. `display: contents` above 600px, so the desktop
+                # band is unchanged.
+                Div(
+                    nav_link('App', '/', 'app'),
+                    nav_link('Docs', '/docs', 'docs'),
+                    nav_link('GitHub ↗', REPO),
+                    cls='nav-links',
+                ),
                 status_pill(reachable),
                 theme_switch(theme),
                 cls='nav',
@@ -305,12 +349,34 @@ def upload_form(replace: bool = False) -> Form:
         Input(type='file', id='files', name='image', accept='image/*', multiple=True,
               cls='visually-hidden', hx_encoding='multipart/form-data',
               **{'hx-on:change': UPLOAD_ONE_BY_ONE}),
+        # The camera. `capture` makes a phone open it instead of the picker,
+        # and it takes one picture at a time, so it posts for itself rather
+        # than going through UPLOAD_ONE_BY_ONE. A desktop browser ignores
+        # `capture` and the input is never reached: nothing points at it
+        # above 600px.
+        Input(type='file', id='camera', name='image', accept='image/*',
+              capture='environment', cls='visually-hidden',
+              hx_post='/submit', hx_trigger='change',
+              hx_encoding='multipart/form-data',
+              hx_target='#queue', hx_swap='afterbegin'),
         Label(
             Img(src='/static/img/glasses.svg', alt=''),
-            Span('Drop pictures here', cls='title'),
-            Span('or ', Em('browse your computer'), cls='sub'),
+            # Two sets of words for one card: dropping is a desktop idea and
+            # a phone has no computer to browse. Swapped by media query
+            # rather than by sniffing the browser.
+            Span('Drop pictures here', cls='title desktop-only'),
+            Span('Add a picture', cls='title mobile-only'),
+            Span('or ', Em('browse your computer'), cls='sub desktop-only'),
+            Span('Take one now, or pick from your library', cls='sub mobile-only'),
             Span('PNG or JPEG, up to 10 MB each. Several at once is fine.', cls='limits'),
             fr='files', cls='dropzone',
+        ),
+        # After the dropzone, not inside it: a label cannot nest in a label.
+        # The CSS joins the two into one card.
+        Div(
+            Label('Take a photo', fr='camera', cls='btn camera'),
+            Label('Choose from library', fr='files', cls='btn ghost'),
+            cls='pick-row mobile-only',
         ),
         Div('or a URL', cls='divider'),
         Div(
@@ -362,8 +428,9 @@ def app_pane() -> Aside:
         ),
         upload_form(),
         Div(
-            P('Or try a sample', cls='samples-label'),
+            P(Span('Or ', cls='lead-in'), 'try a sample', cls='samples-label'),
             Div(*(sample_tile(name) for name in SAMPLES), cls='samples'),
+            cls='sample-strip',
         ),
         cls='pane',
     )
@@ -378,7 +445,8 @@ def session_section() -> Section:
             cls='session-head',
         ),
         P('Results live in this tab only. Reloading loses them, so download '
-          'anything you want to keep.', cls='note'),
+          'anything you want to keep.',
+          Span(' Swipe a card left to remove it.', cls='mobile-only'), cls='note'),
         Div(id='queue'),
         # After #queue: the CSS that reveals it is a sibling combinator.
         Div('Nothing here yet. Drop a picture, paste a URL, or try a sample.', cls='empty'),
@@ -386,11 +454,42 @@ def session_section() -> Section:
     )
 
 
+def addbar() -> Nav:
+    """The bar a phone gets once there is something in the list.
+
+    Camera and Library are labels for the form's two file inputs. URL and
+    Samples are labels for radios: checking one is what the CSS re-lays the
+    URL row or the sample grid over the bar for, and #show-none is how a
+    second tap on the open one closes it again.
+    """
+    def panel(text: str, target: str) -> Div:
+        return Div(
+            Label(text, fr=target, cls='open'),
+            Label(text, fr='show-none', cls='close'),
+            cls=f'addbar-item {target}',
+        )
+
+    return Nav(
+        Input(type='radio', id='show-none', name='addbar', checked=True,
+              cls='visually-hidden', aria_label='Close the panel'),
+        Input(type='radio', id='show-url', name='addbar', cls='visually-hidden',
+              aria_label='Submit a URL'),
+        Input(type='radio', id='show-samples', name='addbar', cls='visually-hidden',
+              aria_label='Show the samples'),
+        Label('Camera', fr='camera', cls='addbar-item'),
+        Label('Library', fr='files', cls='addbar-item'),
+        panel('URL', 'show-url'),
+        panel('Samples', 'show-samples'),
+        cls='addbar',
+    )
+
+
 def page(theme: str | None, reachable: bool) -> tuple:
     return (
-        *head_tags('Deal With It!'),
+        *head_tags('Deal With It!', theme),
         site_header('app', theme, reachable),
         Main(app_pane(), session_section(), cls='container layout'),
+        addbar(),
         site_footer('app'),
     )
 
@@ -438,23 +537,35 @@ def _result_view(job_id: str, image: str, before: str | None) -> Div:
     ``<dialog>`` cannot open without script.
     """
     toggle = f'full-{job_id}'
+    zoom = f'zoom-{job_id}'
     extension = 'jpg' if image.startswith('data:image/jpeg') else 'png'
     footer = [
         Span(cls='spacer'),
         Input(type='checkbox', id=toggle, cls='full-toggle visually-hidden'),
-        Label('View full size', fr=toggle, cls='open-full'),
+        Label(Span('View full size', cls='desktop-only'),
+              Span('Full size', cls='mobile-only'), fr=toggle, cls='open-full'),
+        # Only ever shown inside the overlay, and only on a phone: the frame
+        # scrolled at 200% for a picture that fitting to the screen has made
+        # too small to read. Native pinch still works either way.
+        Input(type='checkbox', id=zoom, cls='zoom-toggle visually-hidden'),
+        Label(Span('Zoom', cls='in'), Span('Fit', cls='out'), fr=zoom, cls='zoom'),
         A(f'Download {extension.upper()}', href=image,
           download=f'deal-with-it-{job_id[:8]}.{extension}', cls='download'),
     ]
+    # Tapping the picture opens it, which is what a phone expects. Sized over
+    # the frame rather than wrapping it, because the frame is also the
+    # overlay: display:none there, so it cannot swallow the pinch.
+    tap = Label(fr=toggle, cls='frame-tap', aria_label='View full size')
 
     if before is None:
-        frame = Div(Img(src=image, alt='Result'), cls='frame')
+        frame = Div(Img(src=image, alt='Result'), tap, cls='frame')
         controls = footer
     else:
         name = f'view-{job_id}'
         frame = Div(
             Img(src=before, alt='The picture as submitted', cls='before'),
             Img(src=image, alt='Result', cls='after'),
+            tap,
             cls='frame',
         )
         controls = [
@@ -472,6 +583,7 @@ def _result_view(job_id: str, image: str, before: str | None) -> Div:
         frame,
         # Clicking the space around the image closes it.
         Label(fr=toggle, cls='backdrop', aria_label='Close the full-size view'),
+        Span('pinch or tap Zoom', cls='zoom-hint'),
         Label('×', fr=toggle, cls='lightbox-close', title='Close',
               aria_label='Close the full-size view'),
         Div(*controls, cls='card-foot'),
@@ -517,15 +629,26 @@ def card(job_id: str, result: JobResult | None, source: JobSource,
 
     return Article(
         Div(
-            Img(src=thumb, alt='', cls='thumb') if thumb else Div(cls='thumb'),
-            Div(B(source.label or ('Unknown job' if expired else 'Picture')),
-                Span('' if expired else _subtitle(result, source)), cls='card-id'),
-            Span(label, cls=chip),
-            Button('×', type='button', cls='remove', title='Remove', aria_label='Remove',
-                   hx_get='/empty', hx_target='closest article', hx_swap='delete'),
-            cls='card-head',
+            Div(
+                Img(src=thumb, alt='', cls='thumb') if thumb else Div(cls='thumb'),
+                Div(B(source.label or ('Unknown job' if expired else 'Picture')),
+                    Span('' if expired else _subtitle(result, source)), cls='card-id'),
+                Span(label, cls=chip),
+                Button('×', type='button', cls='remove', title='Remove', aria_label='Remove',
+                       hx_get='/empty', hx_target='closest article', hx_swap='delete'),
+                cls='card-head',
+            ),
+            *body,
+            cls='card-body',
         ),
-        *body,
+        # Swiping left on a phone snaps this into view; the card is a
+        # scroll-snap strip of the two. `display: none` above 600px, where
+        # the × in the head is the only way out.
+        Div(
+            Button('Remove', type='button', cls='swipe-remove',
+                   hx_get='/empty', hx_target='closest article', hx_swap='delete'),
+            cls='card-remove',
+        ),
         id=dom_id or f'job-{job_id}',
         cls='card',
         hx_get=f'/jobs/{job_id}' if polls else None,
@@ -584,11 +707,15 @@ def stage(percent: str, label: str, last: bool = False) -> Div:
 
 def docs_page(theme: str | None, reachable: bool) -> tuple:
     return (
-        *head_tags('How it works | Deal With It'),
+        *head_tags('How it works | Deal With It', theme),
         site_header('docs', theme, reachable),
         Main(
-            Nav(
-                Span('On this page', cls='label'),
+            # <details> rather than a nav: on a phone the contents fold into
+            # a card that opens on tap, with no script. Above 860px the CSS
+            # forces the content open and the summary reads as the label it
+            # used to be.
+            Details(
+                Summary(Span('On this page', cls='label')),
                 A('How it works', href='#how'),
                 A('API', href='#api'),
                 A('Submit an image', href='#submit', cls='sub'),
@@ -608,7 +735,9 @@ def docs_page(theme: str | None, reachable: bool) -> tuple:
                         figure('/static/img/me.jpg', 'Original picture', 'Turns this'),
                         figure('/static/img/deal_with_me.png', 'Processed picture',
                                'Into this'),
-                        cls='figures',
+                        # Two portraits still fit side by side on a phone;
+                        # the group photos below would be a stripe.
+                        cls='figures portraits',
                     ),
                     Div(
                         figure('/static/img/multiple_people.jpg',

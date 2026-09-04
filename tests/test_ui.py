@@ -6,6 +6,7 @@ import pytest
 
 from src import jobs
 from src.models import JobResult, JobSource, JobState, SourceKind
+from src.ui import THEME_COOKIE
 from tests import support
 from tests.conftest import make_png
 
@@ -38,6 +39,7 @@ class TestPage:
     @pytest.mark.parametrize('needle', [
         'id="queue"', 'class="dropzone"', 'id="files"', 'id="url"', 'id="url-hint"',
         'id="health"', 'id="theme"', 'id="theme-state"', 'class="empty"',
+        'id="camera"', 'class="addbar"', 'class="nav-links"',
     ])
     def test_the_furniture_is_all_there(self, client, needle):
         assert needle in client.get('/').text
@@ -123,6 +125,110 @@ class TestPage:
         assert client.get(path).status_code == 404
 
 
+class TestOnAPhone:
+    """The markup the phone layout is driven from.
+
+    All of it ships on every page: which half is seen is a media query, and
+    input mode versus results mode is `:has(#queue article)`. Nothing here
+    has a route or a line of script behind it.
+    """
+
+    def test_the_camera_is_its_own_input(self, client):
+        """A phone opens the camera for `capture`; a desktop ignores the
+        attribute, and nothing above 600px points at the input anyway."""
+        body = client.get('/').text
+        field = re.search(r'<input type="file"[^>]*id="camera"[^>]*>', body).group()
+        assert 'capture="environment"' in field
+        assert 'hx-post="/submit"' in field, 'one picture at a time posts for itself'
+        assert 'hx-target="#queue"' in field
+
+    def test_both_ways_of_adding_a_picture_are_offered(self, client):
+        body = client.get('/').text
+        assert '<label for="camera" class="btn camera">Take a photo</label>' in body
+        assert '<label for="files" class="btn ghost">Choose from library</label>' in body
+
+    def test_the_dropzone_says_it_twice(self, client):
+        """Dropping is a desktop idea and a phone has no computer to browse."""
+        body = client.get('/').text
+        assert '<span class="title desktop-only">Drop pictures here</span>' in body
+        assert '<span class="title mobile-only">Add a picture</span>' in body
+
+    def test_the_bar_reaches_both_file_inputs_and_both_panels(self, client):
+        body = client.get('/').text
+        bar = re.search(r'<nav class="addbar">.*?</nav>', body, re.S).group()
+        for target in ('camera', 'files', 'show-url', 'show-samples'):
+            assert f'for="{target}"' in bar
+        assert bar.count('for="show-none"') == 2, 'a second tap closes what is open'
+
+    def test_the_panels_are_radios_so_only_one_can_be_open(self, client):
+        body = client.get('/').text
+        radios = re.findall(r'<input type="radio" name="addbar"[^>]*>', body)
+        assert len(radios) == 3
+        assert sum('checked' in radio for radio in radios) == 1
+        assert 'id="show-none"' in radios[0], 'nothing is open to start with'
+
+    def test_a_card_carries_the_panel_a_swipe_reveals(self, client, hx):
+        body = submit(client, hx, url='https://example.test/a.png').text
+        assert 'class="card-body"' in body
+        assert 'class="card-remove"' in body
+        remove = re.search(r'<button[^>]*class="swipe-remove"[^>]*>', body).group()
+        assert 'hx-get="/empty"' in remove
+        assert 'hx-target="closest article"' in remove
+        assert 'hx-swap="delete"' in remove
+
+    def test_the_full_size_view_can_be_zoomed(self, client, hx):
+        job_id = job_ids(submit(client, hx, url='https://example.test/a.png').text)[0]
+        body = client.get(f'/jobs/{job_id}', headers=hx).text
+        assert f'id="zoom-{job_id}"' in body
+        assert f'for="zoom-{job_id}"' in body
+        assert 'class="zoom-hint"' in body
+
+    def test_the_note_mentions_the_swipe_only_where_it_works(self, client):
+        assert '<span class="mobile-only"> Swipe a card left to remove it.</span>' in (
+            client.get('/').text
+        )
+
+
+class TestInstalling:
+    """The head metadata that lets the page live on a home screen."""
+
+    def test_the_manifest_is_linked_and_served(self, client):
+        assert 'rel="manifest" href="/static/manifest.webmanifest"' in client.get('/').text
+        response = client.get('/static/manifest.webmanifest')
+        assert response.status_code == 200
+        assert response.headers['content-type'].startswith('application/manifest+json')
+        assert response.json()['name'] == 'Deal With It!'
+
+    def test_every_icon_the_manifest_names_is_there(self, client):
+        listed = client.get('/static/manifest.webmanifest').json()['icons']
+        for icon in listed:
+            assert client.get(icon['src']).status_code == 200
+        assert any(icon.get('purpose') == 'maskable' for icon in listed)
+
+    def test_a_home_screen_gets_an_icon_of_its_own(self, client):
+        body = client.get('/').text
+        assert 'rel="apple-touch-icon" href="/static/img/icons/apple-touch-icon.png"' in body
+        assert client.get('/static/img/icons/apple-touch-icon.png').status_code == 200
+
+    def test_the_page_reaches_under_the_status_bar(self, client):
+        body = client.get('/').text
+        assert 'viewport-fit=cover' in body
+        assert 'content="black-translucent"' in body
+
+    def test_the_browser_chrome_follows_the_os_until_a_theme_is_chosen(self, client):
+        body = client.get('/').text
+        assert 'content="#24261F" media="(prefers-color-scheme: light)"' in body
+        assert 'content="#0f100c" media="(prefers-color-scheme: dark)"' in body
+
+    @pytest.mark.parametrize('theme,colour', [('light', '#24261F'), ('dark', '#0f100c')])
+    def test_a_chosen_theme_pins_the_chrome_to_it(self, client, theme, colour):
+        """Otherwise the bar around a dark page would still be the light one."""
+        client.cookies.set(THEME_COOKIE, theme)
+        body = client.get('/').text
+        assert f'<meta name="theme-color" content="{colour}">' in body
+        assert 'prefers-color-scheme' not in body
+
+
 class TestDocsPage:
     def test_renders(self, client):
         response = client.get('/docs')
@@ -142,6 +248,12 @@ class TestDocsPage:
     def test_keeps_the_attribution_for_the_group_photo(self, client):
         """It is public domain, not unattributed."""
         assert 'NASA' in client.get('/docs').text
+
+    def test_the_contents_list_folds_up_on_a_phone(self, client):
+        """A native disclosure, forced open by CSS above 860px."""
+        body = client.get('/docs').text
+        assert '<details class="toc">' in body
+        assert '<summary><span class="label">On this page</span></summary>' in body
 
     def test_both_pages_share_the_header(self, client):
         for path in ('/', '/docs'):
@@ -355,7 +467,9 @@ class TestCards:
         body = client.get(f'/jobs/{job_id}', headers=hx).text
         assert 'target="_blank"' not in body
         assert f'id="full-{job_id}"' in body
-        assert body.count(f'for="full-{job_id}"') == 3, 'open, backdrop and close'
+        assert body.count(f'for="full-{job_id}"') == 4, (
+            'open, the picture itself on a phone, the backdrop and close'
+        )
         assert 'class="lightbox-close"' in body
 
     def test_the_overlay_reuses_the_one_copy_of_the_image(self, client, hx):

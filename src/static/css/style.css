@@ -193,6 +193,13 @@ button {
     white-space: nowrap;
 }
 
+/* One page in two shapes. The copy and the controls that only make sense on
+   a phone are in the markup either way and a media query picks between them:
+   no user-agent sniffing, and both halves are there for htmx to find. */
+.mobile-only {
+    display: none;
+}
+
 /* ---------------------------------------------------------------- header */
 
 .band {
@@ -239,6 +246,12 @@ button {
     font-size: 14px;
     font-weight: 600;
     min-width: 0;
+}
+
+/* One cell of the two-row grid the band becomes on a phone. Above 600px it
+   is not a box at all, so the desktop band is exactly as it was. */
+.nav-links {
+    display: contents;
 }
 
 .nav a {
@@ -675,6 +688,17 @@ body:has(#queue article) .clear {
 
 /* ----------------------------------------------------------------- cards */
 
+/* On a desktop a card is one box: the body dissolves into it and the swipe
+   panel is not rendered. Both become real at 600px, where the card turns
+   into a horizontal scroll-snap strip of the two. */
+.card-body {
+    display: contents;
+}
+
+.card-remove {
+    display: none;
+}
+
 .card {
     background: var(--surface);
     border: 1px solid var(--border);
@@ -805,11 +829,22 @@ body:has(#queue article) .clear {
 }
 
 .frame {
+    position: relative;
     background: var(--surface-2);
     border-radius: 10px;
     overflow: hidden;
     display: flex;
     justify-content: center;
+}
+
+/* Tapping the picture opens the full-size view. A phone only, and over the
+   frame rather than around it: the frame is also the overlay, and a label
+   wrapping it would swallow every touch once it was open. */
+.frame-tap {
+    display: none;
+    position: absolute;
+    inset: 0;
+    cursor: zoom-in;
 }
 
 .frame img {
@@ -898,6 +933,22 @@ body:has(#queue article) .clear {
     outline: 2px solid var(--accent);
     outline-offset: 3px;
     border-radius: 3px;
+}
+
+/* Both only ever appear inside the overlay, on a phone. */
+.zoom,
+.zoom-hint {
+    display: none;
+}
+
+/* The label says what the tap will do, so it is the other word that shows. */
+.zoom .out,
+.result:has(.zoom-toggle:checked) .zoom .in {
+    display: none;
+}
+
+.result:has(.zoom-toggle:checked) .zoom .out {
+    display: inline;
 }
 
 .download {
@@ -1110,10 +1161,37 @@ progress:indeterminate::-webkit-progress-bar {
     text-transform: uppercase;
     letter-spacing: .1em;
     color: var(--muted);
-    margin-bottom: 6px;
 }
 
+.toc > summary {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    cursor: pointer;
+    /* Both halves of dropping the native triangle: the marker box in Blink
+       and WebKit, the list-item display everywhere else. */
+    list-style: none;
+}
+
+.toc > summary::-webkit-details-marker {
+    display: none;
+}
+
+.toc > summary::after {
+    content: "▾";
+    color: var(--muted);
+    font-size: 11px;
+}
+
+.toc[open] > summary::after {
+    content: "▴";
+}
+
+/* Blockified by the flex column above 860px, but inside the disclosure the
+   links are slotted into a block, where an <a> would run into the next. */
 .toc a {
+    display: block;
     color: var(--text);
     text-decoration: none;
     padding: 4px 0;
@@ -1378,6 +1456,12 @@ code {
     color: var(--text);
 }
 
+/* The bar a phone gets once the list has something in it. Nothing above
+   600px, where the form is on the page and needs no shortcut to it. */
+.addbar {
+    display: none;
+}
+
 /* ---------------------------------------------------------------- footer */
 
 .site-footer {
@@ -1408,15 +1492,60 @@ code {
 
 /* ------------------------------------------------------------ responsive */
 
+/* Above 860px the contents list is not a disclosure at all: the content box
+   is forced open and the summary is inert, so it reads as the label and the
+   links it was before it became a <details>. */
+@media (min-width: 861px) {
+    .toc > summary {
+        margin-bottom: 6px;
+        pointer-events: none;
+    }
+
+    .toc > summary::after {
+        content: none;
+    }
+
+    .toc::details-content {
+        content-visibility: visible;
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+    }
+}
+
 @media (max-width: 860px) {
     .docs {
         flex-direction: column;
         gap: 32px;
     }
 
+    /* A card that opens on tap. Native disclosure, so no script and no
+       state of our own to keep. */
     .toc {
         position: static;
         width: 100%;
+        gap: 0;
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: 12px;
+    }
+
+    .toc > summary {
+        height: 44px;
+        padding: 0 14px;
+    }
+
+    .toc a {
+        padding: 10px 14px;
+    }
+
+    .toc a.sub {
+        padding: 8px 14px 8px 28px;
+    }
+
+    .toc .try-it {
+        height: 40px;
+        margin: 8px 14px 14px;
     }
 }
 
@@ -1447,5 +1576,496 @@ code {
 
     .doc h1 {
         font-size: 28px;
+    }
+}
+
+/* -------------------------------------------------------------- a phone */
+
+/* Everything below here is the phone layout. Two states, and the CSS reads
+   which one it is from the list itself: with nothing in #queue the pane is
+   the page, and with a card in it the results are the page and the input
+   moves to a bar along the bottom. No endpoint and no script knows about
+   any of this. */
+@media (max-width: 600px) {
+    body {
+        /* The bar: 6px above 50px of items above 34px of chin. */
+        --addbar-h: calc(90px + env(safe-area-inset-bottom));
+    }
+
+    .container {
+        padding: 0 20px;
+    }
+
+    .desktop-only {
+        display: none;
+    }
+
+    .mobile-only {
+        display: initial;
+    }
+
+    /* ----- the band ----- */
+
+    /* Two rows: the brand and the switch, then the links and the pill. The
+       safe-area padding goes here rather than on body because the band is
+       dark in both themes and the status bar is translucent over it. */
+    .band .container {
+        display: grid;
+        grid-template-columns: 1fr auto;
+        column-gap: 12px;
+        row-gap: 0;
+        height: auto;
+        padding: env(safe-area-inset-top) 20px 6px;
+    }
+
+    .nav {
+        display: contents;
+    }
+
+    .brand {
+        grid-area: 1 / 1;
+        height: 48px;
+    }
+
+    .brand img {
+        width: 40px;
+    }
+
+    .brand span {
+        font-size: 15px;
+    }
+
+    .switch-wrap {
+        grid-area: 1 / 2;
+        height: 48px;
+        justify-self: end;
+    }
+
+    .nav-links {
+        grid-area: 2 / 1;
+        display: flex;
+        align-items: center;
+        gap: 20px;
+        height: 38px;
+    }
+
+    .pill {
+        grid-area: 2 / 2;
+        justify-self: end;
+        font-size: 11px;
+        padding: 4px 9px;
+    }
+
+    .pill::before {
+        width: 7px;
+        height: 7px;
+    }
+
+    /* ----- input mode ----- */
+
+    /* Both columns are full width here, so the layout is two flex lines --
+       and a wrapped flex container stretches its lines over any spare
+       height, which on a short page pushes the second one down the screen. */
+    .layout {
+        align-content: flex-start;
+        gap: 18px;
+        padding: 22px 20px 36px;
+    }
+
+    .lede h1 {
+        font-size: 24px;
+    }
+
+    /* Nothing to show until there is something in it, and a phone has no
+       room to say so twice. */
+    body:not(:has(#queue article)) .session {
+        display: none;
+    }
+
+    /* The dropzone and the two buttons under it read as one card: the
+       buttons cannot go inside, because a label cannot nest in a label. */
+    .dropzone {
+        min-height: 0;
+        padding: 22px 18px 18px;
+        border-bottom: 0;
+        border-bottom-left-radius: 0;
+        border-bottom-right-radius: 0;
+    }
+
+    .pick-row {
+        display: flex;
+        gap: 8px;
+        padding: 0 18px 18px;
+        border: 1.5px dashed var(--border-strong);
+        border-top: 0;
+        border-radius: 0 0 14px 14px;
+        background: var(--surface);
+    }
+
+    .pick-row .btn {
+        flex: 1;
+        /* Or the longer label would take more than half the row. */
+        min-width: 0;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        padding: 0 10px;
+        cursor: pointer;
+    }
+
+    .pick-row .ghost {
+        background: var(--surface);
+        border: 1px solid var(--border-strong);
+        color: var(--text);
+    }
+
+    .pick-row .ghost:hover {
+        border-color: var(--accent);
+        background: var(--surface);
+    }
+
+    /* ----- results mode ----- */
+
+    body:has(#queue article) .layout {
+        gap: 0;
+        padding: 18px 20px 28px;
+    }
+
+    /* The pane stops being a column of its own: what is left of it is the
+       form, which keeps its boxes only to hold the two file inputs. */
+    body:has(#queue article) .pane {
+        display: contents;
+    }
+
+    body:has(#queue article) .lede,
+    body:has(#queue article) .dropzone,
+    body:has(#queue article) .pick-row,
+    body:has(#queue article) .divider,
+    body:has(#queue article) .sample-strip,
+    body:has(#queue article) #form > .url-row,
+    body:has(#queue article) #url-hint {
+        display: none;
+    }
+
+    /* #form itself is never display:none. The camera and library inputs are
+       in it, and a label cannot open a file picker for an input with no box. */
+    body:has(#queue article) #form {
+        gap: 0;
+    }
+
+    body:has(#queue article) .site-footer .container {
+        padding-bottom: calc(var(--addbar-h) + 12px);
+    }
+
+    /* ----- the bottom bar ----- */
+
+    body:has(#queue article) .addbar {
+        display: flex;
+        position: fixed;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        z-index: 40;
+        background: var(--band);
+        color: var(--band-fg);
+        padding: 6px 8px calc(34px + env(safe-area-inset-bottom));
+    }
+
+    .addbar-item {
+        flex: 1;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        height: 50px;
+        border-top: 2px solid transparent;
+        color: var(--band-muted);
+        font-size: 11px;
+        font-weight: 800;
+        letter-spacing: .08em;
+        text-transform: uppercase;
+        cursor: pointer;
+    }
+
+    /* Each panel item carries the same word twice: one label opens it, the
+       other checks #show-none, so a second tap closes what is open. */
+    .addbar-item .close {
+        display: none;
+    }
+
+    body:has(#show-url:checked) .addbar-item.show-url,
+    body:has(#show-samples:checked) .addbar-item.show-samples {
+        color: var(--band-fg);
+        border-top-color: var(--accent);
+    }
+
+    body:has(#show-url:checked) .addbar-item.show-url .open,
+    body:has(#show-samples:checked) .addbar-item.show-samples .open {
+        display: none;
+    }
+
+    body:has(#show-url:checked) .addbar-item.show-url .close,
+    body:has(#show-samples:checked) .addbar-item.show-samples .close {
+        display: block;
+    }
+
+    /* The URL panel is the page's own form, re-laid over the bar. A second
+       copy would be torn out by the out-of-band swap /submit answers with. */
+    body:has(#queue article):has(#show-url:checked) #form {
+        position: fixed;
+        left: 0;
+        right: 0;
+        bottom: var(--addbar-h);
+        z-index: 30;
+        gap: 8px;
+        padding: 12px 20px 14px;
+        background: var(--surface);
+        border-top: 1px solid var(--border);
+    }
+
+    body:has(#queue article):has(#show-url:checked) #form > .url-row {
+        display: flex;
+    }
+
+    body:has(#queue article):has(#show-url:checked) #url-hint {
+        display: block;
+    }
+
+    /* The sample grid, re-laid as a strip that scrolls sideways. */
+    body:has(#queue article):has(#show-samples:checked) .sample-strip {
+        display: block;
+        position: fixed;
+        left: 0;
+        right: 0;
+        bottom: var(--addbar-h);
+        z-index: 30;
+        padding: 12px 0 14px;
+        background: var(--surface);
+        border-top: 1px solid var(--border);
+    }
+
+    .sample-strip .samples-label {
+        margin: 0 0 8px;
+        padding: 0 20px;
+    }
+
+    /* "Or try a sample" follows the URL row on the page; over the bar it is
+       a panel title with nothing before it. */
+    body:has(#show-samples:checked) .sample-strip .lead-in {
+        display: none;
+    }
+
+    body:has(#show-samples:checked) .samples {
+        display: flex;
+        align-items: flex-start;
+        gap: 10px;
+        overflow-x: auto;
+        padding: 0 20px 4px;
+        scroll-snap-type: x mandatory;
+        scrollbar-width: none;
+    }
+
+    body:has(#show-samples:checked) .samples::-webkit-scrollbar {
+        display: none;
+    }
+
+    body:has(#show-samples:checked) .sample {
+        flex: none;
+        width: 96px;
+        scroll-snap-align: start;
+    }
+
+    /* ----- cards ----- */
+
+    /* Swipe left to remove: the card is a horizontal scroll-snap strip of
+       the body and a panel behind it, so the gesture is the browser's own
+       overscroll and costs no script. The x in the head still works. */
+    .card {
+        flex-direction: row;
+        gap: 0;
+        padding: 0;
+        border: 0;
+        border-radius: 0;
+        background: none;
+        overflow-x: auto;
+        scroll-snap-type: x mandatory;
+        scrollbar-width: none;
+    }
+
+    .card::-webkit-scrollbar {
+        display: none;
+    }
+
+    .card-body {
+        flex: none;
+        width: 100%;
+        scroll-snap-align: start;
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+        padding: 14px 16px 16px;
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: 14px;
+    }
+
+    .card-remove {
+        display: flex;
+        flex: none;
+        width: 96px;
+        scroll-snap-align: end;
+        margin-left: 10px;
+        border-radius: 14px;
+        background: var(--error-soft);
+    }
+
+    .swipe-remove {
+        flex: 1;
+        border: 0;
+        border-radius: 14px;
+        background: none;
+        color: var(--error);
+        font-size: 13px;
+        font-weight: 700;
+        cursor: pointer;
+    }
+
+    .frame img {
+        max-height: 400px;
+    }
+
+    /* Both rows are a couple of words wider than 390px likes. */
+    .card-head {
+        gap: 10px;
+    }
+
+    .card-foot {
+        gap: 8px;
+    }
+
+    .frame-tap {
+        display: block;
+    }
+
+    /* 9px is what makes the target 38px tall; the 12 is what makes the whole
+       foot -- toggle, Full size, Download -- fit on one line at 390px. */
+    .segmented label {
+        padding: 9px 12px;
+    }
+
+    .download {
+        height: 38px;
+        padding: 0 12px;
+    }
+
+    /* ----- the full-size view ----- */
+
+    .result:has(.full-toggle:checked) .frame {
+        padding: calc(env(safe-area-inset-top) + 64px) 16px
+                 calc(env(safe-area-inset-bottom) + 90px);
+    }
+
+    /* Open, it is the picture itself; a tap target over it would swallow the
+       pinch and close the view on the first touch. */
+    .result:has(.full-toggle:checked) .frame-tap {
+        display: none;
+    }
+
+    .result:has(.full-toggle:checked) .lightbox-close {
+        top: calc(env(safe-area-inset-top) + 12px);
+        right: 16px;
+    }
+
+    .result:has(.full-toggle:checked) .card-foot {
+        padding: 14px 20px calc(env(safe-area-inset-bottom) + 20px);
+    }
+
+    .result:has(.full-toggle:checked) .zoom-hint {
+        display: block;
+        position: fixed;
+        left: 16px;
+        top: calc(env(safe-area-inset-top) + 22px);
+        z-index: 102;
+        font-family: 'Fira Code', ui-monospace, monospace;
+        font-size: 11px;
+        color: rgba(249, 248, 246, .6);
+    }
+
+    .result:has(.full-toggle:checked) .zoom {
+        display: inline-flex;
+        align-items: center;
+        height: 38px;
+        padding: 0 14px;
+        border: 1px solid rgba(249, 248, 246, .28);
+        border-radius: 8px;
+        color: #f9f8f6;
+        font-size: 13px;
+        font-weight: 600;
+        cursor: pointer;
+    }
+
+    /* Zoomed, the frame scrolls its own overflow, so panning is the
+       browser's job too. Nothing here sets touch-action, so a pinch still
+       does what a pinch does. */
+    .result:has(.full-toggle:checked):has(.zoom-toggle:checked) .frame {
+        overflow: auto;
+        align-items: flex-start;
+        justify-content: flex-start;
+        pointer-events: auto;
+    }
+
+    .result:has(.full-toggle:checked):has(.zoom-toggle:checked) .frame img {
+        max-width: none;
+        max-height: none;
+        width: 200%;
+    }
+
+    /* ----- the docs ----- */
+
+    .docs {
+        padding: 18px 20px 60px;
+        font-size: 15px;
+    }
+
+    .doc h2 {
+        font-size: 24px;
+    }
+
+    .doc h3 {
+        font-size: 18px;
+    }
+
+    .doc .lead {
+        font-size: 17px;
+    }
+
+    /* Portraits stay side by side; the group photos would be a stripe. */
+    .figures.portraits {
+        grid-template-columns: 1fr 1fr;
+    }
+
+    .tiles {
+        grid-template-columns: 1fr;
+    }
+
+    .tile {
+        display: grid;
+        grid-template-columns: 56px 1fr;
+        gap: 10px;
+    }
+
+    .tile b {
+        margin-bottom: 0;
+    }
+
+    .snippet pre {
+        font-size: 12px;
+    }
+
+    /* ----- the footer ----- */
+
+    .site-footer .container {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 6px;
     }
 }

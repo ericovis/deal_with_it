@@ -48,3 +48,8 @@ need.
 
 The sunglasses themselves are the ones from the
 [Deal With It](https://knowyourmeme.com/memes/deal-with-it) meme.
+
+`icons/` are the same `glasses.svg`, rasterised with resvg, inverted to white
+and centred on the band colour `#24261F`: 14% padding for the app, home-screen
+and favicon icons, 22% for the maskable one, which a launcher may crop to a
+circle.
