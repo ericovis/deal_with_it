@@ -26,6 +26,14 @@ from src.config import get_settings
 logger = logging.getLogger(__name__)
 
 
+#: How long a thread blocks in one BLMOVE before coming up for air, and how
+#: often it then reaps. RQ's defaults are 405 and 600 seconds, which between
+#: them leave a job whose worker died mid-flight sitting at ``started`` --
+#: holding its payload in a Redis with no room to spare -- for up to a
+#: quarter of an hour. Waking a thread once a minute costs one command.
+REAP_INTERVAL = 60
+
+
 class ThreadWorker(SimpleWorker):
     """A SimpleWorker that may run off the main thread.
 
@@ -44,7 +52,12 @@ class ThreadWorker(SimpleWorker):
 def build_workers(count: int, queue_name: str, connection) -> list[ThreadWorker]:
     prefix = f'{socket.gethostname()}.{os.getpid()}'
     return [
-        ThreadWorker([queue_name], connection=connection, name=f'{prefix}.{index}')
+        ThreadWorker(
+            [queue_name], connection=connection, name=f'{prefix}.{index}',
+            # `dequeue_timeout` is `worker_ttl - 15`, and maintenance only
+            # runs between dequeues, so the two have to move together.
+            worker_ttl=REAP_INTERVAL + 15, maintenance_interval=REAP_INTERVAL,
+        )
         for index in range(count)
     ]
 

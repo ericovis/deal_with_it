@@ -436,7 +436,7 @@ class TestCards:
     def test_a_finished_job_shows_the_image_and_stops_polling(self, client, hx):
         job_id = self.start(client, hx)
         body = client.get(f'/jobs/{job_id}', headers=hx).text
-        assert f'src="{support.IMAGE}"' in body
+        assert f'src="/jobs/{job_id}/result"' in body
         assert 'class="chip done"' in body
         assert 'hx-get="/jobs/' not in body, 'the poll chain must end here'
 
@@ -473,10 +473,10 @@ class TestCards:
         assert 'class="lightbox-close"' in body
 
     def test_the_overlay_reuses_the_one_copy_of_the_image(self, client, hx):
-        """Duplicating the markup would send the whole data URI twice."""
+        """Duplicating the markup would make the browser fetch it twice."""
         job_id = self.start(client, hx)
         body = client.get(f'/jobs/{job_id}', headers=hx).text
-        assert body.count(f'src="{support.IMAGE}"') == 1
+        assert body.count(f'src="/jobs/{job_id}/result"') == 1
 
     def test_a_queued_job_keeps_polling(self, client, hx, async_queue, stub_task):
         stub_task(support.SUCCESS)
@@ -491,7 +491,8 @@ class TestCards:
         stub_task(support.SUCCESS)
         job_id = self.start(client, hx)
         drain()
-        assert f'src="{support.IMAGE}"' in client.get(f'/jobs/{job_id}', headers=hx).text
+        body = client.get(f'/jobs/{job_id}', headers=hx).text
+        assert f'src="/jobs/{job_id}/result"' in body
 
     def test_a_rejected_image_shows_the_reason_and_offers_a_retry(self, client, hx, stub_task):
         stub_task(support.REJECTS)
@@ -533,6 +534,72 @@ class TestCards:
         job_id = self.start(client, hx)
         client.get(f'/jobs/{job_id}', headers=hx)
         assert list(tmp_path.iterdir()) == []
+
+
+class TestResultImages:
+    """A finished card points at its two pictures; it does not carry them.
+
+    Inlined, a 7.9 MB upload came back as a 42 MB poll response -- the
+    submitted image and the result, twice each -- down a phone connection and
+    off the same two cores the worker detects on.
+    """
+
+    def upload(self, client, hx, payload: bytes = None, mime: str = 'image/png'):
+        return job_ids(submit(client, hx, files=[
+            ('image', ('me.png', payload or make_png(), mime))]).text)[0]
+
+    def test_a_finished_card_carries_no_image_data_at_all(self, client, hx):
+        job_id = self.upload(client, hx)
+        body = client.get(f'/jobs/{job_id}', headers=hx).text
+        assert 'base64,' not in body
+        assert f'src="/jobs/{job_id}/result"' in body
+        assert f'src="/jobs/{job_id}/source"' in body
+
+    def test_the_result_is_served_as_an_image(self, client, hx):
+        job_id = self.upload(client, hx)
+        response = client.get(f'/jobs/{job_id}/result')
+        assert response.status_code == 200
+        assert response.headers['content-type'].startswith('image/png')
+        assert response.content == b'sunglasses', 'the stub result, decoded'
+
+    def test_the_submitted_image_is_served_back_unchanged(self, client, hx):
+        original = make_png(color='blue')
+        job_id = self.upload(client, hx, original)
+        response = client.get(f'/jobs/{job_id}/source')
+        assert response.status_code == 200
+        assert response.content == original
+
+    def test_both_are_cacheable_but_never_by_anything_in_between(self, client, hx):
+        job_id = self.upload(client, hx)
+        for suffix in ('result', 'source'):
+            headers = client.get(f'/jobs/{job_id}/{suffix}').headers
+            assert 'private' in headers['cache-control']
+            assert 'immutable' in headers['cache-control']
+            assert headers['x-content-type-options'] == 'nosniff'
+
+    def test_a_media_type_we_do_not_serve_is_not_echoed_back(self, client, hx):
+        """The submitted half is labelled by whoever uploaded it."""
+        job_id = job_ids(submit(client, hx, files=[
+            ('image', ('x.svg', make_png(), 'image/svg+xml'))]).text)[0]
+        response = client.get(f'/jobs/{job_id}/source')
+        assert response.headers['content-type'].startswith('application/octet-stream')
+
+    def test_an_unknown_job_has_no_images(self, client):
+        assert client.get('/jobs/nope/result').status_code == 404
+        assert client.get('/jobs/nope/source').status_code == 404
+
+    def test_a_job_that_has_not_finished_has_no_result_yet(
+            self, client, hx, async_queue, stub_task):
+        stub_task(support.SUCCESS)
+        job_id = self.upload(client, hx)
+        assert client.get(f'/jobs/{job_id}/result').status_code == 404
+
+    def test_a_url_job_points_at_the_url_it_was_given(self, client, hx):
+        """Nothing was uploaded, so there is nothing for us to serve back."""
+        job_id = job_ids(submit(client, hx, url='https://example.test/a.png').text)[0]
+        body = client.get(f'/jobs/{job_id}', headers=hx).text
+        assert 'src="https://example.test/a.png"' in body
+        assert f'/jobs/{job_id}/source' not in body
 
 
 class TestPollingPayloads:

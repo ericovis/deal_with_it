@@ -536,16 +536,15 @@ def _subtitle(result: JobResult, source: JobSource) -> str:
     return kind
 
 
-def _result_view(job_id: str, image: str, before: str | None) -> Div:
+def _result_view(job_id: str, image: str, before: str | None, extension: str) -> Div:
     """The finished image, its Before/After toggle, and the full-screen view.
 
     The full-screen view re-lays out the *same* frame rather than a copy, so
-    the result data URI is sent once. A checkbox drives it because
-    ``<dialog>`` cannot open without script.
+    the picture is referenced once. A checkbox drives it because ``<dialog>``
+    cannot open without script.
     """
     toggle = f'full-{job_id}'
     zoom = f'zoom-{job_id}'
-    extension = 'jpg' if image.startswith('data:image/jpeg') else 'png'
     footer = [
         Span(cls='spacer'),
         Input(type='checkbox', id=toggle, cls='full-toggle visually-hidden'),
@@ -616,9 +615,11 @@ def card(job_id: str, result: JobResult | None, source: JobSource,
     label, chip = CHIPS.get(
         result.state, CHIPS[JobState.QUEUED] if polls else CHIPS[JobState.FAILED])
 
-    # A data URI only once the card has stopped polling; otherwise it would
-    # be re-sent every second.
-    thumb = source.thumb or (source.original if finished else None)
+    # Both halves of a finished card go out as URLs, never inline: a 7.9 MB
+    # upload inlined twice over made a 42 MB poll response, on a host whose
+    # two cores the worker wants. A URL job already has a remote one; an
+    # upload has nothing to show until it finishes.
+    submitted = source.thumb or (f'/jobs/{job_id}/source' if finished else None)
 
     body: list = []
     if result.state == JobState.STARTED:
@@ -626,7 +627,8 @@ def card(job_id: str, result: JobResult | None, source: JobSource,
     elif polls:
         body.append(Progress(max=100))
     elif finished and result.image:
-        body.append(_result_view(job_id, result.image, source.thumb or source.original))
+        body.append(_result_view(job_id, f'/jobs/{job_id}/result', submitted,
+                                 _extension_of(result.image)))
     else:
         message = result.error or 'That did not work.'
         retry = [Button('Retry', type='button', cls='retry',
@@ -637,7 +639,7 @@ def card(job_id: str, result: JobResult | None, source: JobSource,
     return Article(
         Div(
             Div(
-                Img(src=thumb, alt='', cls='thumb') if thumb else Div(cls='thumb'),
+                Img(src=submitted, alt='', cls='thumb') if submitted else Div(cls='thumb'),
                 Div(B(source.label or ('Unknown job' if expired else 'Picture')),
                     Span('' if expired else _subtitle(result, source)), cls='card-id'),
                 Span(label, cls=chip),
@@ -662,6 +664,30 @@ def card(job_id: str, result: JobResult | None, source: JobSource,
         hx_trigger=f'load delay:{POLL_INTERVAL}' if polls else None,
         hx_swap='outerHTML' if polls else None,
     )
+
+
+def _image_response(found: tuple[bytes, str] | None) -> Response:
+    """One of a job's two pictures, or a 404 once the job has expired.
+
+    A job id is a uuid4 and neither picture ever changes under it, so the
+    browser may keep both for as long as the job itself lives. Private,
+    because the picture is: nothing in front of us may hold a copy.
+    ``nosniff`` is already on every response (``BodyLimit`` in
+    :mod:`src.app`), which is what makes the media type below safe to take
+    from a submitted image's own header.
+    """
+    if found is None:
+        return Response('', status_code=404)
+    payload, media_type = found
+    return Response(payload, media_type=media_type, headers={
+        'Cache-Control': f'private, max-age={get_settings().result_ttl}, immutable',
+    })
+
+
+def _extension_of(image: str) -> str:
+    """What to call the file the Download link saves. The result keeps the
+    format the picture came in as, so the data URI header is the answer."""
+    return 'jpg' if image.startswith('data:image/jpeg') else 'png'
 
 
 def card_for(job_id: str) -> Article:
@@ -1007,6 +1033,17 @@ def create_ui():
     @app.get('/jobs/{job_id}')
     def job_fragment(job_id: str):
         return card_for(job_id)
+
+    @app.get('/jobs/{job_id}/result')
+    def job_result_image(job_id: str):
+        """The processed picture, so the card can carry a URL rather than the
+        image itself. Sync `def`: it reads the whole job out of Redis."""
+        return _image_response(jobs.result_image(job_id))
+
+    @app.get('/jobs/{job_id}/source')
+    def job_source_image(job_id: str):
+        """The picture as submitted: the card's thumbnail and Before half."""
+        return _image_response(jobs.source_image(job_id))
 
     @app.post('/jobs/{job_id}/retry')
     def retry_job(request, job_id: str):

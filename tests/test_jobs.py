@@ -1,7 +1,9 @@
 """The queue seam. Runs against fakeredis, so no server is needed."""
 
+from datetime import UTC, datetime, timedelta
+
 import pytest
-from rq.job import Job
+from rq.job import Job, JobStatus
 
 from src import jobs
 from src.models import JobState
@@ -317,3 +319,88 @@ class TestLightPolling:
     def test_an_unknown_id_is_none(self, async_queue, no_full_fetch):
         assert jobs.describe('nope') is None
         assert jobs.result_for('nope') is None
+
+
+class TestAbandonedJobs:
+    """A worker can die mid-job -- a deploy, a restart, a crash in native
+    code, the OOM killer -- and the job it was running stays ``started`` in
+    Redis with nobody coming back to it. RQ only reaps those in a
+    maintenance pass it runs every ten minutes, and only while some worker
+    is alive to run one, so the reader has to be able to tell on its own.
+    """
+
+    @staticmethod
+    def _started(connection, job_id: str, seconds_ago: float) -> None:
+        """Put a job in the state a killed worker leaves behind."""
+        started = datetime.now(UTC) - timedelta(seconds=seconds_ago)
+        connection.hset(Job.key_for(job_id), mapping={
+            'status': JobStatus.STARTED.value,
+            'started_at': started.strftime('%Y-%m-%dT%H:%M:%S.%fZ'),
+        })
+
+    def test_a_job_still_running_inside_its_timeout_is_left_alone(
+            self, async_queue, stub_task):
+        stub_task(support.SUCCESS)
+        job_id, _ = jobs.enqueue(PAYLOAD)
+        self._started(async_queue.connection, job_id, seconds_ago=5)
+        assert jobs.result_for(job_id).state == JobState.STARTED
+
+    def test_a_job_past_its_timeout_is_reported_as_failed(self, async_queue, stub_task):
+        stub_task(support.SUCCESS)
+        settings = jobs.get_settings()
+        job_id, _ = jobs.enqueue(PAYLOAD)
+        self._started(async_queue.connection, job_id,
+                      seconds_ago=settings.job_timeout + jobs.ABANDONED_GRACE + 1)
+        result = jobs.result_for(job_id)
+        assert result.state == JobState.FAILED
+        assert result.error == jobs.ABANDONED
+
+    def test_the_grace_is_respected(self, async_queue, stub_task):
+        """A job exactly at its timeout may still be writing its result."""
+        stub_task(support.SUCCESS)
+        job_id, _ = jobs.enqueue(PAYLOAD)
+        self._started(async_queue.connection, job_id,
+                      seconds_ago=jobs.get_settings().job_timeout + 1)
+        assert jobs.result_for(job_id).state == JobState.STARTED
+
+    def test_describe_reports_it_too_and_keeps_the_label(self, async_queue, stub_task):
+        """The card that has been polling needs to stop, and to say why."""
+        stub_task(support.SUCCESS)
+        job_id, _ = jobs.enqueue(PAYLOAD, meta={'kind': 'url', 'label': 'a.png'})
+        self._started(async_queue.connection, job_id, seconds_ago=1000)
+        result, source = jobs.describe(job_id)
+        assert (result.state, result.error) == (JobState.FAILED, jobs.ABANDONED)
+        assert source.label == 'a.png'
+
+    def test_an_abandoned_job_can_be_retried(self, async_queue, stub_task):
+        """Its payload is still on the job, which is the whole point."""
+        stub_task(support.SUCCESS)
+        job_id, _ = jobs.enqueue(PAYLOAD)
+        self._started(async_queue.connection, job_id, seconds_ago=1000)
+        new_id, state = jobs.resubmit(job_id)
+        assert new_id != job_id and state == JobState.QUEUED
+
+    def test_deciding_costs_no_extra_round_trip(self, async_queue, stub_task):
+        """The verdict rides in the pipeline a poll already makes."""
+        stub_task(support.SUCCESS)
+        job_id, _ = jobs.enqueue({'url': None,
+                                  'base64': 'data:image/png;base64,' + 'A' * 100_000})
+        self._started(async_queue.connection, job_id, seconds_ago=1000)
+
+        def refuse(*args, **kwargs):
+            raise AssertionError('Job.fetch reads the whole payload')
+
+        with pytest.MonkeyPatch.context() as patch:
+            patch.setattr(jobs.Job, 'fetch', refuse)
+            assert jobs.result_for(job_id).error == jobs.ABANDONED
+
+    def test_a_finished_job_is_never_mistaken_for_an_abandoned_one(
+            self, sync_queue, stub_task):
+        stub_task(support.SUCCESS)
+        job_id, _ = jobs.enqueue(PAYLOAD)
+        connection = sync_queue.connection
+        # A job that ran, long ago, and whose result is still readable.
+        old = datetime.now(UTC) - timedelta(seconds=10_000)
+        connection.hset(Job.key_for(job_id), 'started_at',
+                        old.strftime('%Y-%m-%dT%H:%M:%S.%fZ'))
+        assert jobs.result_for(job_id).state == JobState.FINISHED

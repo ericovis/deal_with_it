@@ -72,8 +72,26 @@ Invariants worth knowing before editing:
   the card alone: the script empties the input itself, and an out-of-band
   form swap would tear out the element the rest of the batch posts from.
   `/submit` still takes a list, because the submit button can post one.
-- **A polling card must not carry a data URI.** `JobSource.thumb` is a
-  remote URL or a `/static` path; an upload has neither until it finishes.
+- **No card carries a data URI, polling or finished.** A finished upload used
+  to inline the submitted image and the result, twice each, in the poll that
+  swapped the card in: a 7.9 MB upload came back as a 42 MB fragment, down a
+  phone connection and off the same two cores the worker detects on. Both
+  halves are URLs now — `/jobs/{id}/source` and `/jobs/{id}/result`, served
+  from the job by `jobs.source_image` / `jobs.result_image` — so a poll stays
+  a few KB and the browser fetches each picture once, in parallel, and caches
+  it. `JobSource.thumb` is still a remote URL or a `/static` path when the
+  submission had one. `JobResult.image` stays the data URI: that is the
+  published API.
+- **A started job past its deadline is reported failed** (`_abandoned` in
+  `src/jobs.py`). A worker killed mid-job — a deploy, a crash in native code,
+  the OOM killer, all of which this deployment restarts from — leaves its job
+  at `started` with nobody coming back to it, and the card polls its last
+  checkpoint ("Encoding the result") forever. RQ does reap those, but only in
+  a maintenance pass it runs every ten minutes *and* only while some worker is
+  alive to run one, so the reader decides instead, at `job_timeout +
+  ABANDONED_GRACE`. `ThreadWorker` also reaps every `REAP_INTERVAL`
+  (`src/worker.py`), which is what gives an abandoned job's payload a TTL
+  rather than leaving it in a `noeviction` Redis for good.
 - **Progress is stage markers** written to `job.meta` by the worker. The face
   count is lifted out of the "Drawing glasses on N faces" step because the
   next checkpoint overwrites `step`.

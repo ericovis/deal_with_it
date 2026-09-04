@@ -5,6 +5,7 @@ ids and :class:`~src.models.JobResult`.
 """
 
 import logging
+from datetime import UTC, datetime
 from urllib.parse import urlparse
 
 from redis import Redis
@@ -12,8 +13,11 @@ from redis.exceptions import RedisError
 from rq import Queue
 from rq.exceptions import NoSuchJobError
 from rq.job import Job, JobStatus
+from rq.utils import str_to_date
 
+from src import images
 from src.config import get_settings
+from src.errors import DealWithItError
 from src.models import JobResult, JobSource, JobState, SourceKind
 
 logger = logging.getLogger(__name__)
@@ -23,6 +27,13 @@ logger = logging.getLogger(__name__)
 _queue: Queue | None = None
 
 GENERIC_FAILURE = 'Something went wrong while processing this image.'
+
+ABANDONED = 'The worker restarted while this image was being processed.'
+
+#: How long past its own ``job_timeout`` a started job is given before the
+#: page stops believing in it. Only has to cover the clock skew between the
+#: worker that stamped ``started_at`` and whoever is reading it.
+ABANDONED_GRACE = 30
 
 #: Resolved by the worker at execution time. Referenced by name so the web
 #: tier never imports the face stack.
@@ -101,11 +112,11 @@ def _fetch(job_id: str) -> Job | None:
         return None
 
 
-def _peek(job_id: str) -> tuple[JobStatus, dict, int | None] | None:
-    """Status, meta and queue position, without the payload.
+def _peek(job_id: str) -> tuple[JobStatus, dict, int | None, datetime | None] | None:
+    """Status, meta, queue position and start time, without the payload.
 
     ``Job.fetch`` reads the whole hash, and for an upload that includes the
-    image itself -- megabytes per poll, once a second per card. The three
+    image itself -- megabytes per poll, once a second per card. The few
     things a pending job is polled for are tiny, and a pipeline buys all of
     them for one round trip.
 
@@ -115,13 +126,42 @@ def _peek(job_id: str) -> tuple[JobStatus, dict, int | None] | None:
     """
     queue = get_queue()
     with queue.connection.pipeline() as pipe:
-        pipe.hmget(Job.key_for(job_id), ['status', 'meta'])
+        pipe.hmget(Job.key_for(job_id), ['status', 'meta', 'started_at'])
         pipe.lpos(queue.key, job_id)
-        (raw_status, raw_meta), ahead = pipe.execute()
+        (raw_status, raw_meta, raw_started), ahead = pipe.execute()
     if raw_status is None:
         return None
     meta = queue.serializer.loads(raw_meta) if raw_meta else {}
-    return JobStatus(raw_status.decode()), meta, ahead
+    return JobStatus(raw_status.decode()), meta, ahead, _started_at(raw_started)
+
+
+def _started_at(raw: bytes | None) -> datetime | None:
+    """When the worker picked this job up, if it has been picked up."""
+    if not raw:
+        return None
+    try:
+        return str_to_date(raw)
+    except ValueError:  # pragma: no cover - a hash we did not write
+        return None
+
+
+def _abandoned(status: JobStatus, started_at: datetime | None) -> bool:
+    """True for a job nobody is coming back to.
+
+    A job runs for at most ``job_timeout``; RQ's death penalty is what
+    enforces that. Still ``started`` well past it means the worker that had
+    it is gone -- killed mid-job by a deploy, a restart, a crash in native
+    code or the OOM killer, all of which this deployment expects and
+    restarts from. RQ does notice, in ``run_maintenance_tasks``, but that
+    runs every ten minutes *and* only while some worker is alive to run it,
+    so a card would poll its last checkpoint ("Encoding the result") for
+    that long, or forever while the worker is down. This is the reader
+    deciding instead, which needs nobody's cooperation.
+    """
+    if status != JobStatus.STARTED or started_at is None:
+        return False
+    age = (datetime.now(UTC) - started_at).total_seconds()
+    return age > get_settings().job_timeout + ABANDONED_GRACE
 
 
 def _pending(job_id: str, status: JobStatus, meta: dict,
@@ -140,7 +180,9 @@ def result_for(job_id: str) -> JobResult | None:
     peeked = _peek(job_id)
     if peeked is None:
         return None
-    status, meta, ahead = peeked
+    status, meta, ahead, started_at = peeked
+    if _abandoned(status, started_at):
+        return _abandoned_result(job_id)
     if status not in _TERMINAL:
         return _pending(job_id, status, meta, ahead)
     job = _fetch(job_id)
@@ -152,7 +194,9 @@ def describe(job_id: str) -> tuple[JobResult, JobSource] | None:
     peeked = _peek(job_id)
     if peeked is None:
         return None
-    status, meta, ahead = peeked
+    status, meta, ahead, started_at = peeked
+    if _abandoned(status, started_at):
+        return _abandoned_result(job_id), _source_of(meta, None)
     if status not in _TERMINAL:
         return _pending(job_id, status, meta, ahead), _source_of(meta, None)
     job = _fetch(job_id)
@@ -161,10 +205,55 @@ def describe(job_id: str) -> tuple[JobResult, JobSource] | None:
     return _state_of(job), _source_of(job.meta or {}, job.args[0] if job.args else {})
 
 
+def _abandoned_result(job_id: str) -> JobResult:
+    """A job whose worker went away. Retryable: the payload is still there."""
+    logger.warning('job %s was abandoned by its worker', job_id)
+    return JobResult(job_id=job_id, state=JobState.FAILED, error=ABANDONED)
+
+
 def payload_for(job_id: str) -> dict | None:
     """The image payload a job was created with."""
     job = _fetch(job_id)
     return job.args[0] if job is not None and job.args else None
+
+
+#: What a card may serve back as an image. The submitted half carries a
+#: media type the *client* chose, so it is checked against this list rather
+#: than echoed; the bytes behind it are already known to be a picture,
+#: because the worker decoded them.
+IMAGE_TYPES = frozenset({'image/jpeg', 'image/png', 'image/webp', 'image/gif'})
+OPAQUE_TYPE = 'application/octet-stream'
+
+
+def _as_image(data_uri: str | None) -> tuple[bytes, str] | None:
+    """A stored data URI as the bytes and media type to answer a GET with."""
+    if not data_uri or not images.is_data_uri(data_uri):
+        return None
+    media_type = data_uri[len('data:'):data_uri.index(';')]
+    try:
+        payload = images.decode_data_uri(data_uri)
+    except DealWithItError:  # pragma: no cover - the worker read it already
+        return None
+    return payload, media_type if media_type in IMAGE_TYPES else OPAQUE_TYPE
+
+
+def result_image(job_id: str) -> tuple[bytes, str] | None:
+    """The processed image, for a card to point an ``<img>`` at.
+
+    A finished card used to carry the picture inline, twice over: a 7.9 MB
+    upload came back as a 42 MB poll response, on a host whose cores the
+    worker needs. As a URL it is fetched once, in parallel, and cached.
+    """
+    job = _fetch(job_id)
+    if job is None or job.get_status() != JobStatus.FINISHED:
+        return None
+    return _as_image((job.return_value() or {}).get('image'))
+
+
+def source_image(job_id: str) -> tuple[bytes, str] | None:
+    """The image as submitted: the "before" half, and the card's thumbnail."""
+    payload = payload_for(job_id) or {}
+    return _as_image(payload.get('base64'))
 
 
 def resubmit(job_id: str) -> tuple[str, JobState] | None:
