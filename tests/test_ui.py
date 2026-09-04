@@ -125,6 +125,42 @@ class TestPage:
         assert client.get(path).status_code == 404
 
 
+class TestNotFound:
+    """Most of the 404s this app makes are not typos: they are shared links
+    whose pictures have been swept."""
+
+    def test_an_unknown_page_gets_a_page(self, client):
+        response = client.get('/nope')
+        assert response.status_code == 404
+        assert response.headers['content-type'].startswith('text/html')
+        assert '<!doctype html>' in response.text.lower()
+        assert 'Nothing here' in response.text
+
+    def test_it_offers_a_way_back(self, client):
+        body = client.get('/nope').text
+        assert 'href="/"' in body and 'href="/docs"' in body
+
+    def test_it_is_the_real_shell(self, client):
+        """Same header, footer and stylesheet as everything else."""
+        body = client.get('/nope').text
+        assert '/static/css/style.css' in body
+        assert 'class="site-footer"' in body
+
+    def test_the_api_keeps_its_json(self, client):
+        """A published contract does not start answering in HTML."""
+        response = client.get('/api/nope')
+        assert response.status_code == 404
+        assert response.headers['content-type'].startswith('application/json')
+        assert response.json() == {'detail': 'Not Found'}
+
+    @pytest.mark.parametrize('path', ['/static/img/nope.png', '/i/job/nope.webp'])
+    def test_a_missing_picture_is_not_answered_with_a_page(self, client, path):
+        """An HTML body is a nonsense response to an <img>."""
+        response = client.get(path)
+        assert response.status_code == 404
+        assert not response.headers['content-type'].startswith('text/html')
+
+
 class TestOnAPhone:
     """The markup the phone layout is driven from.
 

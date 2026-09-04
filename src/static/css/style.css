@@ -2153,3 +2153,54 @@ code {
         gap: 6px;
     }
 }
+
+/* ------------------------------------------------------------------ 404 --
+   A wrong URL, and -- more often -- a shared link whose picture has been
+   swept. Centred in the layout rather than dropped into the app's two-column
+   grid, which has nothing to put in either column here. */
+.lost {
+    flex: 1 1 100%;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 14px;
+    text-align: center;
+    padding: 64px 0 80px;
+}
+
+.lost h1 {
+    margin: 0;
+}
+
+.lost .lead {
+    max-width: 46ch;
+    margin: 0;
+    color: var(--muted);
+}
+
+.lost-glasses {
+    width: 132px;
+    opacity: 0.5;
+    filter: var(--invert);
+    /* Sat on the nose of nothing at all. */
+    transform: rotate(-8deg);
+}
+
+.lost-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    justify-content: center;
+    margin: 10px 0 0;
+}
+
+@media (max-width: 600px) {
+    .lost {
+        padding: 40px 0 56px;
+    }
+
+    .lost-glasses {
+        width: 96px;
+    }
+}

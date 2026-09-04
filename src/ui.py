@@ -30,6 +30,7 @@ from fasthtml.common import (
     Footer,
     Form,
     Header,
+    Html,
     Img,
     Input,
     Label,
@@ -47,10 +48,11 @@ from fasthtml.common import (
     UploadFile,
     cookie,
     fast_app,
+    to_xml,
 )
 from pydantic import ValidationError
 from starlette.concurrency import run_in_threadpool
-from starlette.responses import Response
+from starlette.responses import HTMLResponse, JSONResponse, Response
 
 from src import blobs, images, jobs, throttle
 from src.assets import asset
@@ -512,6 +514,53 @@ def page(theme: str | None, reachable: bool) -> tuple:
         addbar(),
         site_footer('app'),
     )
+
+
+def not_found_page(theme: str | None, reachable: bool,
+                   heading: str = 'Nothing here',
+                   message: str = 'That page does not exist.',
+                   expired: bool = False) -> tuple:
+    """What a wrong or worn-out URL gets.
+
+    Its own page rather than a bare status line, because most of the 404s this
+    app produces are not typos: they are shared links whose pictures have
+    expired, and "gone" is a different thing to say than "never existed".
+    """
+    return (
+        *head_tags(f'{heading} | Deal With It', theme),
+        site_header('app', theme, reachable),
+        Main(
+            Section(
+                Img(src=asset('/static/img/glasses.svg'), alt='', cls='lost-glasses'),
+                H1(heading),
+                P(message, cls='lead'),
+                P(
+                    A('Deal with another picture', href='/', cls='btn'),
+                    A('How it works', href='/docs', cls='btn ghost'),
+                    cls='lost-actions',
+                ),
+                cls='lost',
+            ),
+            cls='container layout',
+        ),
+        site_footer('app'),
+    )
+
+
+def not_found_response(theme: str | None, **kwargs) -> HTMLResponse:
+    """The 404 page as a response. Rendered here rather than returned as
+    components, because an exception handler is plain Starlette and does not
+    go through FastHTML's own rendering."""
+    document = not_found_page(theme, jobs.is_broker_reachable(), **kwargs)
+    # to_xml on an Html element emits the doctype itself.
+    return HTMLResponse(to_xml(Html(*document)), status_code=404)
+
+
+EXPIRED_HEADING = 'That one has expired'
+EXPIRED_MESSAGE = (
+    'Results are kept for a short while and then deleted, so this link has '
+    'outlived its picture. Nothing was lost that was not going to be.'
+)
 
 
 # ------------------------------------------------------------------- cards
@@ -1098,6 +1147,19 @@ def create_ui():
         return theme_state(chosen), cookie(
             THEME_COOKIE, chosen, max_age=THEME_MAX_AGE, path='/', samesite='lax',
         )
+
+    async def _not_found(request, exc):
+        """Only the interface answers with a page.
+
+        `/api/*` is a published JSON contract and keeps its `{"detail": ...}`
+        even for a path no route claims; `/static/*` and `/i/*` never reach
+        here, and an HTML body would be a nonsense response to an <img>.
+        """
+        if request.url.path.startswith('/api/'):
+            return JSONResponse({'detail': 'Not Found'}, status_code=404)
+        return not_found_response(theme_of(request))
+
+    app.add_exception_handler(404, _not_found)
 
     @app.get('/empty')
     def empty():
