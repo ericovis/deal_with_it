@@ -540,6 +540,12 @@ input[type="text"]:focus {
 }
 
 .btn {
+    /* inline-flex, not the button element's own centring: an <a class="btn">
+       is a button too, and without this its text sits at the top of the
+       44px box. */
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
     height: 44px;
     padding: 0 18px;
     border: none;
@@ -548,8 +554,22 @@ input[type="text"]:focus {
     color: var(--primary-fg);
     font-weight: 700;
     font-size: 14px;
+    text-decoration: none;
     cursor: pointer;
     white-space: nowrap;
+}
+
+/* The second button in a pair, where one of them has to be the quieter one. */
+.btn.ghost {
+    background: var(--surface);
+    border: 1px solid var(--border-strong);
+    color: var(--text);
+}
+
+.btn.ghost:hover {
+    border-color: var(--accent);
+    color: var(--accent);
+    background: var(--surface);
 }
 
 .btn:hover {
@@ -606,6 +626,12 @@ input[type="text"]:focus {
 
 .sample img {
     width: 100%;
+    /* `height: auto` is load-bearing, not tidiness: the tag carries width and
+       height attributes (so the grid does not reflow as sixteen tiles land),
+       and those become a presentational `height: 200px`. aspect-ratio only
+       governs when height is auto, so without this the tile renders one
+       column wide and 200px tall. */
+    height: auto;
     aspect-ratio: 1;
     object-fit: cover;
     display: block;
@@ -1721,42 +1747,8 @@ code {
         padding: 22px 18px 18px;
     }
 
-    /* The buttons sit between the sub-heading and the limits line, which
-       `order` puts back after them -- they are the card's children, not the
-       label's. `position` lifts them over the label's hit overlay. */
-    .pick-row {
-        position: relative;
-        order: 1;
-        display: flex;
-        gap: 8px;
-        width: 100%;
-        margin-top: 8px;
-    }
-
     .dropzone .limits {
-        order: 2;
         margin-top: 4px;
-    }
-
-    .pick-row .btn {
-        flex: 1;
-        display: inline-flex;
-        align-items: center;
-        justify-content: center;
-        padding: 0 14px;
-        cursor: pointer;
-    }
-
-    .pick-row .ghost {
-        background: var(--surface);
-        border: 1px solid var(--border-strong);
-        color: var(--text);
-    }
-
-    .pick-row .ghost:hover {
-        border-color: var(--accent);
-        color: var(--accent);
-        background: var(--surface);
     }
 
     .url-row .btn {
@@ -1778,7 +1770,6 @@ code {
 
     body:has(#queue article) .lede,
     body:has(#queue article) .dropzone,
-    body:has(#queue article) .pick-row,
     body:has(#queue article) .divider,
     body:has(#queue article) .sample-strip,
     body:has(#queue article) #form > .url-row,
@@ -1786,8 +1777,9 @@ code {
         display: none;
     }
 
-    /* #form itself is never display:none. The camera and library inputs are
-       in it, and a label cannot open a file picker for an input with no box. */
+    /* #form itself is never display:none. The file input is in it, and a
+       label cannot open a picker for an input with no box -- which is what
+       the bar's "Add a picture" is. */
     body:has(#queue article) #form {
         gap: 0;
     }
@@ -2152,4 +2144,176 @@ code {
         align-items: flex-start;
         gap: 6px;
     }
+}
+
+/* ------------------------------------------------------------------ 404 --
+   A wrong URL, and -- more often -- a shared link whose picture has been
+   swept. Centred in the layout rather than dropped into the app's two-column
+   grid, which has nothing to put in either column here. */
+.lost {
+    flex: 1 1 100%;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 14px;
+    text-align: center;
+    padding: 64px 0 80px;
+}
+
+.lost h1 {
+    margin: 0;
+}
+
+.lost .lead {
+    max-width: 46ch;
+    margin: 0;
+    color: var(--muted);
+}
+
+.lost-glasses {
+    width: 132px;
+    opacity: 0.5;
+    filter: var(--invert);
+    /* Sat on the nose of nothing at all. */
+    transform: rotate(-8deg);
+}
+
+.lost-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    justify-content: center;
+    margin: 10px 0 0;
+}
+
+@media (max-width: 600px) {
+    .lost {
+        padding: 40px 0 56px;
+    }
+
+    .lost-glasses {
+        width: 96px;
+    }
+}
+
+/* ---------------------------------------------------------- shared result --
+   /s/<id>: one result on its own page, for someone who was not here. */
+.shared {
+    flex: 1 1 100%;
+    max-width: 720px;
+    margin: 0 auto;
+    padding: 32px 0 64px;
+    text-align: center;
+}
+
+.shared h1 {
+    margin: 0 0 4px;
+}
+
+.shared .lead {
+    margin: 0 0 22px;
+    color: var(--muted);
+}
+
+.shared .result {
+    text-align: left;
+}
+
+/* The expiry line, on a card and on a shared page. countdown.js rewrites the
+   text; the server-rendered absolute time is what it says without script. */
+.card-share {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    flex-wrap: wrap;
+    /* No horizontal padding: .card-foot has none either, and the two rows sit
+       under one another -- an inset here made the lower one look indented. */
+    padding: 8px 0 10px;
+    font-size: 0.82rem;
+    color: var(--muted);
+}
+
+.expiry {
+    font-variant-numeric: tabular-nums;
+}
+
+.expiry.gone {
+    color: var(--danger, #c0392b);
+}
+
+.card-share .share {
+    font-weight: 600;
+}
+
+/* --------------------------------------------------- download and share --
+   One Download that opens the formats, rather than one link per format:
+   which formats exist depends on what was submitted, so the row used to be
+   two items wide sometimes and three others. */
+.download-menu {
+    position: relative;
+}
+
+.download-menu > summary {
+    list-style: none;
+    cursor: pointer;
+}
+
+.download-menu > summary::-webkit-details-marker {
+    display: none;
+}
+
+/* The arrow, and which way it points. */
+.download-menu > summary::after {
+    content: '';
+    display: inline-block;
+    width: 0;
+    height: 0;
+    margin-left: 7px;
+    vertical-align: middle;
+    border-left: 4px solid transparent;
+    border-right: 4px solid transparent;
+    border-top: 5px solid currentColor;
+    transition: transform 0.12s ease;
+}
+
+.download-menu[open] > summary::after {
+    transform: rotate(180deg);
+}
+
+.download-menu .formats {
+    position: absolute;
+    right: 0;
+    bottom: calc(100% + 6px);
+    z-index: 3;
+    display: flex;
+    flex-direction: column;
+    min-width: 100%;
+    padding: 4px;
+    border: 1px solid var(--border-strong);
+    border-radius: 10px;
+    background: var(--surface);
+    box-shadow: 0 8px 24px rgb(0 0 0 / 18%);
+}
+
+.download-menu .formats a {
+    padding: 7px 14px;
+    border-radius: 6px;
+    font-size: 0.82rem;
+    font-weight: 600;
+    text-decoration: none;
+    color: var(--text);
+    white-space: nowrap;
+}
+
+.download-menu .formats a:hover {
+    background: var(--bg);
+    color: var(--accent);
+}
+
+/* Hidden until share.js has asked the browser whether it can share a file.
+   `[hidden]` alone loses to the flex display the footer gives its children. */
+.card-foot .share-system[hidden] {
+    display: none;
 }

@@ -2,16 +2,18 @@
 
 Two pages: the app at ``/`` and the docs at ``/docs``. Submitting a picture
 swaps a card into ``#queue``; the card polls itself until the worker is done
-and then turns into the result in place. Two lines of script in the whole
-interface: the clipboard call on the docs page, and ``UPLOAD_ONE_BY_ONE``,
-which htmx has no attribute for.
+and then turns into the result in place. Four pieces of script in the whole
+interface, three of them enhancements the page reads correctly without: the
+clipboard call on the docs page, ``UPLOAD_ONE_BY_ONE`` (which htmx has no
+attribute for), ``countdown.js``, which turns a server-rendered expiry into a
+ticking one, and ``share.js``, which reveals a button that cannot honestly be
+offered until the browser has said it can share a file.
 """
 
-import base64
 import json
 import logging
 from dataclasses import dataclass
-from functools import cache
+from datetime import datetime
 from pathlib import Path
 
 from fasthtml.common import (
@@ -32,6 +34,7 @@ from fasthtml.common import (
     Footer,
     Form,
     Header,
+    Html,
     Img,
     Input,
     Label,
@@ -42,22 +45,32 @@ from fasthtml.common import (
     P,
     Pre,
     Progress,
+    Script,
     Section,
     Span,
     Summary,
+    Time,
     Title,
     UploadFile,
     cookie,
     fast_app,
+    to_xml,
 )
 from pydantic import ValidationError
 from starlette.concurrency import run_in_threadpool
-from starlette.responses import Response
+from starlette.responses import HTMLResponse, JSONResponse, Response
 
-from src import images, jobs, throttle
+from src import blobs, images, jobs, throttle
 from src.assets import asset
 from src.config import get_settings
-from src.models import ImageRequest, JobResult, JobSource, JobState, SourceKind
+from src.models import (
+    ImageRequest,
+    JobImages,
+    JobResult,
+    JobSource,
+    JobState,
+    SourceKind,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -131,16 +144,15 @@ EXAMPLE_SAMPLE = 'apollo'
 EXAMPLE_SOURCE = 'https://upload.wikimedia.org/wikipedia/commons/3/3d/Apollo_11_Crew.jpg'
 
 
-@cache
-def sample_data_uri(name: str) -> str:
-    """A sample picture as a data URI, read once per process.
+def sample_source(name: str) -> bytes:
+    """A sample picture as submitted: the committed file, at full size.
 
-    Base64 rather than a ``/static`` URL: the worker's SSRF guard refuses to
-    fetch our own, non-public host.
+    Copied into the job's directory rather than fetched from our own
+    ``/static``, because the worker's SSRF guard refuses our own non-public
+    host. Never the tile: SAMPLE_FACES pins a face count per sample and those
+    counts move when the width does.
     """
-    sample = SAMPLES[name]
-    payload = base64.b64encode((IMG_DIR / sample.filename).read_bytes()).decode()
-    return f'data:{sample.media_type};base64,{payload}'
+    return (IMG_DIR / SAMPLES[name].filename).read_bytes()
 
 
 def _first_message(exc: ValidationError) -> str:
@@ -184,9 +196,15 @@ def _theme_colour(theme: str | None) -> tuple:
     )
 
 
-def head_tags(title: str, theme: str | None) -> tuple:
-    """Metadata that belongs in <head>. FastHTML hoists these out of a page."""
-    card = _absolute('/static/img/deal_with_me.png')
+def head_tags(title: str, theme: str | None, image: str | None = None,
+              description: str | None = None) -> tuple:
+    """Metadata that belongs in <head>. FastHTML hoists these out of a page.
+
+    ``image`` overrides the social card, which is what makes a shared result
+    unfurl into the actual picture rather than the site's own artwork.
+    """
+    card = _absolute(image or '/static/img/deal_with_me.png')
+    blurb = description or 'A Python API for creating "Deal With It"-like Images'
     return (
         Title(title),
         # viewport-fit=cover lets the band paint under a phone's status bar;
@@ -194,7 +212,7 @@ def head_tags(title: str, theme: str | None) -> tuple:
         Meta(name='viewport',
              content='width=device-width,initial-scale=1,viewport-fit=cover'),
         Meta(name='author', content='Eric Magalhães'),
-        Meta(name='description', content='A Python API for creating "Deal With It"-like Images'),
+        Meta(name='description', content=blurb),
         Meta(name='application-name', content='Deal With It!'),
         Meta(name='apple-mobile-web-app-title', content='Deal With It!'),
         Meta(name='apple-mobile-web-app-capable', content='yes'),
@@ -205,14 +223,12 @@ def head_tags(title: str, theme: str | None) -> tuple:
         Meta(name='twitter:card', content='summary_large_image'),
         Meta(name='twitter:creator', content='@ericovis'),
         Meta(name='twitter:title', content='Deal with it!'),
-        Meta(name='twitter:description',
-             content='A Python API for creating "Deal With It"-like Images'),
+        Meta(name='twitter:description', content=blurb),
         Meta(name='twitter:image', content=card),
         Meta(property='og:title', content='Deal with it!'),
         Meta(property='og:type', content='website'),
         Meta(property='og:image', content=card),
-        Meta(property='og:description',
-             content='A Python API for creating "Deal With It"-like Images.'),
+        Meta(property='og:description', content=blurb),
         Link(rel='icon', href=asset('/static/img/favicon.png'), type='image/png',
              sizes='16x16'),
         Link(rel='icon', href=asset('/static/img/icons/favicon-64.png'), type='image/png',
@@ -225,6 +241,12 @@ def head_tags(title: str, theme: str | None) -> tuple:
                                     'family=Manrope:wght@400;500;600;700;800&'
                                     'family=Fira+Code:wght@400;500&display=swap'),
         Link(rel='stylesheet', href=asset('/static/css/style.css')),
+        # The two scripts that are not htmx wiring. Both are enhancements:
+        # the countdown turns a server-rendered expiry into a ticking one, and
+        # share.js reveals a button that cannot be offered without first
+        # asking the browser whether it can share a file at all.
+        Script(src=asset('/static/js/countdown.js'), defer=True),
+        Script(src=asset('/static/js/share.js'), defer=True),
     )
 
 
@@ -346,6 +368,11 @@ def upload_form(replace: bool = False) -> Form:
 
     The file input sits before the card on purpose: the card is the file
     input's label, and dropping onto a file input's label counts as choosing.
+
+    One input for every device. A phone's picker already offers the camera
+    beside the library, so a second `capture` input only made the same sheet
+    open from two places -- and `capture` actively *hides* the library, which
+    was the opposite of what the second button promised.
     """
     return Form(
         Input(type='file', id='files', name='image', accept='image/*', multiple=True,
@@ -360,31 +387,12 @@ def upload_form(replace: bool = False) -> Form:
                 Span('Drop pictures here', cls='title desktop-only'),
                 Span('Add a picture', cls='title mobile-only'),
                 Span('or ', Em('browse your computer'), cls='sub desktop-only'),
-                Span('Take one now, or pick from your library', cls='sub mobile-only'),
+                Span('Camera or library, whichever you like', cls='sub mobile-only'),
                 fr='files', cls='dropzone-face',
-            ),
-            # Inside the card, where the design puts them -- but beside the
-            # label rather than in it, because a label cannot nest in a
-            # label. `.dropzone-face::before` covers the rest of the card, so
-            # tapping or dropping anywhere else still reaches the input.
-            Div(
-                Label('Take a photo', fr='camera', cls='btn camera'),
-                Label('Choose from library', fr='files', cls='btn ghost'),
-                cls='pick-row mobile-only',
             ),
             Span('PNG or JPEG, up to 10 MB each. Several at once is fine.', cls='limits'),
             cls='dropzone',
         ),
-        # After the card, so `#files + .dropzone` still reaches it. `capture`
-        # makes a phone open the camera instead of the picker, and it takes
-        # one picture at a time, so it posts for itself rather than going
-        # through UPLOAD_ONE_BY_ONE. A desktop browser ignores the attribute,
-        # and nothing points at this input above 600px.
-        Input(type='file', id='camera', name='image', accept='image/*',
-              capture='environment', cls='visually-hidden',
-              hx_post='/submit', hx_trigger='change',
-              hx_encoding='multipart/form-data',
-              hx_target='#queue', hx_swap='afterbegin'),
         Div('or a URL', cls='divider'),
         Div(
             Input(type='text', id='url', name='url',
@@ -410,10 +418,19 @@ def upload_form(replace: bool = False) -> Form:
     )
 
 
+def tile_url(sample: Sample) -> str:
+    """The picture the grid shows. Never the one it submits: the counts in
+    the captions depend on the original's width, so display and submission
+    must not share a file. ``scripts/make_tiles.py`` writes these."""
+    return asset(f'/static/img/tiles/{Path(sample.filename).stem}.webp')
+
+
 def sample_tile(name: str) -> Button:
     sample = SAMPLES[name]
     return Button(
-        Img(src=asset(f'/static/img/{sample.filename}'), alt=''),
+        # Square because the CSS crops it square anyway; width and height so
+        # the grid does not reflow as sixteen of them arrive.
+        Img(src=tile_url(sample), alt='', width=200, height=200),
         Span(B(sample.title), Span(sample.filename), cls='caption'),
         type='button',
         cls='sample',
@@ -464,10 +481,12 @@ def session_section() -> Section:
 def addbar() -> Nav:
     """The bar a phone gets once there is something in the list.
 
-    Camera and Library are labels for the form's two file inputs. URL and
-    Samples are labels for radios: checking one is what the CSS re-lays the
-    URL row or the sample grid over the bar for, and #show-none is how a
-    second tap on the open one closes it again.
+    "Add a picture" is a label for the one file input, which is the same
+    control the dropzone card is. A phone's picker already offers the camera
+    alongside the library, so splitting it in two only made the same sheet
+    open from two places. URL and Samples are labels for radios: checking one
+    is what the CSS re-lays the URL row or the sample grid over the bar for,
+    and #show-none is how a second tap on the open one closes it again.
     """
     def panel(text: str, target: str) -> Div:
         return Div(
@@ -483,8 +502,7 @@ def addbar() -> Nav:
               aria_label='Submit a URL'),
         Input(type='radio', id='show-samples', name='addbar', cls='visually-hidden',
               aria_label='Show the samples'),
-        Label('Camera', fr='camera', cls='addbar-item'),
-        Label('Library', fr='files', cls='addbar-item'),
+        Label('Add a picture', fr='files', cls='addbar-item add'),
         panel('URL', 'show-url'),
         panel('Samples', 'show-samples'),
         cls='addbar',
@@ -499,6 +517,174 @@ def page(theme: str | None, reachable: bool) -> tuple:
         addbar(),
         site_footer('app'),
     )
+
+
+def expiry_line(expires_at) -> Time:
+    """When this result stops existing.
+
+    The absolute time is the truth and is rendered server-side, so the
+    sentence is correct with JavaScript off. countdown.js turns it into a
+    ticking one; `datetime` is what it reads.
+    """
+    return Time(
+        f'This image will be deleted at {expires_at:%H:%M} UTC',
+        datetime=expires_at.strftime('%Y-%m-%dT%H:%M:%SZ'),
+        data_expires=True,
+        cls='expiry',
+    )
+
+
+def llms_txt() -> str:
+    """The /llms.txt an agent reads before trying to use this.
+
+    Generated rather than committed, because half of it is numbers that live
+    in Settings -- a static file would quietly start lying the first time
+    someone changed a limit. Follows llmstxt.org: a title, a summary
+    blockquote, then sections of links.
+    """
+    settings = get_settings()
+    base = settings.public_url.rstrip('/') or 'http://localhost:5000'
+    megabytes = settings.max_image_bytes // 1024 // 1024
+    minutes = settings.blob_ttl // 60
+    return f"""# Deal With It!
+
+> Puts the "Deal With It" sunglasses on every face in a picture. Submit an
+> image by URL or as base64, poll a job id, and get back links to the result
+> in several sizes and formats. Free, unauthenticated, and rate limited.
+
+Processing is asynchronous: detection takes a few seconds, so a submission
+returns a job id and you poll for the result. Results are deleted after
+{minutes} minutes -- fetch anything you want to keep.
+
+## Using the API
+
+- [OpenAPI schema]({base}/api/openapi.json): the machine-readable contract.
+- [Interactive docs]({base}/api/docs): the same, with a try-it button.
+- [How it works]({base}/docs): prose, with the detection pipeline explained.
+
+Two calls, in order:
+
+```
+POST {base}/api/jobs      {{"url": "https://example.com/photo.jpg"}}
+                          -> 202 {{"job_id": "...", "status_url": "..."}}
+
+GET  {base}/api/jobs/ID   -> {{"state": "queued"|"started"|"finished"|"failed"}}
+```
+
+Poll once a second. When `state` is `finished`:
+
+- `images.view` -- WebP, 1600px. Show this to a person.
+- `images.thumb` -- WebP, 160px. Appears *before* the job finishes.
+- `images.before` -- the submitted picture, same size as `view`.
+- `images.full` -- full resolution, in the format it was submitted in.
+- `images.card` -- JPEG, 1200px, for `og:image` where WebP is not safe.
+- `downloads` -- the full-resolution result keyed by format.
+- `faces` -- a box, a score and 68 landmarks per face, in submitted-image
+  coordinates. Useful if you want to draw something else instead.
+- `expires_at` -- when every link above stops working.
+- `share_url` -- a page showing the result, safe to hand to someone.
+
+## Limits
+
+- One image per request, up to {megabytes} MB and {settings.max_image_pixels:,} pixels.
+- {settings.rate_limit} submissions per {settings.rate_window} seconds per client;
+  over that is `429` with `Retry-After`.
+- A full queue is `503`, also with `Retry-After`.
+- A job is given {settings.job_timeout} seconds before it is abandoned.
+- URLs must be public: private and loopback addresses are refused.
+
+## Notes
+
+- A `failed` job carries a readable `error` -- an unreachable URL, an
+  undecodable image, or no faces found. Those are outcomes, not bugs.
+- The detector finds dogs sometimes. The score does not separate them from
+  people, so there is no threshold that would.
+- Nothing here is durable storage, and there is no authentication. Do not
+  submit anything you would mind a stranger seeing at an unguessable URL.
+
+## Optional
+
+- [Source]({REPO}): MIT licensed.
+- [Load and limits]({REPO}/blob/master/docs/LOAD.md): measured throughput,
+  memory and abuse behaviour.
+"""
+
+
+def not_found_page(theme: str | None, reachable: bool,
+                   heading: str = 'Nothing here',
+                   message: str = 'That page does not exist.',
+                   expired: bool = False) -> tuple:
+    """What a wrong or worn-out URL gets.
+
+    Its own page rather than a bare status line, because most of the 404s this
+    app produces are not typos: they are shared links whose pictures have
+    expired, and "gone" is a different thing to say than "never existed".
+    """
+    return (
+        *head_tags(f'{heading} | Deal With It', theme),
+        site_header('app', theme, reachable),
+        Main(
+            Section(
+                Img(src=asset('/static/img/glasses.svg'), alt='', cls='lost-glasses'),
+                H1(heading),
+                P(message, cls='lead'),
+                P(
+                    A('Deal with another picture', href='/', cls='btn'),
+                    A('How it works', href='/docs', cls='btn ghost'),
+                    cls='lost-actions',
+                ),
+                cls='lost',
+            ),
+            cls='container layout',
+        ),
+        site_footer('app'),
+    )
+
+
+def not_found_response(theme: str | None, **kwargs) -> HTMLResponse:
+    """The 404 page as a response. Rendered here rather than returned as
+    components, because an exception handler is plain Starlette and does not
+    go through FastHTML's own rendering."""
+    document = not_found_page(theme, jobs.is_broker_reachable(), **kwargs)
+    # to_xml on an Html element emits the doctype itself.
+    return HTMLResponse(to_xml(Html(*document)), status_code=404)
+
+
+def share_page(job_id: str, record: dict, theme: str | None, reachable: bool) -> tuple:
+    """One result, standing on its own, for someone who was not here.
+
+    Rendered from the job's own meta.json rather than from Redis: the job
+    record expires at `result_ttl` and the pictures at `blob_ttl`, so a
+    Redis-backed page would go dark while its own images were still up.
+    """
+    pictures = JobImages(**{role: blobs.url(ref) for role, ref in record['images'].items()})
+    downloads = {fmt: blobs.url(ref) for fmt, ref in (record.get('downloads') or {}).items()}
+    expires_at = datetime.fromisoformat(record['expires_at'])
+    faces = record.get('faces') or 0
+    caption = ('Deal With It — glasses on '
+               f'{faces} face{"" if faces == 1 else "s"}')
+    return (
+        *head_tags(f'{caption} | Deal With It', theme,
+                   image=pictures.card or pictures.full, description=caption),
+        site_header('app', theme, reachable),
+        Main(
+            Section(
+                H1('Someone dealt with it'),
+                P(caption, cls='lead'),
+                _result_view(job_id, pictures, downloads, expires_at=expires_at),
+                cls='shared',
+            ),
+            cls='container layout',
+        ),
+        site_footer('app'),
+    )
+
+
+EXPIRED_HEADING = 'That one has expired'
+EXPIRED_MESSAGE = (
+    'Results are kept for a short while and then deleted, so this link has '
+    'outlived its picture. Nothing was lost that was not going to be.'
+)
 
 
 # ------------------------------------------------------------------- cards
@@ -536,16 +722,36 @@ def _subtitle(result: JobResult, source: JobSource) -> str:
     return kind
 
 
-def _result_view(job_id: str, image: str, before: str | None) -> Div:
+def download_menu(job_id: str, downloads: dict[str, str]) -> Details:
+    """One Download control that opens the formats.
+
+    A `<details>` because it needs no script and closes on click-away with
+    `::details-content`; the same element the docs contents list uses. The
+    formats are whichever ones the worker wrote, which depends on what was
+    submitted, so the list is never longer than it is useful.
+    """
+    return Details(
+        Summary('Download', cls='download'),
+        Div(
+            *[A(fmt.upper(), href=url, download=f'deal-with-it-{job_id[:8]}.{fmt}')
+              for fmt, url in sorted(downloads.items())],
+            cls='formats',
+        ),
+        cls='download-menu',
+    )
+
+
+def _result_view(job_id: str, pictures: JobImages, downloads: dict[str, str],
+                 share_url: str | None = None, expires_at=None) -> Div:
     """The finished image, its Before/After toggle, and the full-screen view.
 
     The full-screen view re-lays out the *same* frame rather than a copy, so
-    the result data URI is sent once. A checkbox drives it because
-    ``<dialog>`` cannot open without script.
+    the picture is referenced once. A checkbox drives it because ``<dialog>``
+    cannot open without script.
     """
     toggle = f'full-{job_id}'
     zoom = f'zoom-{job_id}'
-    extension = 'jpg' if image.startswith('data:image/jpeg') else 'png'
+    image, before = pictures.view, pictures.before
     footer = [
         Span(cls='spacer'),
         Input(type='checkbox', id=toggle, cls='full-toggle visually-hidden'),
@@ -556,8 +762,13 @@ def _result_view(job_id: str, image: str, before: str | None) -> Div:
         # too small to read. Native pinch still works either way.
         Input(type='checkbox', id=zoom, cls='zoom-toggle visually-hidden'),
         Label(Span('Zoom', cls='in'), Span('Fit', cls='out'), fr=zoom, cls='zoom'),
-        A(f'Download {extension.upper()}', href=image,
-          download=f'deal-with-it-{job_id[:8]}.{extension}', cls='download'),
+        # Hidden until a browser says it can actually share a file, which
+        # share.js does. On a phone this is the system sheet -- save to
+        # Photos, send on WhatsApp -- and there is no way to offer that
+        # without asking the browser first.
+        Button('Share', type='button', cls='share-system', hidden=True,
+               data_share=pictures.full, data_name=f'deal-with-it-{job_id[:8]}'),
+        download_menu(job_id, downloads),
     ]
     # Tapping the picture opens it, which is what a phone expects. Sized over
     # the frame rather than wrapping it, because the frame is also the
@@ -586,6 +797,16 @@ def _result_view(job_id: str, image: str, before: str | None) -> Div:
             *footer,
         ]
 
+    below = []
+    if share_url or expires_at:
+        below.append(Div(
+            # Not "Share": the button above already is, and it does a
+            # different thing. This one opens a page to send someone.
+            *( [A('Get a link', href=share_url, cls='share')] if share_url else [] ),
+            *( [expiry_line(expires_at)] if expires_at else [] ),
+            cls='card-share',
+        ))
+
     return Div(
         frame,
         # Clicking the space around the image closes it.
@@ -594,6 +815,7 @@ def _result_view(job_id: str, image: str, before: str | None) -> Div:
         Label('×', fr=toggle, cls='lightbox-close', title='Close',
               aria_label='Close the full-size view'),
         Div(*controls, cls='card-foot'),
+        *below,
         cls='result',
     )
 
@@ -616,17 +838,21 @@ def card(job_id: str, result: JobResult | None, source: JobSource,
     label, chip = CHIPS.get(
         result.state, CHIPS[JobState.QUEUED] if polls else CHIPS[JobState.FAILED])
 
-    # A data URI only once the card has stopped polling; otherwise it would
-    # be re-sent every second.
-    thumb = source.thumb or (source.original if finished else None)
+    # A submission that came with a picture we already serve (a URL, a
+    # sample tile) shows that; anything else waits for the worker to write a
+    # thumbnail. Never the picture itself: inlined twice over, a 7.9 MB upload
+    # made a 42 MB poll response on a host whose two cores the worker wants.
+    pictures = result.images
+    submitted = source.thumb or (pictures.thumb if pictures else None)
 
     body: list = []
     if result.state == JobState.STARTED:
         body.append(Progress(value=result.progress, max=100))
     elif polls:
         body.append(Progress(max=100))
-    elif finished and result.image:
-        body.append(_result_view(job_id, result.image, source.thumb or source.original))
+    elif finished and pictures:
+        body.append(_result_view(job_id, pictures, result.downloads or {},
+                                 result.share_url, result.expires_at))
     else:
         message = result.error or 'That did not work.'
         retry = [Button('Retry', type='button', cls='retry',
@@ -637,7 +863,7 @@ def card(job_id: str, result: JobResult | None, source: JobSource,
     return Article(
         Div(
             Div(
-                Img(src=thumb, alt='', cls='thumb') if thumb else Div(cls='thumb'),
+                Img(src=submitted, alt='', cls='thumb') if submitted else Div(cls='thumb'),
                 Div(B(source.label or ('Unknown job' if expired else 'Picture')),
                     Span('' if expired else _subtitle(result, source)), cls='card-id'),
                 Span(label, cls=chip),
@@ -701,7 +927,12 @@ def snippet(text: str) -> Div:
 
 
 def figure(src: str, alt: str, caption: str) -> Figure:
-    return Figure(Img(src=asset(src), alt=alt), Figcaption(caption))
+    """A docs illustration, shown at about 372 CSS px. The WebP beside the
+    original is what gets sent; the original stays because it is the file the
+    prose is about, and `deal_with_me.png` is also the og:image, which
+    scrapers want as a PNG."""
+    derived = f'/static/img/figures/{Path(src).stem}.webp'
+    return Figure(Img(src=asset(derived), alt=alt, loading='lazy'), Figcaption(caption))
 
 
 def tile(name: str, description: str) -> Div:
@@ -782,7 +1013,7 @@ def docs_page(theme: str | None, reachable: bool) -> tuple:
                       A('FastHTML', href='https://fastht.ml'), ' + htmx, the REST API is ',
                       A('FastAPI', href='https://fastapi.tiangolo.com'), '.'),
                     Div(
-                        tile('web', 'Serves the page and the JSON API. Never touches an image.'),
+                        tile('web', 'Serves the page and the JSON API. Never decodes an image.'),
                         tile('worker', 'Pulls jobs off the queue, fetches and decodes the '
                                        'image, draws the glasses.'),
                         tile('redis', 'The queue, and where results wait to be collected.'),
@@ -810,18 +1041,36 @@ def docs_page(theme: str | None, reachable: bool) -> tuple:
                     P(Code('GET'), ' the ', Code('status_url'), ' until ', Code('state'),
                       ' is ', Code('finished'), ' or ', Code('failed'), ':'),
                     snippet('{\n  "job_id": "9f2c...",\n  "state": "finished",\n'
-                            '  "image": "data:image/png;base64,...",\n  "error": null,\n'
+                            '  "images": {\n'
+                            '    "view":   ".../i/9f2c.../view.webp",\n'
+                            '    "thumb":  ".../i/9f2c.../thumb.webp",\n'
+                            '    "before": ".../i/9f2c.../before.webp",\n'
+                            '    "full":   ".../i/9f2c.../result.jpg"\n  },\n'
+                            '  "downloads": {"jpg": "...", "webp": "..."},\n'
+                            '  "share_url": ".../s/9f2c...",\n'
+                            '  "expires_at": "2026-09-04T17:32:00Z",\n'
+                            '  "error": null,\n'
                             '  "progress": 100,\n  "step": "Done",\n'
                             '  "detection": "plain",\n'
                             '  "faces": [{"box": [101, 420, 402, 197], "score": 0.95,\n'
                             '             "points": {"left_eye": [249.7, 225.3], ...},\n'
                             '             "landmarks": [[199.0, 208.0], ...]}]\n}'),
+                    P(Code('images'), ' are links, not bytes. ', Code('view'),
+                      ' is what to show someone -- WebP, 1600px, a fortieth of the '
+                      'full-resolution file -- and ', Code('full'), ' keeps the format '
+                      'the picture was submitted in. ', Code('downloads'),
+                      ' offers the same picture in whichever formats were written for '
+                      'it. Everything under ', Code('/i/'), ' stops existing at ',
+                      Code('expires_at'), ', and so does ', Code('share_url'), '.'),
                     P(Code('state'), ' is one of ', Code('queued'), ', ', Code('started'),
                       ', ', Code('finished'), ' or ', Code('failed'), '. A failed job '
                       'carries a readable ', Code('error'), ': an unreachable URL, an '
                       'undecodable image, or no faces found. An unknown or expired job id '
                       'gives a ', Code('404'), '. The result is a JPEG when the input was '
                       'a JPEG and a PNG otherwise.'),
+                    P('Before version 2, the result came back inline as ', Code('image'),
+                      ': a base64 data URI, megabytes of it, in every poll. That field '
+                      'is gone.'),
                     P('Submissions are limited per client and refused with ', Code('429'),
                       ' (too many in a minute) or ', Code('503'), ' (the queue is full); '
                       'both carry a ', Code('Retry-After'), ' header.'),
@@ -864,8 +1113,14 @@ def docs_page(theme: str | None, reachable: bool) -> tuple:
 # ---------------------------------------------------------------- handlers
 
 
-async def _upload_payload(upload: UploadFile) -> str:
-    """Read an upload into a data URI, or say why it cannot be used."""
+async def _store_upload(job_id: str, upload: UploadFile) -> str:
+    """Put an upload in the job's directory, or say why it cannot be used.
+
+    Bytes, not an image: nothing here opens the file, so the web tier still
+    never runs an attacker-supplied decoder. It is strictly less work than
+    the base64 encode this replaced, and the picture no longer travels
+    through Redis at all.
+    """
     settings = get_settings()
     content_type = upload.content_type or ''
     if not content_type.startswith('image/'):
@@ -877,22 +1132,31 @@ async def _upload_payload(upload: UploadFile) -> str:
         )
     if not payload:
         raise ValueError('That file is empty.')
-    return f'data:{content_type};base64,{base64.b64encode(payload).decode()}'
+    # The extension comes from an allowlist, never from the client's own
+    # string: these files are served straight off disk.
+    name = f'source.{blobs.extension_for(content_type)}'
+    return await run_in_threadpool(blobs.put, job_id, name, payload)
 
 
 def _enqueue(payload: dict, kind: SourceKind, label: str,
-             thumb: str | None = None, client: str | None = None) -> Article:
+             thumb: str | None = None, client: str | None = None,
+             job_id: str | None = None) -> Article:
     """Validate, queue, and hand back the card for whatever state it is in."""
-    try:
-        request = ImageRequest.model_validate(payload)
-    except ValidationError as exc:
-        return rejected_card(label, kind, _first_message(exc))
+    if payload.get('url') is not None:
+        try:
+            request = ImageRequest.model_validate(
+                {'url': payload['url'], 'base64': None})
+        except ValidationError as exc:
+            return rejected_card(label, kind, _first_message(exc))
+        payload = {'url': str(request.url), 'blob': None}
+    elif not payload.get('blob'):
+        return rejected_card(label, kind, NOTHING_SUBMITTED)
     try:
         throttle.admit(client)
     except throttle.Throttled as exc:
         return rejected_card(label, kind, str(exc))
     job_id, _ = jobs.enqueue(
-        request.as_payload(),
+        payload, job_id=job_id,
         meta={'kind': str(kind), 'label': label, 'thumb': thumb},
     )
     return card_for(job_id)
@@ -955,20 +1219,28 @@ def create_ui():
         if name not in SAMPLES:
             return rejected_card(name, SourceKind.SAMPLE, NOTHING_SUBMITTED)
         sample = SAMPLES[name]
+        job_id = jobs.new_id()
+        reference = blobs.put(job_id, f'source.{Path(sample.filename).suffix[1:]}',
+                              sample_source(name))
         # Samples do not reset the form: the buttons sit outside it.
         return _enqueue(
-            {'url': None, 'base64': sample_data_uri(name)},
-            SourceKind.SAMPLE, sample.filename, asset(f'/static/img/{sample.filename}'), client,
+            {'url': None, 'blob': reference},
+            SourceKind.SAMPLE, sample.filename, tile_url(sample), client, job_id,
         )
 
     async def _submit_file(upload: UploadFile, client: str | None):
         label = upload.filename or 'Uploaded image'
+        job_id = jobs.new_id()
         try:
-            payload = await _upload_payload(upload)
+            reference = await _store_upload(job_id, upload)
         except ValueError as exc:
             return rejected_card(label, SourceKind.UPLOAD, str(exc))
+        except OSError:
+            logger.exception('could not store an upload for job %s', job_id)
+            return rejected_card(label, SourceKind.UPLOAD, 'Could not store that image.')
         return await run_in_threadpool(
-            _enqueue, {'url': None, 'base64': payload}, SourceKind.UPLOAD, label, None, client)
+            _enqueue, {'url': None, 'blob': reference},
+            SourceKind.UPLOAD, label, None, client, job_id)
 
     def _submit_url(url: str, client: str | None):
         """A bad URL answers in the hint, not with a card: no job was created,
@@ -1033,6 +1305,35 @@ def create_ui():
         return theme_state(chosen), cookie(
             THEME_COOKIE, chosen, max_age=THEME_MAX_AGE, path='/', samesite='lax',
         )
+
+    async def _not_found(request, exc):
+        """Only the interface answers with a page.
+
+        `/api/*` is a published JSON contract and keeps its `{"detail": ...}`
+        even for a path no route claims; `/static/*` and `/i/*` never reach
+        here, and an HTML body would be a nonsense response to an <img>.
+        """
+        if request.url.path.startswith('/api/'):
+            return JSONResponse({'detail': 'Not Found'}, status_code=404)
+        return not_found_response(theme_of(request))
+
+    app.add_exception_handler(404, _not_found)
+
+    @app.get('/s/{job_id}')
+    def shared(request, job_id: str):
+        """A finished result, by link. Read off disk, so it lives exactly as
+        long as the pictures it shows."""
+        record = jobs.shared_record(job_id)
+        if record is None:
+            return not_found_response(theme_of(request), heading=EXPIRED_HEADING,
+                                      message=EXPIRED_MESSAGE)
+        return share_page(job_id, record, theme_of(request), jobs.is_broker_reachable())
+
+    @app.get('/llms.txt')
+    def llms(request):
+        """What an agent reads before trying to use this. Plain text, because
+        that is what llmstxt.org asks for and what a fetch tool expects."""
+        return Response(llms_txt(), media_type='text/plain; charset=utf-8')
 
     @app.get('/empty')
     def empty():

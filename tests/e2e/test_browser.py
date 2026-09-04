@@ -1,8 +1,11 @@
 """The interface, driven by a browser, against the whole real stack."""
 
+import re
+
 import pytest
 from playwright.sync_api import Page, expect
 
+from src.config import get_settings
 from src.ui import EXAMPLE_SOURCE, SAMPLES
 from tests.conftest import make_png
 from tests.e2e.conftest import TIMEOUT
@@ -18,6 +21,17 @@ def try_sample(page: Page, name: str) -> None:
     page.locator('.sample', has_text=SAMPLES[name].filename).click()
 
 
+#: Drops a <time data-expires> on the page with a chosen number of seconds
+#: left, so the units can be checked without waiting an hour for a real one.
+SPAWN_EXPIRY = """(seconds) => {
+    const t = document.createElement('time');
+    t.id = 'probe';
+    t.setAttribute('data-expires', '');
+    t.setAttribute('datetime', new Date(Date.now() + seconds * 1000).toISOString());
+    document.body.appendChild(t);
+}"""
+
+
 def first_card(page: Page):
     return page.locator('#queue article').first
 
@@ -29,6 +43,21 @@ def run(page: Page, name: str, outcome: str = 'done'):
     card = first_card(page)
     expect(card.locator(f'.chip.{outcome}')).to_be_visible(timeout=TIMEOUT)
     return card
+
+
+def test_the_pins_took(live_server):
+    """The settings this suite depends on are actually in force.
+
+    Not paranoia: the rate limit silently reverted to thirty a minute for a
+    long time, and because this suite submits far more than that from one
+    address, the symptom was a card coming back Failed in whichever test
+    happened to cross the line -- a different one each run, and only sometimes.
+    Cheaper to assert the cause than to keep diagnosing the symptom.
+    """
+    settings = get_settings()
+    assert settings.rate_limit == 0, 'the suite would throttle itself'
+    assert settings.http_timeout == 1, 'one hung fetch would block the worker'
+    assert settings.blob_dir, 'the store must not land next to the checkout'
 
 
 class TestSubmitting:
@@ -252,7 +281,7 @@ class TestOnAPhone:
     def test_the_input_is_the_whole_page_until_there_is_a_result(self, page: Page):
         page.goto('/')
         expect(page.locator('.lede')).to_be_visible()
-        expect(page.locator('.pick-row')).to_be_visible()
+        expect(page.locator('.dropzone')).to_be_visible()
         expect(page.locator('.addbar')).to_be_hidden()
 
     def test_a_result_takes_the_screen_and_the_input_moves_to_the_bar(self, page: Page):
@@ -282,24 +311,27 @@ class TestOnAPhone:
         expect(page.locator('.sample-strip')).to_be_visible()
         expect(page.locator('#url')).to_be_hidden(), 'one panel at a time'
 
-    def test_the_two_buttons_reach_the_two_inputs(self, page: Page):
-        """They sit inside the card, beside the label rather than in it."""
+    def test_the_card_opens_the_one_picker(self, page: Page):
+        """One input for both devices: a phone's picker already offers the
+        camera beside the library."""
         page.goto('/')
-        with page.expect_file_chooser() as camera:
-            page.locator('.pick-row .camera').click()
-        assert not camera.value.is_multiple(), 'one photo at a time'
-        with page.expect_file_chooser() as library:
-            page.locator('.pick-row .ghost').click()
-        assert library.value.is_multiple()
+        with page.expect_file_chooser() as chooser:
+            page.locator('.dropzone-face').click()
+        assert chooser.value.is_multiple(), 'several at once is fine'
 
-    def test_a_picture_from_the_camera_becomes_a_card(self, page: Page, tmp_path):
-        """The camera input posts for itself, so a phone gets one card and
-        the typed URL beside it is left alone."""
+    def test_the_bar_opens_the_same_picker(self, page: Page):
+        run(page, 'me')
+        with page.expect_file_chooser() as chooser:
+            page.locator('.addbar-item.add').click()
+        assert chooser.value.is_multiple()
+
+    def test_a_picture_becomes_a_card_without_disturbing_a_typed_url(
+            self, page: Page, tmp_path):
         picture = tmp_path / 'snap.png'
         picture.write_bytes(make_png())
         page.goto('/')
         page.locator('#url').fill('https://example.test/later.png')
-        page.locator('#camera').set_input_files(picture)
+        page.locator('#files').set_input_files(picture)
         expect(page.locator('#queue article')).to_have_count(1, timeout=TIMEOUT)
         expect(first_card(page).locator('.card-id b')).to_have_text('snap.png')
         expect(page.locator('#url')).to_have_value('https://example.test/later.png')
@@ -391,3 +423,140 @@ class TestTheRestOfTheFurniture:
         page.locator('.snippet .copy').first.click()
         copied = page.evaluate('navigator.clipboard.readText()')
         assert f'"url": "{EXAMPLE_SOURCE}"' in copied
+
+
+class TestTheSampleGrid:
+    def test_the_tiles_are_square(self, page: Page):
+        """They are square files and the CSS crops square; a width/height
+        attribute pair once quietly overrode the aspect-ratio and made them
+        tall, which no unit test can see."""
+        page.goto('/')
+        for tile in page.locator('.sample img').all()[:4]:
+            box = tile.bounding_box()
+            assert abs(box['width'] - box['height']) <= 1, (
+                f'{box["width"]}x{box["height"]} is not square'
+            )
+
+    def test_a_tile_is_small(self, page: Page):
+        """Sixteen full-size JPEGs was 4 MB of landing page."""
+        page.goto('/')
+        page.wait_for_load_state('networkidle')
+        sizes = page.evaluate("""() => performance.getEntriesByType('resource')
+            .filter(r => r.name.includes('/static/img/tiles/'))
+            .map(r => r.encodedBodySize)""")
+        assert sizes, 'no tiles were fetched'
+        assert max(sizes) < 40_000, f'largest tile is {max(sizes)} bytes'
+
+
+class TestTheCountdown:
+    """The one script in the interface that is not htmx wiring."""
+
+    def test_it_rewrites_the_server_sentence(self, page: Page):
+        """The server renders an absolute time; the script makes it relative."""
+        card = run(page, 'me')
+        expiry = card.locator('time[data-expires]')
+        expect(expiry).to_be_visible()
+        expect(expiry).to_contain_text('This image will be deleted in', timeout=5000)
+
+    def test_the_clock_actually_moves(self, page: Page):
+        """Injected with seconds left, because at minute granularity a real
+        card would take a minute to visibly change."""
+        page.goto('/')
+        page.evaluate(SPAWN_EXPIRY, 40)
+        page.wait_for_timeout(1200)
+        first = page.locator('#probe').inner_text()
+        page.wait_for_timeout(2500)
+        assert page.locator('#probe').inner_text() != first, f'stuck on {first!r}'
+
+    @pytest.mark.parametrize('seconds, pattern', [
+        (40, r'deleted in \d+ s$'),
+        (150, r'deleted in 2 min$'),
+        (7300, r'deleted in \d+ h \d+ min$'),
+        (-5, r'has been deleted$'),
+    ])
+    def test_it_picks_a_unit_worth_reading(self, page: Page, seconds, pattern):
+        page.goto('/')
+        page.evaluate(SPAWN_EXPIRY, seconds)
+        page.wait_for_timeout(1200)
+        assert re.search(pattern, page.locator('#probe').inner_text())
+
+    def test_the_page_still_reads_without_it(self, page: Page):
+        """The absolute time is the truth; the ticker is decoration. Blocking
+        the file with an empty one, not setInterval -- the script ticks once
+        directly on load, so stubbing the timer would still let it rewrite the
+        sentence. Empty rather than aborted, so the console stays clean."""
+        page.route('**/countdown.js*',
+                   lambda route: route.fulfill(status=200, content_type='text/javascript',
+                                               body=''))
+        card = run(page, 'me')
+        expect(card.locator('time[data-expires]')).to_contain_text('will be deleted at')
+
+
+class TestTheDownloadMenu:
+    def test_the_formats_are_behind_one_button(self, page: Page):
+        card = run(page, 'me')
+        menu = card.locator('.download-menu')
+        expect(menu.locator('summary')).to_have_text('Download')
+        expect(menu.locator('.formats')).to_be_hidden()
+        menu.locator('summary').click()
+        expect(menu.locator('.formats')).to_be_visible()
+        assert menu.locator('.formats a').count() >= 2
+
+    def test_a_format_link_points_at_the_full_resolution_file(self, page: Page):
+        card = run(page, 'me')
+        card.locator('.download-menu summary').click()
+        link = card.locator('.download-menu .formats a').first
+        assert re.search(r'/i/[0-9a-f-]+/result\.\w+$', link.get_attribute('href'))
+        assert link.get_attribute('download').startswith('deal-with-it-')
+
+
+class TestTheSystemShareButton:
+    def test_it_stays_hidden_where_files_cannot_be_shared(self, page: Page):
+        """Headless chromium has no share sheet, which is the case the
+        button has to survive: it must not be offered half-working."""
+        card = run(page, 'me')
+        expect(card.locator('button.share-system')).to_be_hidden()
+
+    def test_it_appears_once_the_browser_says_it_can(self, page: Page, context):
+        context.add_init_script(
+            'navigator.share = () => Promise.resolve();'
+            'navigator.canShare = () => true;'
+        )
+        card = run(page, 'me')
+        expect(card.locator('button.share-system')).to_be_visible()
+
+    def test_it_hands_the_picture_to_the_system(self, page: Page, context):
+        """What a phone does with it -- Photos, WhatsApp -- is the system's
+        business; ours is handing over a real file."""
+        context.add_init_script("""
+            window.__shared = null;
+            navigator.canShare = () => true;
+            navigator.share = (data) => {
+                window.__shared = data.files.map(f => [f.name, f.type, f.size]);
+                return Promise.resolve();
+            };
+        """)
+        card = run(page, 'me')
+        card.locator('button.share-system').click()
+        page.wait_for_function('window.__shared !== null', timeout=15000)
+        [[name, kind, size]] = page.evaluate('window.__shared')
+        assert name.startswith('deal-with-it-')
+        assert kind.startswith('image/')
+        assert size > 0
+
+
+class TestSharing:
+    def test_a_finished_card_links_to_a_page_worth_passing_on(self, page: Page):
+        card = run(page, 'me')
+        card.locator('a.share').click()
+        expect(page.locator('h1')).to_contain_text('Someone dealt with it')
+        expect(page.locator('.frame img.after')).to_be_visible()
+        page.locator('.frame img.after').evaluate('img => img.decode()')
+
+
+class TestNotFound:
+    @pytest.mark.expects_404
+    def test_an_unknown_url_gets_the_page(self, page: Page):
+        page.goto('/no-such-thing')
+        expect(page.locator('h1')).to_contain_text('Nothing here')
+        expect(page.locator('.site-footer')).to_be_visible()

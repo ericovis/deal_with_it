@@ -1,13 +1,16 @@
 """The queue seam. Runs against fakeredis, so no server is needed."""
 
+from datetime import UTC, datetime, timedelta
+
 import pytest
-from rq.job import Job
+from rq.job import Job, JobStatus
 
 from src import jobs
 from src.models import JobState
 from tests import support
 
 PAYLOAD = {'url': 'https://example.test/a.png', 'base64': None}
+UPLOADED = 'data:image/png;base64,c3VuZ2xhc3Nlcw=='
 
 
 class TestEnqueue:
@@ -43,12 +46,23 @@ class TestResultFor:
     def test_unknown_job_is_none(self, sync_queue):
         assert jobs.result_for('does-not-exist') is None
 
-    def test_finished_job_carries_the_image(self, sync_queue, stub_task):
+    def test_finished_job_points_at_its_pictures(self, sync_queue, stub_task):
         stub_task(support.SUCCESS)
-        result = jobs.result_for(jobs.enqueue(PAYLOAD)[0])
+        job_id, _ = jobs.enqueue(PAYLOAD)
+        result = jobs.result_for(job_id)
         assert result.state == JobState.FINISHED
-        assert result.image == support.IMAGE
+        assert result.images.view == f'/i/{job_id}/view.webp'
+        assert result.images.thumb == f'/i/{job_id}/thumb.webp'
+        assert result.images.full == f'/i/{job_id}/result.png'
+        assert result.expires_at is not None
         assert result.error is None
+
+    def test_a_finished_job_offers_its_downloads_by_format(self, sync_queue, stub_task):
+        stub_task(support.SUCCESS)
+        job_id, _ = jobs.enqueue(PAYLOAD)
+        downloads = jobs.result_for(job_id).downloads
+        assert downloads['png'] == f'/i/{job_id}/result.png'
+        assert downloads['webp'] == f'/i/{job_id}/result.webp'
 
     def test_rejected_input_is_reported_as_a_failure_with_its_message(self, sync_queue, stub_task):
         """The job succeeded; the image did not. The caller cares about the message."""
@@ -56,7 +70,7 @@ class TestResultFor:
         result = jobs.result_for(jobs.enqueue(PAYLOAD)[0])
         assert result.state == JobState.FAILED
         assert result.error == 'No faces were found in this image.'
-        assert result.image is None
+        assert result.images is None
 
     def test_a_crash_is_reported_generically(self, sync_queue, stub_task, caplog):
         """A traceback is for our logs, never for the response body."""
@@ -78,7 +92,7 @@ class TestResultFor:
         stub_task(support.SUCCESS)
         result = jobs.result_for(jobs.enqueue(PAYLOAD)[0])
         assert result.state == JobState.QUEUED
-        assert result.image is None
+        assert result.images is None
 
     def test_queued_becomes_finished_once_a_worker_runs(self, async_queue, stub_task, drain):
         stub_task(support.SUCCESS)
@@ -89,7 +103,7 @@ class TestResultFor:
 
         result = jobs.result_for(job_id)
         assert result.state == JobState.FINISHED
-        assert result.image == support.IMAGE
+        assert result.images.view == f'/i/{job_id}/view.webp'
 
 
 class TestConnection:
@@ -166,15 +180,20 @@ class TestMetadata:
         _, source = jobs.describe(job_id)
         assert source.kind == 'url'
         assert source.label == 'example.test/a.png'
-        assert source.thumb == PAYLOAD['url']
+        assert source.thumb == f'/i/{job_id}/thumb.webp', (
+            'a URL job carries no meta, so the worker writes it one'
+        )
 
     def test_an_upload_with_no_meta_gets_a_stand_in_name(self, sync_queue, stub_task):
         stub_task(support.SUCCESS)
-        job_id, _ = jobs.enqueue({'url': None, 'base64': support.IMAGE})
+        job_id, _ = jobs.enqueue({'url': None, 'base64': UPLOADED})
         _, source = jobs.describe(job_id)
         assert source.kind == 'upload'
         assert source.label == 'Uploaded image'
-        assert source.thumb is None, 'nothing cheap enough to show on every poll'
+        assert source.thumb == f'/i/{job_id}/thumb.webp', (
+            'an upload arrives with nothing to show, so the worker writes a '
+            'thumbnail of it before detection even starts'
+        )
 
     @pytest.mark.parametrize('url,expected', [
         ('https://example.test/a.png', 'example.test/a.png'),
@@ -286,7 +305,7 @@ class TestLightPolling:
         result, source = jobs.describe(job_id)
         assert result.state == JobState.QUEUED
         assert source.label == 'a.png'
-        assert source.original is None
+        assert source.thumb is None, 'nothing to show until the worker writes one'
 
     def test_a_queued_job_is_read_without_its_payload(
             self, async_queue, stub_task, no_full_fetch):
@@ -311,9 +330,93 @@ class TestLightPolling:
         job_id, _ = jobs.enqueue(self.BIG, meta={'kind': 'upload', 'label': 'a.png'})
         result, source = jobs.describe(job_id)
         assert result.state == JobState.FINISHED
-        assert result.image == support.IMAGE
-        assert source.original == self.BIG['base64']
+        assert result.images.view == f'/i/{job_id}/view.webp'
 
     def test_an_unknown_id_is_none(self, async_queue, no_full_fetch):
         assert jobs.describe('nope') is None
         assert jobs.result_for('nope') is None
+
+
+class TestAbandonedJobs:
+    """A worker can die mid-job -- a deploy, a restart, a crash in native
+    code, the OOM killer -- and the job it was running stays ``started`` in
+    Redis with nobody coming back to it. RQ only reaps those in a
+    maintenance pass it runs every ten minutes, and only while some worker
+    is alive to run one, so the reader has to be able to tell on its own.
+    """
+
+    @staticmethod
+    def _started(connection, job_id: str, seconds_ago: float) -> None:
+        """Put a job in the state a killed worker leaves behind."""
+        started = datetime.now(UTC) - timedelta(seconds=seconds_ago)
+        connection.hset(Job.key_for(job_id), mapping={
+            'status': JobStatus.STARTED.value,
+            'started_at': started.strftime('%Y-%m-%dT%H:%M:%S.%fZ'),
+        })
+
+    def test_a_job_still_running_inside_its_timeout_is_left_alone(
+            self, async_queue, stub_task):
+        stub_task(support.SUCCESS)
+        job_id, _ = jobs.enqueue(PAYLOAD)
+        self._started(async_queue.connection, job_id, seconds_ago=5)
+        assert jobs.result_for(job_id).state == JobState.STARTED
+
+    def test_a_job_past_its_timeout_is_reported_as_failed(self, async_queue, stub_task):
+        stub_task(support.SUCCESS)
+        settings = jobs.get_settings()
+        job_id, _ = jobs.enqueue(PAYLOAD)
+        self._started(async_queue.connection, job_id,
+                      seconds_ago=settings.job_timeout + jobs.ABANDONED_GRACE + 1)
+        result = jobs.result_for(job_id)
+        assert result.state == JobState.FAILED
+        assert result.error == jobs.ABANDONED
+
+    def test_the_grace_is_respected(self, async_queue, stub_task):
+        """A job exactly at its timeout may still be writing its result."""
+        stub_task(support.SUCCESS)
+        job_id, _ = jobs.enqueue(PAYLOAD)
+        self._started(async_queue.connection, job_id,
+                      seconds_ago=jobs.get_settings().job_timeout + 1)
+        assert jobs.result_for(job_id).state == JobState.STARTED
+
+    def test_describe_reports_it_too_and_keeps_the_label(self, async_queue, stub_task):
+        """The card that has been polling needs to stop, and to say why."""
+        stub_task(support.SUCCESS)
+        job_id, _ = jobs.enqueue(PAYLOAD, meta={'kind': 'url', 'label': 'a.png'})
+        self._started(async_queue.connection, job_id, seconds_ago=1000)
+        result, source = jobs.describe(job_id)
+        assert (result.state, result.error) == (JobState.FAILED, jobs.ABANDONED)
+        assert source.label == 'a.png'
+
+    def test_an_abandoned_job_can_be_retried(self, async_queue, stub_task):
+        """Its payload is still on the job, which is the whole point."""
+        stub_task(support.SUCCESS)
+        job_id, _ = jobs.enqueue(PAYLOAD)
+        self._started(async_queue.connection, job_id, seconds_ago=1000)
+        new_id, state = jobs.resubmit(job_id)
+        assert new_id != job_id and state == JobState.QUEUED
+
+    def test_deciding_costs_no_extra_round_trip(self, async_queue, stub_task):
+        """The verdict rides in the pipeline a poll already makes."""
+        stub_task(support.SUCCESS)
+        job_id, _ = jobs.enqueue({'url': None,
+                                  'base64': 'data:image/png;base64,' + 'A' * 100_000})
+        self._started(async_queue.connection, job_id, seconds_ago=1000)
+
+        def refuse(*args, **kwargs):
+            raise AssertionError('Job.fetch reads the whole payload')
+
+        with pytest.MonkeyPatch.context() as patch:
+            patch.setattr(jobs.Job, 'fetch', refuse)
+            assert jobs.result_for(job_id).error == jobs.ABANDONED
+
+    def test_a_finished_job_is_never_mistaken_for_an_abandoned_one(
+            self, sync_queue, stub_task):
+        stub_task(support.SUCCESS)
+        job_id, _ = jobs.enqueue(PAYLOAD)
+        connection = sync_queue.connection
+        # A job that ran, long ago, and whose result is still readable.
+        old = datetime.now(UTC) - timedelta(seconds=10_000)
+        connection.hset(Job.key_for(job_id), 'started_at',
+                        old.strftime('%Y-%m-%dT%H:%M:%S.%fZ'))
+        assert jobs.result_for(job_id).state == JobState.FINISHED

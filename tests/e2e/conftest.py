@@ -19,6 +19,8 @@ from contextlib import closing
 
 import pytest
 
+from src.config import get_settings
+
 # Playwright is an optional group (`uv sync --group e2e`); without it there is
 # nothing here to collect, and `uv run pytest` still passes.
 try:
@@ -72,12 +74,28 @@ def _needs_a_browser(playwright):
         pytest.skip(f'chromium is not installed -- `playwright install chromium` ({exc})')
 
 
+@pytest.fixture(scope='session', autouse=True)
+def blob_root(tmp_path_factory):
+    """One blob store for the whole session, set once and left set.
+
+    Overrides the per-test fixture in tests/conftest.py on purpose. The
+    server and the worker here are threads in *this* process and read the
+    settings cache the tests share, so a per-test store would be repointed
+    under a session-scoped server between tests -- the worker writes a job's
+    pictures into one directory and the next test moves the store somewhere
+    else. Cards then hang instead of finishing, in whichever test happens to
+    run next, which is a miserable thing to debug.
+    """
+    root = tmp_path_factory.mktemp('e2e-blobs')
+    os.environ['DWI_BLOB_DIR'] = str(root)
+    get_settings.cache_clear()
+    return root
+
+
 @pytest.fixture(scope='session')
-def live_server(_needs_the_face_stack):
+def live_server(_needs_the_face_stack, blob_root):
     import uvicorn
     from fakeredis import FakeStrictRedis
-
-    from src.config import get_settings
 
     # Short, because one hung fetch would block the single worker thread and
     # every job queued behind it.
@@ -87,19 +105,20 @@ def live_server(_needs_the_face_stack):
     # test passed depended on how many of its submissions landed inside the
     # same fixed window. Being refused is worth a test, but a deterministic
     # one -- tests/test_throttle.py has it.
-    pinned = {'DWI_HTTP_TIMEOUT': '1', 'DWI_RATE_LIMIT': '0'}
-    previous = {name: os.environ.get(name) for name in pinned}
-    os.environ.update(pinned)
-    # Settings are cached and something earlier in the run may have read
-    # them, so prime the cache with these -- and then put the environment
-    # back, because tests/test_throttle.py has its own opinion about both.
+    # Set for the session and left set. Priming the settings cache and then
+    # putting the environment back does not work: `clean_settings_cache` in
+    # tests/conftest.py clears that cache before every test, and the next read
+    # goes back to the environment -- where the pins are gone. The rate limit
+    # would quietly return to thirty a minute, the suite submits far more than
+    # that from 127.0.0.1, and cards start coming back Failed at random. Which
+    # is exactly what happened, intermittently, until `test_the_pins_took`
+    # below started saying so.
+    #
+    # Safe to leave set: this runs as its own pytest session (its own CI job),
+    # and tests/test_throttle.py does not read the environment -- its `limits`
+    # fixture monkeypatches get_settings directly.
+    os.environ.update({'DWI_HTTP_TIMEOUT': '1', 'DWI_RATE_LIMIT': '0'})
     get_settings.cache_clear()
-    get_settings()
-    for name, value in previous.items():
-        if value is None:
-            del os.environ[name]
-        else:
-            os.environ[name] = value
 
     from src import jobs
     from src.app import app
@@ -138,16 +157,28 @@ def browser_context_args(browser_context_args):
     return {**browser_context_args, 'viewport': {'width': 1280, 'height': 900}}
 
 
+#: What a browser logs for the status of the page it was asked to open. A
+#: test that navigates to a 404 on purpose cannot avoid it.
+_NAVIGATION_404 = 'the server responded with a status of 404'
+
+
 @pytest.fixture(autouse=True)
-def quiet_console(page):
+def quiet_console(page, request):
     """No test may leave the browser complaining.
 
-    This interface ships two lines of script, so anything in the console is
-    almost always htmx failing or markup we got wrong -- and when it is one of
-    those two lines, this is what says so.
+    The interface ships four pieces of script -- the clipboard call, the
+    one-file-per-request upload, the expiry countdown and the share button --
+    so anything in the console is almost always htmx failing, one of those
+    four, or markup we got wrong. This is what says so.
+
+    A test marked ``expects_404`` is visiting a missing page deliberately and
+    the browser logs the navigation's own status; that one line is allowed,
+    and nothing else is.
     """
     problems: list[str] = []
     page.on('console', lambda m: problems.append(m.text) if m.type == 'error' else None)
     page.on('pageerror', lambda exc: problems.append(str(exc)))
     yield
+    if request.node.get_closest_marker('expects_404'):
+        problems = [p for p in problems if _NAVIGATION_404 not in p]
     assert not problems, f'the browser complained: {problems}'

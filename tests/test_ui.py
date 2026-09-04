@@ -4,9 +4,9 @@ import re
 
 import pytest
 
-from src import jobs
-from src.models import JobResult, JobSource, JobState, SourceKind
-from src.ui import THEME_COOKIE
+from src import blobs, jobs
+from src.models import JobImages, JobResult, JobSource, JobState, SourceKind
+from src.ui import IMG_DIR, THEME_COOKIE
 from tests import support
 from tests.conftest import make_png
 
@@ -39,7 +39,7 @@ class TestPage:
     @pytest.mark.parametrize('needle', [
         'id="queue"', 'class="dropzone"', 'id="files"', 'id="url"', 'id="url-hint"',
         'id="health"', 'id="theme"', 'id="theme-state"', 'class="empty"',
-        'id="camera"', 'class="addbar"', 'class="nav-links"',
+        'class="addbar"', 'class="nav-links"',
     ])
     def test_the_furniture_is_all_there(self, client, needle):
         assert needle in client.get('/').text
@@ -125,6 +125,110 @@ class TestPage:
         assert client.get(path).status_code == 404
 
 
+class TestSharing:
+    """A finished result, by link, for someone who was not here."""
+
+    def finished(self, client, hx):
+        return job_ids(submit(client, hx, files=[
+            ('image', ('me.png', make_png(), 'image/png'))]).text)[0]
+
+    def test_a_card_offers_a_link_to_pass_on(self, client, hx):
+        job_id = self.finished(client, hx)
+        body = client.get(f'/jobs/{job_id}', headers=hx).text
+        assert f'href="/s/{job_id}"' in body
+        assert '>Get a link</a>' in body, (
+            'the Share button beside it hands the file to the system sheet, '
+            'which is a different thing to offer'
+        )
+
+    def test_the_share_page_shows_the_result(self, client, hx):
+        job_id = self.finished(client, hx)
+        response = client.get(f'/s/{job_id}')
+        assert response.status_code == 200
+        assert f'/i/{job_id}/view.webp' in response.text
+
+    def test_it_unfurls_into_the_picture_not_the_site_artwork(self, client, hx):
+        """The whole point of sharing a meme is the preview."""
+        job_id = self.finished(client, hx)
+        body = client.get(f'/s/{job_id}').text
+        assert f'property="og:image" content="/i/{job_id}/card.jpg"' in body
+        assert 'deal_with_me.png' not in body, 'the default card is for the site itself'
+
+    def test_it_reads_from_disk_not_from_redis(self, client, hx, redis_conn):
+        """Redis forgets a job at result_ttl; the pictures live to blob_ttl.
+        A share link has to last as long as what it shows, not less."""
+        job_id = self.finished(client, hx)
+        redis_conn.flushall()
+        assert client.get(f'/s/{job_id}').status_code == 200
+
+    def test_a_swept_result_says_it_has_expired(self, client, hx):
+        job_id = self.finished(client, hx)
+        blobs.forget(job_id)
+        response = client.get(f'/s/{job_id}')
+        assert response.status_code == 404
+        assert 'expired' in response.text.lower()
+        assert 'Nothing here' not in response.text, 'gone is not the same as never existed'
+
+    def test_an_invented_id_does_not_explode(self, client):
+        assert client.get('/s/../../etc/passwd').status_code == 404
+        assert client.get('/s/nope').status_code == 404
+
+
+class TestTheCountdown:
+    """The expiry is rendered as an absolute time and ticked by script, so
+    the sentence is right either way."""
+
+    def test_a_finished_card_says_when_it_expires(self, client, hx):
+        job_id = job_ids(submit(client, hx, files=[
+            ('image', ('me.png', make_png(), 'image/png'))]).text)[0]
+        body = client.get(f'/jobs/{job_id}', headers=hx).text
+        assert 'data-expires' in body
+        assert 'This image will be deleted at' in body
+        assert re.search(r'<time[^>]+datetime="\d{4}-\d\d-\d\dT[\d:]+Z"', body)
+
+    def test_the_page_loads_the_ticker(self, client):
+        assert '/static/js/countdown.js' in client.get('/').text
+
+    def test_it_is_deferred_so_it_never_blocks_the_page(self, client):
+        assert re.search(r'<script[^>]*countdown\.js[^>]*defer', client.get('/').text)
+
+
+class TestNotFound:
+    """Most of the 404s this app makes are not typos: they are shared links
+    whose pictures have been swept."""
+
+    def test_an_unknown_page_gets_a_page(self, client):
+        response = client.get('/nope')
+        assert response.status_code == 404
+        assert response.headers['content-type'].startswith('text/html')
+        assert '<!doctype html>' in response.text.lower()
+        assert 'Nothing here' in response.text
+
+    def test_it_offers_a_way_back(self, client):
+        body = client.get('/nope').text
+        assert 'href="/"' in body and 'href="/docs"' in body
+
+    def test_it_is_the_real_shell(self, client):
+        """Same header, footer and stylesheet as everything else."""
+        body = client.get('/nope').text
+        assert '/static/css/style.css' in body
+        assert 'class="site-footer"' in body
+
+    def test_the_api_keeps_its_json(self, client):
+        """A published contract does not start answering in HTML."""
+        response = client.get('/api/nope')
+        assert response.status_code == 404
+        assert response.headers['content-type'].startswith('application/json')
+        assert response.json() == {'detail': 'Not Found'}
+
+    @pytest.mark.parametrize('path', ['/static/img/nope.png', '/i/job/nope.webp'])
+    def test_a_missing_picture_is_not_answered_with_a_page(self, client, path):
+        """An HTML body is a nonsense response to an <img>."""
+        response = client.get(path)
+        assert response.status_code == 404
+        assert not response.headers['content-type'].startswith('text/html')
+
+
 class TestOnAPhone:
     """The markup the phone layout is driven from.
 
@@ -133,19 +237,22 @@ class TestOnAPhone:
     has a route or a line of script behind it.
     """
 
-    def test_the_camera_is_its_own_input(self, client):
-        """A phone opens the camera for `capture`; a desktop ignores the
-        attribute, and nothing above 600px points at the input anyway."""
+    def test_there_is_one_file_input_for_everything(self, client):
+        """A phone's picker already offers the camera beside the library, so a
+        separate capture input only made the same sheet open from two
+        places."""
         body = client.get('/').text
-        field = re.search(r'<input type="file"[^>]*id="camera"[^>]*>', body).group()
-        assert 'capture="environment"' in field
-        assert 'hx-post="/submit"' in field, 'one picture at a time posts for itself'
-        assert 'hx-target="#queue"' in field
+        fields = re.findall(r'<input type="file"[^>]*>', body)
+        assert len(fields) == 1, f'{len(fields)} file inputs: {fields}'
+        assert 'id="files"' in fields[0]
+        assert 'capture=' not in body, 'capture forces the camera and hides the library'
 
-    def test_both_ways_of_adding_a_picture_are_offered(self, client):
+    def test_the_card_is_the_only_way_in(self, client):
+        """One dropzone, worded for whichever device is reading it."""
         body = client.get('/').text
-        assert '<label for="camera" class="btn camera">Take a photo</label>' in body
-        assert '<label for="files" class="btn ghost">Choose from library</label>' in body
+        assert 'Take a photo' not in body
+        assert 'Choose from library' not in body
+        assert body.count('class="dropzone"') == 1
 
     def test_the_dropzone_says_it_twice(self, client):
         """Dropping is a desktop idea and a phone has no computer to browse."""
@@ -153,10 +260,10 @@ class TestOnAPhone:
         assert '<span class="title desktop-only">Drop pictures here</span>' in body
         assert '<span class="title mobile-only">Add a picture</span>' in body
 
-    def test_the_bar_reaches_both_file_inputs_and_both_panels(self, client):
+    def test_the_bar_reaches_the_file_input_and_both_panels(self, client):
         body = client.get('/').text
         bar = re.search(r'<nav class="addbar">.*?</nav>', body, re.S).group()
-        for target in ('camera', 'files', 'show-url', 'show-samples'):
+        for target in ('files', 'show-url', 'show-samples'):
             assert f'for="{target}"' in bar
         assert bar.count('for="show-none"') == 2, 'a second tap closes what is open'
 
@@ -272,7 +379,9 @@ class TestSubmit:
     def test_an_upload_starts_a_job(self, client, hx):
         response = submit(client, hx, files=[('image', ('me.png', make_png(), 'image/png'))])
         [job_id] = job_ids(response.text)
-        assert jobs.payload_for(job_id)['base64'].startswith('data:image/png;base64,')
+        payload = jobs.payload_for(job_id)
+        assert payload['blob'] == f'{job_id}/source.png', 'on disk, not through Redis'
+        assert blobs.path(payload['blob']).read_bytes() == make_png()
         assert 'me.png' in response.text
 
     def test_several_files_become_several_jobs(self, client, hx):
@@ -345,18 +454,29 @@ class TestSubmit:
 
 
 class TestSamples:
-    def test_a_sample_is_queued_as_base64_not_as_a_url(self, client, hx):
-        """The worker's SSRF guard would refuse to fetch our own host."""
+    def test_a_sample_is_queued_as_a_blob_not_as_a_url(self, client, hx):
+        """The worker's SSRF guard would refuse to fetch our own host, so the
+        picture is copied into the job's directory instead."""
         response = submit(client, hx, sample='me')
         [job_id] = job_ids(response.text)
         payload = jobs.payload_for(job_id)
         assert payload['url'] is None
-        assert payload['base64'].startswith('data:image/jpeg;base64,')
+        assert payload['blob'] == f'{job_id}/source.jpg'
 
-    def test_a_sample_card_shows_the_static_file_rather_than_the_data_uri(self, client, hx):
-        """It is the same picture at a thousandth of the bytes."""
+    def test_a_sample_card_shows_a_tile_rather_than_the_full_size_file(self, client, hx):
+        """It is the same picture at a fortieth of the bytes."""
         body = submit(client, hx, sample='group').text
-        assert 'src="/static/img/multiple_people.jpg?v=' in body
+        assert 'src="/static/img/tiles/multiple_people.webp?v=' in body
+
+    def test_a_sample_is_submitted_at_its_original_size(self, client, hx):
+        """The tile is for looking at. What goes to the worker must stay the
+        committed full-resolution file: SAMPLE_FACES pins a face count per
+        sample and those counts move when the width does. Point submission at
+        a derivative and every caption on the page quietly becomes wrong.
+        """
+        job_id = job_ids(submit(client, hx, sample='group').text)[0]
+        submitted = blobs.path(jobs.payload_for(job_id)['blob']).read_bytes()
+        assert submitted == (IMG_DIR / 'multiple_people.jpg').read_bytes()
 
     def test_an_unknown_sample_is_refused(self, client, hx):
         response = submit(client, hx, sample='../../etc/passwd')
@@ -436,7 +556,7 @@ class TestCards:
     def test_a_finished_job_shows_the_image_and_stops_polling(self, client, hx):
         job_id = self.start(client, hx)
         body = client.get(f'/jobs/{job_id}', headers=hx).text
-        assert f'src="{support.IMAGE}"' in body
+        assert f'src="/i/{job_id}/view.webp"' in body
         assert 'class="chip done"' in body
         assert 'hx-get="/jobs/' not in body, 'the poll chain must end here'
 
@@ -451,14 +571,15 @@ class TestCards:
         job_id = self.start(client, hx)
         body = client.get(f'/jobs/{job_id}', headers=hx).text
         assert f'download="deal-with-it-{job_id[:8]}.png"' in body
-        assert 'Download PNG' in body
+        assert '<summary class="download">Download</summary>' in body
 
     def test_a_jpeg_result_downloads_as_a_jpeg(self, client, hx, stub_task):
         stub_task(support.SUCCEEDS_AS_JPEG)
         job_id = self.start(client, hx)
         body = client.get(f'/jobs/{job_id}', headers=hx).text
         assert f'download="deal-with-it-{job_id[:8]}.jpg"' in body
-        assert 'Download JPG' in body
+        assert '>JPG</a>' in body, 'the format is a choice inside the menu now'
+        assert 'Download JPG' not in body, 'the button is just "Download"'
 
     def test_the_full_size_view_is_an_overlay_not_a_link(self, client, hx):
         """A data: URI cannot be navigated to -- browsers block it -- so the
@@ -473,10 +594,10 @@ class TestCards:
         assert 'class="lightbox-close"' in body
 
     def test_the_overlay_reuses_the_one_copy_of_the_image(self, client, hx):
-        """Duplicating the markup would send the whole data URI twice."""
+        """Duplicating the markup would make the browser fetch it twice."""
         job_id = self.start(client, hx)
         body = client.get(f'/jobs/{job_id}', headers=hx).text
-        assert body.count(f'src="{support.IMAGE}"') == 1
+        assert body.count(f'src="/i/{job_id}/view.webp"') == 1
 
     def test_a_queued_job_keeps_polling(self, client, hx, async_queue, stub_task):
         stub_task(support.SUCCESS)
@@ -491,7 +612,8 @@ class TestCards:
         stub_task(support.SUCCESS)
         job_id = self.start(client, hx)
         drain()
-        assert f'src="{support.IMAGE}"' in client.get(f'/jobs/{job_id}', headers=hx).text
+        body = client.get(f'/jobs/{job_id}', headers=hx).text
+        assert f'src="/i/{job_id}/view.webp"' in body
 
     def test_a_rejected_image_shows_the_reason_and_offers_a_retry(self, client, hx, stub_task):
         stub_task(support.REJECTS)
@@ -533,6 +655,101 @@ class TestCards:
         job_id = self.start(client, hx)
         client.get(f'/jobs/{job_id}', headers=hx)
         assert list(tmp_path.iterdir()) == []
+
+
+class TestBlobServing:
+    """`/i` for a bare uvicorn. Caddy serves the same directory in production
+    and repeats every rule below; these are what say what the rules are."""
+
+    JOB = '9f2c4a1b-0000-4000-8000-000000000001'
+
+    def test_a_blob_is_served(self, client, blob_root):
+        blobs.put(self.JOB, 'view.webp', b'RIFF....WEBPVP8 ')
+        response = client.get(f'/i/{self.JOB}/view.webp')
+        assert response.status_code == 200
+        assert response.content == b'RIFF....WEBPVP8 '
+
+    def test_it_carries_the_cache_policy_and_nosniff(self, client, blob_root):
+        """The cache policy is this mount's own; nosniff comes from the
+        BodyLimit middleware, which is exactly what Caddy bypasses -- so the
+        Caddyfile has to say both."""
+        blobs.put(self.JOB, 'view.webp', b'x')
+        headers = client.get(f'/i/{self.JOB}/view.webp').headers
+        assert headers['cache-control'] == blobs.cache_control()
+        assert 'private' in headers['cache-control']
+        assert 'nosniff' in headers['x-content-type-options']
+
+    def test_a_write_still_in_flight_is_not_served(self, client, blob_root):
+        """Dot-prefixed names are the temp files of an unfinished write."""
+        (blob_root / self.JOB).mkdir()
+        (blob_root / self.JOB / '.view.webp.abc123').write_bytes(b'half a picture')
+        assert client.get(f'/i/{self.JOB}/.view.webp.abc123').status_code == 404
+
+    def test_a_missing_blob_is_a_plain_404(self, client, blob_root):
+        assert client.get(f'/i/{self.JOB}/gone.webp').status_code == 404
+
+    @pytest.mark.parametrize('path', [
+        '/i/../README.md', '/i/%2e%2e/README.md', '/i/../../etc/passwd',
+    ])
+    def test_nothing_above_the_store_is_reachable(self, client, path):
+        assert client.get(path).status_code in (400, 404)
+
+
+class TestResultPictures:
+    """A finished card points at the job's own files; it never carries one.
+
+    Inlined, a 7.9 MB upload came back as a 42 MB poll response -- the
+    submitted image and the result, twice each -- and even as URLs the
+    full-resolution files were megabytes for something shown 460 px tall.
+    """
+
+    def upload(self, client, hx, payload=None, mime='image/png'):
+        return job_ids(submit(client, hx, files=[
+            ('image', ('me.png', payload or make_png(), mime))]).text)[0]
+
+    def test_a_finished_card_carries_no_image_data_at_all(self, client, hx):
+        job_id = self.upload(client, hx)
+        body = client.get(f'/jobs/{job_id}', headers=hx).text
+        assert 'base64,' not in body
+        assert f'src="/i/{job_id}/view.webp"' in body
+
+    def test_the_card_shows_the_viewing_copy_not_the_full_size_one(self, client, hx):
+        """The full-resolution file exists, but only behind Download."""
+        job_id = self.upload(client, hx)
+        body = client.get(f'/jobs/{job_id}', headers=hx).text
+        assert f'src="/i/{job_id}/result.png"' not in body
+        assert f'href="/i/{job_id}/result.png"' in body
+
+    def test_the_thumbnail_is_the_thumbnail_and_not_the_view(self, client, hx):
+        job_id = self.upload(client, hx)
+        body = client.get(f'/jobs/{job_id}', headers=hx).text
+        assert f'src="/i/{job_id}/thumb.webp" alt="" class="thumb"' in body
+
+    def test_every_format_the_worker_wrote_is_offered(self, client, hx):
+        """One Download that opens the formats: which ones exist depends on
+        what was submitted, so a row of links was a different width each
+        time."""
+        job_id = self.upload(client, hx)
+        body = client.get(f'/jobs/{job_id}', headers=hx).text
+        assert body.count('<summary class="download">Download</summary>') == 1
+        assert '>PNG</a>' in body and '>WEBP</a>' in body
+        assert f'download="deal-with-it-{job_id[:8]}.png"' in body
+        assert f'download="deal-with-it-{job_id[:8]}.webp"' in body
+
+    def test_the_share_button_waits_to_be_told_it_will_work(self, client, hx):
+        """A browser that can only share links must not be offered a button
+        that half-works, and only the browser knows."""
+        job_id = self.upload(client, hx)
+        body = client.get(f'/jobs/{job_id}', headers=hx).text
+        button = re.search(r'<button[^>]*class="share-system"[^>]*>', body).group()
+        assert 'hidden' in button
+        assert f'data-share="/i/{job_id}/result.png"' in button
+
+    def test_the_pictures_a_card_points_at_are_all_fetchable(self, client, hx):
+        job_id = self.upload(client, hx)
+        body = client.get(f'/jobs/{job_id}', headers=hx).text
+        for path in set(re.findall(r'"(/i/[^"]+)"', body)):
+            assert client.get(path).status_code == 200, path
 
 
 class TestPollingPayloads:
@@ -628,10 +845,12 @@ class TestProgress:
 
     def test_a_finished_card_says_how_many_faces_it_drew_on(self, client, hx, monkeypatch):
         monkeypatch.setattr(jobs, 'describe', lambda job_id: (
-            JobResult(job_id=job_id, state=JobState.FINISHED, image=support.IMAGE,
-                      progress=100, step='Done'),
+            JobResult(job_id=job_id, state=JobState.FINISHED, progress=100, step='Done',
+                      images=JobImages(view=f'/i/{job_id}/view.webp',
+                                       thumb=f'/i/{job_id}/thumb.webp',
+                                       full=f'/i/{job_id}/result.png')),
             JobSource(kind=SourceKind.SAMPLE, label='multiple_people.jpg',
-                      thumb='/static/img/multiple_people.jpg', faces=8),
+                      thumb='/static/img/tiles/multiple_people.webp', faces=8),
         ))
         assert 'Sample picture · 8 faces' in client.get('/jobs/whatever', headers=hx).text
 
@@ -673,7 +892,12 @@ class TestRetry:
         [new_id] = job_ids(response.text)
 
         assert new_id != job_id, 'a retry is a new job, not a resurrected one'
-        assert jobs.payload_for(new_id) == original
+        retried = jobs.payload_for(new_id)
+        assert retried['blob'] == f'{new_id}/source.jpg', 'in its own directory'
+        assert (blobs.path(retried['blob']).stat().st_ino
+                == blobs.path(original['blob']).stat().st_ino), (
+            'hard-linked, so either job can be swept without taking the other'
+        )
         assert 'socks_the_cat.jpg' in response.text, 'and it remembers what it was called'
 
     def test_retrying_an_expired_job_says_so(self, client, hx):

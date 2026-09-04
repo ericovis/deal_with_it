@@ -29,12 +29,15 @@ the job (`meta['landmarks']`) and returned by the API as `faces`.
 browser ───────────────► web (FastAPI+FastHTML) ──────► worker (rq)
         ◄─────────────── 202 {job_id}                     │
         GET  /api/jobs/{id}  (htmx polls every 1s)         │ fetch, detect, paste
-        ◄─────────────── {state, image}  ◄─────────────────┘
+        ◄─────────────── {state, images}  ◄────────────────┘   write derivatives
+                                    │                          │
+        GET /i/{job}/view.webp ─────┴──► Caddy, off the shared blob directory
 ```
 
-The web tier never touches an image: it validates the request shape, puts a
-payload on the queue and reads job state back. The task is enqueued **by
-name** (`src/jobs.py:TASK`) so the web process never imports OpenCV.
+The web tier never *decodes* an image: it validates the request shape, writes
+the submitted bytes to the blob store, puts a path on the queue and reads job
+state back. The task is enqueued **by name** (`src/jobs.py:TASK`) so the web
+process never imports OpenCV.
 
 ```
 src/app.py          Composition root: FastAPI outer app, FastHTML mounted at /
@@ -48,11 +51,14 @@ src/images.py       Fetching (SSRF-guarded) and decoding into a numpy array
 src/models.py       Pydantic v2 request/response schemas. Shape only
 src/config.py       Settings, all DWI_-prefixed env vars
 src/errors.py       DealWithItError: failures whose message is safe to show
+src/blobs.py        The blob store. Web-safe: no imaging library, ever
+src/derivatives.py  Pixels to files. Worker-only; all the Pillow lives here
 src/assets.py       Content-hashed /static URLs and their cache headers
 src/processors/     BaseProcessor + DealWithItProcessor
 src/static/         style.css, the sample photos, glasses.svg, the app
                     icons and the web manifest
-tests/              Hermetic: no network, no Redis server, no fixtures on disk
+tests/              Hermetic: no network, no Redis server, no committed
+                    fixtures; blobs go to a per-test tmp_path
 ```
 
 Invariants worth knowing before editing:
@@ -67,13 +73,49 @@ Invariants worth knowing before editing:
 - **The dropzone posts one file per request** (`UPLOAD_ONE_BY_ONE` in
   `src/ui.py`): a plain `hx-post` on a multiple file input sends the whole
   selection in one body, so nothing appears until the last picture has
-  uploaded. It is one of the two lines of script in the interface — htmx has
+  uploaded. It is one of the four pieces of script in the interface — htmx has
   no attribute that splits a file input. A file post therefore answers with
   the card alone: the script empties the input itself, and an out-of-band
   form swap would tear out the element the rest of the batch posts from.
   `/submit` still takes a list, because the submit button can post one.
-- **A polling card must not carry a data URI.** `JobSource.thumb` is a
-  remote URL or a `/static` path; an upload has neither until it finishes.
+- **Nothing multi-megabyte goes through Redis, and no card carries a
+  picture.** A submission is written to the blob store and the queue carries a
+  path; the worker writes sized derivatives there and the result is a map of
+  URLs. A finished card fetches ~320 KB where it once fetched 15.8 MB as URLs,
+  or 42 MB inlined. `JobResult.image` is gone — that is API 2.0.
+- **`src/blobs.py` is web-safe and `src/derivatives.py` is not.** blobs imports
+  no imaging library, which is what lets the web tier mint paths and store
+  opaque bytes without gaining the ability to decode an attacker's image; a
+  subprocess test pins it. All the Pillow lives in derivatives, which only the
+  worker imports. The web tier never *decodes* an image — writing bytes to a
+  file is strictly less than the base64 encode it replaced.
+- **A job owns one directory**, which is what makes it independently
+  deletable and is the whole basis of the sweep. Writes are temp-file plus
+  `os.replace` inside it, so a reader sees a whole file or nothing; the temp
+  name is dot-prefixed and both servers refuse to serve one. A retry
+  hard-links rather than sharing a directory.
+- **`view.webp` is one size for the card *and* the lightbox, on purpose.**
+  `_result_view` reuses the same `<img>` for both and the lightbox is a CSS
+  `:has(:checked)` state, so no `srcset`/`sizes` pair can describe it —
+  `sizes` cannot see a sibling checkbox. Download is the escape hatch for
+  full resolution. Do not "fix" this with srcset.
+- **A sample is displayed from `tiles/` and submitted from the original.**
+  `SAMPLE_FACES` pins a face count per sample and those counts move with the
+  width, so pointing submission at a tile would quietly make every caption on
+  the page wrong. A test asserts the submitted bytes equal the committed file.
+- **The share page reads `meta.json` off disk, not Redis.** Redis forgets a
+  job at `result_ttl`; the pictures live to `blob_ttl`. A Redis-backed page
+  would go dark while its own images were still up.
+- **A started job past its deadline is reported failed** (`_abandoned` in
+  `src/jobs.py`). A worker killed mid-job — a deploy, a crash in native code,
+  the OOM killer, all of which this deployment restarts from — leaves its job
+  at `started` with nobody coming back to it, and the card polls its last
+  checkpoint ("Encoding the result") forever. RQ does reap those, but only in
+  a maintenance pass it runs every ten minutes *and* only while some worker is
+  alive to run one, so the reader decides instead, at `job_timeout +
+  ABANDONED_GRACE`. `ThreadWorker` also reaps every `REAP_INTERVAL`
+  (`src/worker.py`), which is what gives an abandoned job's payload a TTL
+  rather than leaving it in a `noeviction` Redis for good.
 - **Progress is stage markers** written to `job.meta` by the worker. The face
   count is lifted out of the "Drawing glasses on N faces" step because the
   next checkpoint overwrites `step`.
@@ -110,20 +152,37 @@ Invariants worth knowing before editing:
   states and the CSS reads which one from the list itself: with nothing in
   `#queue` the input pane is the page, and `body:has(#queue article)` moves
   it into a fixed bar (`nav.addbar` in `src/ui.py`). The URL and Samples
-  panels over that bar are three radios (`#show-url`, `#show-samples`,
+  panel over that bar is three radios (`#show-url`, `#show-samples`,
   `#show-none`); the swipe-to-remove gesture is a scroll-snap strip of
   `.card-body` and `.card-remove`; the copy that differs between a desktop
   and a phone ships twice, as `.desktop-only` / `.mobile-only`. No endpoint,
   no cookie and no script knows about any of it.
-- **`#form` is never `display: none`.** The camera and library file inputs
-  live in it, and a label cannot open a picker for an input with no box, so
-  results mode hides the form's children instead.
+- **`#form` is never `display: none`.** The file input lives in it, and a
+  label cannot open a picker for an input with no box — which is what the
+  phone bar's "Add a picture" is — so results mode hides the form's children
+  instead.
+- **One file input, one dropzone, both devices.** A phone's picker already
+  offers the camera beside the library; a second `capture` input only made the
+  same sheet open from two places, and `capture` *hides* the library, which is
+  the opposite of what its button promised. Only the wording differs between
+  a phone and a desktop, through `.desktop-only` / `.mobile-only`.
 - **The dropzone card is a `<div>`, not the label.** On a phone the card also
   holds a "Take a photo" label, and a label cannot nest in a label, so the
   label is `.dropzone-face` inside it and `.dropzone-face::before` stretches
   its hit area back over the whole card -- which is what keeps a click or a
   drop on the padding working. `.pick-row` is `position: relative` so its two
   buttons sit above that overlay, and `order` puts the limits line after them.
+- **Script is only ever an enhancement.** `countdown.js` retimes a sentence
+  the server already rendered correctly; `share.js` reveals a Share button
+  that starts `hidden`, because only the browser knows whether it can share a
+  *file* and a button that half-works is worse than none. Both are delegated
+  from the document and re-run on `htmx:afterSwap`, since cards are swapped in
+  and out constantly — a held element reference goes stale immediately.
+- **`/llms.txt` is generated, not committed** (`llms_txt()` in `src/ui.py`).
+  Half of it is numbers that live in `Settings` — the size cap, the rate
+  limit, how long a result survives — and a static file would start lying the
+  first time one of those changed. Same reasoning as the API description
+  carrying the flow rather than a README no one fetches.
 - **The docs contents list is a `<details>`.** Above 860px it is forced open
   with `::details-content { content-visibility: visible }` and the summary is
   made inert, so the sidebar is the label and links it always was.

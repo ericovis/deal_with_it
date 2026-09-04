@@ -9,7 +9,8 @@ import logging
 
 from fastapi import APIRouter, HTTPException, Request, status
 
-from src import jobs, throttle
+from src import blobs, images, jobs, throttle
+from src.errors import DealWithItError
 from src.models import ImageRequest, JobCreated, JobResult, SourceKind
 
 logger = logging.getLogger(__name__)
@@ -26,9 +27,13 @@ def client_of(request: Request) -> str | None:
     response_model=JobCreated,
     status_code=status.HTTP_202_ACCEPTED,
     summary='Queue an image for processing',
+    tags=['jobs'],
     responses={
-        429: {'description': 'Too many submissions from this client'},
-        503: {'description': 'The queue is full'},
+        202: {'description': 'Accepted. Poll `status_url` for the result.'},
+        422: {'description': 'Neither a url nor a base64 image, or both at once'},
+        429: {'description': 'Too many submissions from this client. '
+                             'Carries `Retry-After`.'},
+        503: {'description': 'The queue is full. Carries `Retry-After`.'},
     },
 )
 def create_job(image: ImageRequest, request: Request) -> JobCreated:
@@ -45,7 +50,23 @@ def create_job(image: ImageRequest, request: Request) -> JobCreated:
             headers={'Retry-After': str(exc.retry_after)},
         ) from exc
     payload = image.as_payload()
-    job_id, state = jobs.enqueue(payload, meta={
+    job_id = jobs.new_id()
+    if payload['base64'] is not None:
+        # base64-decoding a string, not decoding an image: the bytes go
+        # straight to disk and the queue carries a path. `base64` stays in
+        # the published request contract; it just stops riding through Redis.
+        try:
+            data = images.decode_data_uri(payload['base64'])
+        except DealWithItError as exc:
+            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                                detail=str(exc)) from exc
+        media_type = payload['base64'][len('data:'):payload['base64'].index(';')]
+        queued = {'url': None,
+                  'blob': blobs.put(job_id, f'source.{blobs.extension_for(media_type)}', data)}
+    else:
+        queued = {'url': payload['url'], 'blob': None}
+
+    job_id, state = jobs.enqueue(queued, job_id=job_id, meta={
         'kind': str(SourceKind.URL if payload['url'] else SourceKind.UPLOAD),
         'label': jobs.label_for(payload),
         'thumb': payload['url'],
@@ -62,18 +83,49 @@ def create_job(image: ImageRequest, request: Request) -> JobCreated:
     response_model=JobResult,
     name='read_job',
     summary='Read the state, and eventually the result, of a job',
-    responses={404: {'description': 'Unknown or expired job id'}},
+    tags=['jobs'],
+    responses={
+        200: {'description': 'The job. `images` is populated once it is '
+                             '`finished`.'},
+        404: {'description': 'Unknown job id, or one whose pictures have '
+                             'already been deleted'},
+    },
 )
-def read_job(job_id: str) -> JobResult:
+def read_job(job_id: str, request: Request) -> JobResult:
     result = jobs.result_for(job_id)
     if result is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail='No such job. It may have expired.',
         )
-    return result
+    return _with_absolute_links(result, request)
 
 
-@router.get('/health', summary='Liveness and broker connectivity')
+def _with_absolute_links(result: JobResult, request: Request) -> JobResult:
+    """Links a caller can use without knowing where we live.
+
+    From ``request.base_url`` rather than the configured ``public_url``: it is
+    what the client actually asked for, and it is correct behind the reverse
+    proxy because uvicorn runs with ``--proxy-headers``.
+    """
+    base = str(request.base_url).rstrip('/')
+    if not base:  # pragma: no cover - a request always has one
+        return result
+
+    def absolute(url: str | None) -> str | None:
+        return f'{base}{url}' if url and url.startswith('/') else url
+
+    return result.model_copy(update={
+        'images': result.images.model_copy(update={
+            field: absolute(value)
+            for field, value in result.images if isinstance(value, str)
+        }) if result.images else None,
+        'downloads': ({fmt: absolute(url) for fmt, url in result.downloads.items()}
+                      if result.downloads else None),
+        'share_url': absolute(result.share_url),
+    })
+
+
+@router.get('/health', summary='Liveness and broker connectivity', tags=['health'])
 def health() -> dict:
     return {'status': 'ok', 'redis': jobs.is_broker_reachable()}

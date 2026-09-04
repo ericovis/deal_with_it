@@ -88,6 +88,20 @@ def clean_settings_cache():
     get_settings.cache_clear()
 
 
+@pytest.fixture(autouse=True)
+def blob_root(tmp_path_factory, monkeypatch, clean_settings_cache):
+    """A blob store per test, and nothing shared between them.
+
+    Autouse because a stray default would otherwise write a job's pictures
+    next to the checkout and every test would still pass. Depends on
+    ``clean_settings_cache`` so the ordering is stated rather than hoped for.
+    """
+    root = tmp_path_factory.mktemp('blobs')
+    monkeypatch.setenv('DWI_BLOB_DIR', str(root))
+    get_settings.cache_clear()
+    return root
+
+
 @pytest.fixture
 def redis_conn():
     connection = fakeredis.FakeStrictRedis()

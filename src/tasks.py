@@ -1,15 +1,19 @@
 """The unit of work the RQ worker runs: picklable arguments in, a plain
 dict out. Must not import anything web-related."""
 
+import json
 import logging
 import re
+from concurrent.futures import ThreadPoolExecutor
+from datetime import UTC, datetime, timedelta
+from uuid import uuid4
 
+from PIL import Image
 from rq import get_current_job
 
-from src import images
+from src import blobs, derivatives, images
 from src.config import get_settings
 from src.errors import DealWithItError
-from src.models import ImageRequest
 from src.processors.deal_with_it import DealWithItProcessor
 
 logger = logging.getLogger(__name__)
@@ -42,21 +46,76 @@ def record_faces(faces: list, detection: str) -> None:
     job.save_meta()
 
 
-def process_image(payload: dict) -> dict:
-    """Fetch or decode the image, draw the glasses, return a data URI.
+def sweep_blobs() -> dict:
+    """Drop expired job directories, then the oldest until the store fits.
 
-    Expected failures come back as an ``error`` string; anything else raises
-    and lands in RQ's failed registry.
+    An ordinary job on the ordinary queue, enqueued by the cron scheduler in
+    ``src/worker.py``: it shows up in the log like any other, is bounded by
+    ``job_timeout``, and can be run by hand. The decision-making is in
+    ``blobs.reap`` so it can be tested without a worker.
     """
     settings = get_settings()
-    request = ImageRequest.model_validate(payload)
+    swept = blobs.reap(
+        ttl=settings.blob_ttl,
+        max_bytes=settings.blob_max_bytes,
+        # Never evict something that may still be queued: a job written
+        # seconds ago has not necessarily been picked up yet, and deleting
+        # its source would fail it.
+        min_age=settings.job_timeout * 2,
+    )
+    return {'swept': len(swept), 'error': None}
+
+
+def show_thumbnail(reference: str) -> None:
+    """Put the picture on the card while the job is still running.
+
+    ``meta['thumb']` is what `jobs._source_of` reads, and a poll already
+    fetches meta, so this costs the card nothing extra. Only set when the
+    submission did not come with something to show: a sample has its tile and
+    a URL has itself, and both are already on screen. A no-op outside a
+    worker.
+    """
+    job = get_current_job()
+    if job is None or job.meta.get('thumb'):
+        return
+    job.meta['thumb'] = blobs.url(reference)
+    job.save_meta()
+
+
+def _job_id() -> str:
+    """Whose directory the pictures go in. Falls back to an id of its own so
+    the task can still be called directly, which the tests do."""
+    job = get_current_job()
+    return job.id if job is not None else f'detached-{uuid4().hex}'
+
+
+def process_image(payload: dict) -> dict:
+    """Fetch or decode the image, draw the glasses, write the derivatives.
+
+    Returns references into the blob store, not pictures: nothing
+    multi-megabyte goes back through Redis. Expected failures come back as an
+    ``error`` string; anything else raises and lands in RQ's failed registry.
+    """
+    settings = get_settings()
+    if not any(payload.get(key) for key in ('url', 'blob', 'base64')):
+        raise ValueError('An url, a blob or a base64 string must be passed.')
+    job_id = _job_id()
     try:
         report_progress(10, 'Fetching the image')
         array, source_format = images.load(
-            url=str(request.url) if request.url else None,
-            base64_data=request.base64,
+            url=payload.get('url'),
+            base64_data=payload.get('base64'),
+            blob=payload.get('blob'),
             settings=settings,
         )
+        source = Image.fromarray(array)
+        # Before detection, not after: it is 10 ms, and it is the difference
+        # between a card that shows what it is working on and a grey box for
+        # however long the queue and the detector take. A sample or a URL
+        # already had something to show; an upload did not.
+        written = derivatives.write_thumb(job_id, source)
+        show_thumbnail(written['thumb'])
+
         processor = DealWithItProcessor(
             array,
             max_detection_size=settings.max_detection_size,
@@ -65,11 +124,45 @@ def process_image(payload: dict) -> dict:
         # A photo comes back as a photo: PNG-encoding a JPEG input is 7x the
         # bytes and, at phone resolution, longer than the detection itself.
         processor.img_format = 'JPEG' if source_format == 'JPEG' else 'PNG'
-        processor.call()
+        # The Before half is the submitted picture, which we already have, so
+        # it does not have to wait for the glasses. Pillow's encoder releases
+        # the GIL, so this genuinely overlaps the drawing -- worth a second of
+        # latency on a big picture, and neutral under load, where both cores
+        # are busy either way.
+        with ThreadPoolExecutor(1) as pool:
+            before = pool.submit(derivatives.write_before, job_id, source)
+            try:
+                processor.call()
+            except BaseException:
+                before.result()  # Never leave the pool with work in flight.
+                raise
         record_faces(processor.faces, processor.detection)
     except DealWithItError as exc:
         logger.info('rejected image: %s', exc)
-        return {'image': None, 'error': str(exc)}
+        return {'images': None, 'error': str(exc)}
 
-    report_progress(90, 'Encoding the result')
-    return {'image': processor.base64_output, 'error': None}
+    report_progress(90, 'Writing the pictures')
+    # Not `images`: that name is the module this function fetches through.
+    result, downloads = derivatives.write_result(
+        job_id, processor.output, processor.img_format)
+    written |= result | before.result()
+    expires_at = datetime.now(UTC) + timedelta(seconds=settings.blob_ttl)
+    # Beside the pictures, not in Redis: the job record expires at
+    # `result_ttl` and the pictures at `blob_ttl`, so a share page reading
+    # from Redis would go dark while its own images were still there.
+    blobs.put(job_id, 'meta.json', json.dumps({
+        'job_id': job_id,
+        'images': written,
+        'downloads': downloads,
+        'expires_at': expires_at.isoformat(),
+        'faces': len(processor.faces),
+        'detection': processor.detection,
+    }).encode())
+    return {
+        'images': written,
+        'downloads': downloads,
+        # Stamped when the files land, not read back off their mtime: a retry
+        # hard-links its source, which would make an mtime lie.
+        'expires_at': expires_at.isoformat(),
+        'error': None,
+    }

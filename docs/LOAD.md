@@ -77,6 +77,98 @@ Before results matched the input format, a 36 MP job returned a 22.5 MB PNG
 data URI and the encode alone took 7.3 s, longer than detection. A JPEG at
 quality 90 encodes in 0.16 s.
 
+## Getting a result to the browser
+
+Measured 2026-09-04 on the 4-core laptop, two worker threads pinned to two
+cores. What changed is where the pictures live, not how long a job takes:
+a card used to inline the submitted image *and* the result, twice each — the
+thumbnail, the Before half, the After half and the Download link — into the
+one-second poll that swapped it in.
+
+| upload           | job   | poll response | on the wire, all told |
+|------------------|-------|---------------|-----------------------|
+| 3.2 MB 36 MP JPEG| 2.6 s | 16.6 MB → 3.2 KB | 16.6 → 6.2 MB      |
+| 7.9 MB 11 MP PNG | 5.3 s | 41.8 MB → 3.2 KB | 41.8 → 15.7 MB     |
+
+Eight such cards: **194 MB before, 73 MB after**, and the 73 MB is binary
+rather than base64 (a third of the saving on its own), fetched once per
+picture instead of twice, in parallel, cacheable, and off the poll chain —
+so a slow picture no longer holds up the card that carries it. In a browser,
+queueing those eight put 371 poll responses on the wire totalling 292 KB,
+the largest 2.7 KB.
+
+This is the other half of "the results take forever": the job was done in
+under three seconds and the browser still had tens of megabytes to pull,
+through a proxy compressing base64 for nothing, off the cores detection
+needs.
+
+### Measured against the live site
+
+2026-09-04, over the internet from a home connection to the VPS. One 7.9 MB
+PNG through the page, nothing else in the queue:
+
+```
+upload    7.89 MB                       14.9 s
+job       finished (worker log agrees)  25.0 s
+card poll 41.76 MB, gzip, chunked      263.8 s
+```
+
+**The card took four and a half minutes after the worker had finished.** That
+is the whole reported bug: the poll that carries the finished card *is* the
+41.76 MB response, so until it lands htmx has nothing to swap in and the card
+keeps showing the last state it did get — "Encoding the result · 90%", the
+last checkpoint the worker writes. Meanwhile the worker is idle, which is
+what `htop` shows. Queue several and it is worse, on one connection.
+
+The link, not the CPU, is the limit: a 0.50 MB static PNG over the same link
+runs at 0.18 MB/s, and refetching the same card with `Accept-Encoding:
+identity` took 55.8 s against 64.5 s gzipped — so Caddy compressing base64
+costs about 14%, real but secondary to simply sending 41.76 MB.
+
+Serving the two pictures as URLs fixes the symptom outright, not just the
+byte count: the card arrives in 3.2 KB and flips to Done immediately, and the
+pictures stream in afterwards as ordinary images, in parallel and cached,
+without the card's *state* waiting on them.
+
+### Sized derivatives, and the store behind them
+
+Done. The worker writes what each place needs instead of one full-resolution
+file: a 160 px thumbnail, a 1600 px viewing copy used by both the card and the
+full-screen view, the same for the submitted image, a 1200 px JPEG for link
+previews, and the full-resolution file for download.
+
+| upload | full-res result | what a finished card fetches |
+|--------|-----------------|------------------------------|
+| 3.2 MB 36 MP JPEG | 3.09 MB | **318 KB** (thumb 3.9 + view 157 + before 157) |
+| 7.9 MB 11 MP PNG | 7.71 MB | **320 KB** |
+
+Against 15.8 MB as URLs, or 42 MB inlined. The derivatives cost about 0.9 s of
+worker time per job, against removing the base64 encode and megabytes of Redis
+traffic.
+
+The static side went the same way: 200 px WebP centre crops for the sample
+grid (exactly what `object-fit: cover` was already showing) and 760 px figures
+for the docs.
+
+| page | before | after |
+|------|--------|-------|
+| `/` | 4.0 MB | **175 KB** |
+| `/docs` | ~1.7 MB | **190 KB** |
+
+Images no longer travel through Redis at all. A submission is written to a
+directory both tiers mount and the queue carries a path, so `DWI_MAX_QUEUE_DEPTH`
+is no longer bounded by the Redis ceiling — it is bounded by how long a queue
+is worth watching.
+
+**Disk is now the thing that fills.** Roughly 12 MB per finished job (the
+full-resolution result, its WebP and JPEG siblings, and the derivatives;
+the submitted source is deleted on success). At the 170 jobs/min above that is
+~2 GB a minute, so on this host `DWI_BLOB_MAX_BYTES` (1 GB), not
+`DWI_BLOB_TTL` (1 hour), is what binds under load — the TTL is what binds
+under ordinary traffic. The sweep runs as an ordinary job on the queue every
+30 s, oldest first, and will not evict anything younger than two job timeouts
+in case it is still queued.
+
 ## On two cores
 
 Measured 2026-09-04 against the live deployment: a 2 vCPU, 3.8 GB VPS with
@@ -110,6 +202,9 @@ Two things worth fixing rather than measuring around:
   result was 0.37 MB on the wire — nothing saved — and 0.2 s slower than
   the same fetch with `Accept-Encoding: identity`. Exclude the job
   endpoints from compression and that CPU goes back to detection.
+  *Since fixed at the source:* the pictures are no longer base64 in a poll
+  response at all, but binary on `/jobs/{id}/result` and `/jobs/{id}/source`,
+  which Caddy skips compressing on content type alone. See below.
 - **Nothing must be allowed to grow without a ceiling** on a host with no
   swap. The worker peaked at 850 MB with two 36 MP jobs in flight, against
   677 MB idle, which is fine; Redis holding queued payloads and results is
@@ -168,12 +263,46 @@ the argument list said otherwise, but podman's quadlet generator drops an
 empty `""` argument and everything after it, so `--save "" --maxmemory 1gb`
 reached Redis as `--save`.
 
-The rate limit keys on `request.client.host`. Behind a proxy, run uvicorn
-with `--proxy-headers --forwarded-allow-ips <proxy>` (the `web` image
-target already does) or every client shares one budget.
+The rate limit keys on `request.client.host`, which behind a proxy means
+whatever the proxy says. **Getting that wrong is a bypass, not a nuisance**,
+and it was wrong here until 2026-09-04:
+
+- uvicorn ran with `--forwarded-allow-ips "*"`, whose always-trust path takes
+  the **first** entry of `X-Forwarded-For`.
+- Both Caddy and Cloudflare *append* to a client-supplied header rather than
+  replacing it. `X-Forwarded-For: 1.2.3.4` arrived as `1.2.3.4,<real>`, and
+  the first entry is the client's own invention.
+
+So anyone could pick their own bucket. Measured: forty submissions each
+claiming a different address were all accepted, against a limit of thirty a
+minute. The fix is to make the proxy work the client out and hand the app a
+single value it did not get from the client — Caddy `trusted_proxies` with
+Cloudflare's ranges plus `header_up X-Forwarded-For {client_ip}`, and uvicorn
+trusting only the container subnet. The same forty now get 29 accepted and 11
+refused, sharing one bucket as they should, and an ordinary submission is
+unaffected.
+
+A stale Cloudflare range list fails the safe way: visitors get bucketed as
+Cloudflare, which over-limits rather than under-limits.
 
 A crash inside native code takes the whole worker process down, threads
 and all.
-Run it under a restart policy; queued jobs survive in Redis, and the ones
-that were running land in the failed registry once their heartbeat expires,
-where the page offers a Retry.
+Run it under a restart policy; queued jobs survive in Redis and the restarted
+worker picks them up. The ones that were *running* do not come back: they sit
+at `started`, and the card polling them shows its last checkpoint — almost
+always "Encoding the result", the last one written — until something says
+otherwise. RQ's own reaping is not that something on its own: it happens in
+`run_maintenance_tasks`, which runs every ten minutes and only while some
+worker is alive to run it. Measured, killing a worker mid-job left the card
+polling for **595 seconds**; with the worker down it never recovered at all.
+
+Two things fix it, and both are needed:
+
+- `_abandoned` in `src/jobs.py` reports a `started` job past `job_timeout +
+  ABANDONED_GRACE` as failed, from the read side, so the page is honest with
+  no worker running. The card now fails, with a Retry, 151 s after the kill.
+- `ThreadWorker` reaps every `REAP_INTERVAL` (60 s) instead of RQ's 600, and
+  blocks for 60 s per dequeue instead of 405 so it comes up for air to do it.
+  This is what moves the job to the failed registry and gives its payload a
+  TTL; abandoned jobs' hashes have no expiry of their own, so on a
+  `noeviction` Redis they otherwise accumulate until writes start failing.

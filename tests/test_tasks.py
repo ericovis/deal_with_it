@@ -1,9 +1,13 @@
 """The worker's entry point: expected failures must come back as data."""
 
+import os
+import time
+
 import numpy as np
 import pytest
+from PIL import Image
 
-from src import images, jobs, tasks
+from src import blobs, images, jobs, tasks
 from src.images import ImageSourceError
 from src.processors.deal_with_it import NoFacesFound
 from tests import support
@@ -14,7 +18,7 @@ def stub_load(monkeypatch):
     """Replace image loading so these tests need neither network nor pixels."""
 
     def install(result, source_format='PNG'):
-        def fake_load(url=None, base64_data=None, settings=None):
+        def fake_load(url=None, base64_data=None, blob=None, settings=None):
             if isinstance(result, Exception):
                 raise result
             return result, source_format
@@ -35,13 +39,13 @@ def stub_processor(monkeypatch):
             detection = 'plain'
 
             def __init__(self, array, **kwargs):
-                self.base64_output = None
+                self.output = None
                 seen['processor'] = self
 
             def call(self):
                 if isinstance(outcome, Exception):
                     raise outcome
-                self.base64_output = outcome
+                self.output = outcome
 
         monkeypatch.setattr(tasks, 'DealWithItProcessor', FakeProcessor)
         return seen
@@ -56,19 +60,38 @@ class TestOutputFormat:
     def test_a_jpeg_comes_back_as_a_jpeg_and_everything_else_as_png(
             self, stub_load, stub_processor, source_format, expected):
         stub_load(np.zeros((2, 2, 3), dtype=np.uint8), source_format)
-        seen = stub_processor('data:image/png;base64,AAAA')
+        seen = stub_processor(Image.new('RGB', (2, 2), 'red'))
         tasks.process_image({'url': 'https://example.test/a', 'base64': None})
         assert seen['processor'].img_format == expected
 
 
-def test_returns_the_processed_image(stub_load, stub_processor):
+def test_writes_the_pictures_and_returns_where_they_went(stub_load, stub_processor, blob_root):
+    """Nothing multi-megabyte goes back through Redis: the return value is a
+    handful of references to files on a disk both tiers can see."""
     stub_load(np.zeros((4, 4, 3), dtype=np.uint8))
-    stub_processor('data:image/png;base64,AAAA')
+    stub_processor(Image.new('RGB', (8, 8), 'red'))
 
-    assert tasks.process_image({'url': 'https://example.test/a.png', 'base64': None}) == {
-        'image': 'data:image/png;base64,AAAA',
-        'error': None,
-    }
+    result = tasks.process_image({'url': 'https://example.test/a.png', 'base64': None})
+
+    assert result['error'] is None
+    assert set(result['images']) == {'full', 'view', 'thumb', 'before', 'card'}
+    for reference in result['images'].values():
+        assert blobs.path(reference).is_file(), reference
+    assert result['downloads']['png'] == result['images']['full']
+    assert 'webp' in result['downloads']
+    assert result['expires_at'], 'the card counts down to this'
+
+
+def test_a_small_picture_is_not_blown_up_to_fill_a_derivative(
+        stub_load, stub_processor, blob_root):
+    """Fitting never upscales: an 8px picture is already the right size for
+    anything below it, and stretching it would cost bytes for nothing."""
+    stub_load(np.zeros((4, 4, 3), dtype=np.uint8))
+    stub_processor(Image.new('RGB', (8, 8), 'red'))
+
+    result = tasks.process_image({'url': 'https://example.test/a.png', 'base64': None})
+    with Image.open(blobs.path(result['images']['view'])) as view:
+        assert view.size == (8, 8)
 
 
 def test_reports_a_bad_source_as_an_error_not_a_crash(stub_load):
@@ -76,7 +99,7 @@ def test_reports_a_bad_source_as_an_error_not_a_crash(stub_load):
     stub_load(ImageSourceError('The URL is not an image.'))
 
     result = tasks.process_image({'url': 'https://example.test/a.png', 'base64': None})
-    assert result == {'image': None, 'error': 'The URL is not an image.'}
+    assert result == {'images': None, 'error': 'The URL is not an image.'}
 
 
 def test_reports_a_faceless_image_as_an_error(stub_load, stub_processor):
@@ -85,7 +108,7 @@ def test_reports_a_faceless_image_as_an_error(stub_load, stub_processor):
     stub_processor(NoFacesFound('No faces were found in this image.'))
 
     result = tasks.process_image({'url': 'https://example.test/a.png', 'base64': None})
-    assert result == {'image': None, 'error': 'No faces were found in this image.'}
+    assert result == {'images': None, 'error': 'No faces were found in this image.'}
 
 
 def test_unexpected_errors_propagate(stub_load, stub_processor):
@@ -97,11 +120,9 @@ def test_unexpected_errors_propagate(stub_load, stub_processor):
         tasks.process_image({'url': 'https://example.test/a.png', 'base64': None})
 
 
-def test_revalidates_the_payload_it_was_given():
-    from pydantic import ValidationError
-
-    with pytest.raises(ValidationError):
-        tasks.process_image({'url': None, 'base64': None})
+def test_refuses_a_payload_that_names_no_source():
+    with pytest.raises(ValueError, match='must be passed'):
+        tasks.process_image({'url': None, 'blob': None})
 
 
 class TestFaceCount:
@@ -152,3 +173,103 @@ class TestRecordedFaces:
 
     def test_outside_a_worker_it_is_a_no_op(self):
         tasks.record_faces([], 'plain')
+
+
+class TestTheThumbnailComesFirst:
+    """A card should show what it is working on, not a grey box."""
+
+    def test_the_thumbnail_is_written_before_detection(
+            self, stub_load, stub_processor, blob_root):
+        """Written from the *submitted* picture, so it does not need the
+        glasses -- or a face."""
+        stub_load(np.zeros((4, 4, 3), dtype=np.uint8))
+
+        seen = {}
+
+        class Watching:
+            img_format = 'PNG'
+            faces: list = []
+            detection = 'plain'
+
+            def __init__(self, array, **kwargs):
+                self.output = None
+
+            def call(self):
+                seen['thumb_existed'] = any(
+                    (blob_root / d / 'thumb.webp').is_file() for d in os.listdir(blob_root))
+                self.output = Image.new('RGB', (8, 8), 'red')
+
+        monkeypatch = pytest.MonkeyPatch()
+        monkeypatch.setattr(tasks, 'DealWithItProcessor', Watching)
+        try:
+            tasks.process_image({'url': 'https://example.test/a.png', 'blob': None})
+        finally:
+            monkeypatch.undo()
+        assert seen['thumb_existed'], 'the card had nothing to show while it worked'
+
+    def test_a_picture_with_no_faces_still_leaves_a_thumbnail(
+            self, stub_load, stub_processor, blob_root):
+        stub_load(np.zeros((4, 4, 3), dtype=np.uint8))
+        stub_processor(NoFacesFound('No faces were found in this image.'))
+
+        result = tasks.process_image({'url': 'https://example.test/a.png', 'blob': None})
+        assert result['images'] is None
+        thumbs = list(blob_root.glob('*/thumb.webp'))
+        assert thumbs, 'the thumbnail is not part of the result, so it survives one'
+
+    def test_the_thumbnail_reaches_a_polling_card(
+            self, async_queue, stub_task, drain, blob_root):
+        """It goes on job.meta, which a poll already fetches."""
+        stub_task(support.SUCCESS)
+        job_id, _ = jobs.enqueue({'url': None, 'blob': 'x/source.png'}, meta={})
+        drain()
+        _, source = jobs.describe(job_id)
+        assert source.thumb == f'/i/{job_id}/thumb.webp'
+
+    def test_it_does_not_replace_a_thumbnail_the_card_already_had(
+            self, async_queue, stub_task, drain):
+        """A sample has its tile and a URL has itself; both are already up."""
+        stub_task(support.SUCCESS)
+        job_id, _ = jobs.enqueue({'url': None, 'blob': 'x/source.png'},
+                                 meta={'thumb': '/static/img/tiles/me.webp'})
+        drain()
+        _, source = jobs.describe(job_id)
+        assert source.thumb == '/static/img/tiles/me.webp'
+
+
+class TestSweepingTheStore:
+    """Nothing on a filesystem expires by itself, so a job goes and looks."""
+
+    def test_it_drops_what_is_past_the_ttl(self, blob_root, monkeypatch):
+        monkeypatch.setenv('DWI_BLOB_TTL', '900')
+        tasks.get_settings.cache_clear()
+        blobs.put('old-job-0001', 'view.webp', b'x')
+        blobs.put('new-job-0001', 'view.webp', b'x')
+        stale = time.time() - 7200
+        os.utime(blob_root / 'old-job-0001', (stale, stale))
+
+        assert tasks.sweep_blobs() == {'swept': 1, 'error': None}
+        assert not (blob_root / 'old-job-0001').exists()
+        assert (blob_root / 'new-job-0001').exists()
+
+    def test_it_runs_as_an_ordinary_job(self, async_queue, drain, blob_root, monkeypatch):
+        """The scheduler enqueues it; it is not a side effect of the
+        supervisor loop, so it shows up in the queue like anything else."""
+        monkeypatch.setenv('DWI_BLOB_TTL', '900')
+        tasks.get_settings.cache_clear()
+        blobs.put('old-job-0002', 'view.webp', b'x')
+        stale = time.time() - 7200
+        os.utime(blob_root / 'old-job-0002', (stale, stale))
+
+        job_id, _ = jobs.enqueue({}, meta={})
+        jobs.get_queue().enqueue('src.tasks.sweep_blobs')
+        drain()
+        assert not (blob_root / 'old-job-0002').exists()
+
+    def test_it_will_not_eat_a_job_that_may_still_be_queued(self, blob_root, monkeypatch):
+        monkeypatch.setenv('DWI_BLOB_MAX_BYTES', '1')
+        tasks.get_settings.cache_clear()
+        blobs.put('fresh-job-001', 'source.jpg', b'x' * 500)
+
+        assert tasks.sweep_blobs() == {'swept': 0, 'error': None}
+        assert (blob_root / 'fresh-job-001').exists()

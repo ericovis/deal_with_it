@@ -14,22 +14,69 @@ COUNTS_FACES = 'tests.support.counts_faces'
 DAWDLES = 'tests.support.dawdles'
 RECORDS_FACES = 'tests.support.records_faces'
 
-IMAGE = 'data:image/png;base64,c3VuZ2xhc3Nlcw=='
-JPEG_IMAGE = 'data:image/jpeg;base64,c3VuZ2xhc3Nlcw=='
 SUCCEEDS_AS_JPEG = 'tests.support.succeeds_as_jpeg'
+
+#: Recognisable stand-in bytes. Nothing here decodes them; the tests that
+#: care about real pixels use the real processor.
+PIXELS = b'sunglasses'
+
+
+def written(img_format: str = 'PNG') -> dict:
+    """What `src.tasks.process_image` returns, without the face stack.
+
+    These stubs run inside a real worker, so they write real files into
+    whatever DWI_BLOB_DIR the test set -- a manifest pointing at nothing
+    would not exercise the paths that matter.
+    """
+    import json
+    from datetime import UTC, datetime, timedelta
+    from uuid import uuid4
+
+    from rq import get_current_job
+
+    from src import blobs
+    from src.config import get_settings
+
+    job = get_current_job()
+    job_id = job.id if job is not None else f'detached-{uuid4().hex}'
+    from src.tasks import show_thumbnail
+    native = 'jpg' if img_format == 'JPEG' else 'png'
+    images = {
+        'full': blobs.put(job_id, f'result.{native}', PIXELS),
+        'view': blobs.put(job_id, 'view.webp', PIXELS),
+        'thumb': blobs.put(job_id, 'thumb.webp', PIXELS),
+        'before': blobs.put(job_id, 'before.webp', PIXELS),
+        'card': blobs.put(job_id, 'card.jpg', PIXELS),
+    }
+    show_thumbnail(images['thumb'])
+    expires = datetime.now(UTC) + timedelta(seconds=get_settings().blob_ttl)
+    downloads = {native: images['full'],
+                 'webp': blobs.put(job_id, 'result.webp', PIXELS)}
+    # The share page reads this, not Redis, so a stub that skipped it would
+    # leave /s/<id> untested.
+    blobs.put(job_id, 'meta.json', json.dumps({
+        'job_id': job_id, 'images': images, 'downloads': downloads,
+        'expires_at': expires.isoformat(), 'faces': 1, 'detection': 'plain',
+    }).encode())
+    return {
+        'images': images,
+        'downloads': downloads,
+        'expires_at': expires.isoformat(),
+        'error': None,
+    }
 
 
 def succeeds(payload: dict) -> dict:
-    return {'image': IMAGE, 'error': None}
+    return written()
 
 
 def succeeds_as_jpeg(payload: dict) -> dict:
-    return {'image': JPEG_IMAGE, 'error': None}
+    return written('JPEG')
 
 
 def rejects(payload: dict) -> dict:
     """What process_image does with an input it cannot use."""
-    return {'image': None, 'error': 'No faces were found in this image.'}
+    return {'images': None, 'error': 'No faces were found in this image.'}
 
 
 def crashes(payload: dict) -> dict:
@@ -37,7 +84,7 @@ def crashes(payload: dict) -> dict:
 
 
 def returns_nothing(payload: dict) -> dict:
-    return {'image': None, 'error': None}
+    return {'images': None, 'error': None}
 
 
 def reports_progress(payload: dict) -> dict:
@@ -45,7 +92,7 @@ def reports_progress(payload: dict) -> dict:
     from src.tasks import report_progress
 
     report_progress(42, 'Halfway up the stairs')
-    return {'image': IMAGE, 'error': None}
+    return written()
 
 
 def dawdles(payload: dict) -> dict:
@@ -54,7 +101,7 @@ def dawdles(payload: dict) -> dict:
 
     for _ in range(500):
         time.sleep(0.01)
-    return {'image': IMAGE, 'error': None}
+    return written()
 
 
 class _FakeFace:
@@ -71,7 +118,7 @@ def records_faces(payload: dict) -> dict:
     from src.tasks import record_faces
 
     record_faces([_FakeFace()], 'upscaled')
-    return {'image': IMAGE, 'error': None}
+    return written()
 
 
 def counts_faces(payload: dict) -> dict:
@@ -79,5 +126,5 @@ def counts_faces(payload: dict) -> dict:
     from src.tasks import report_progress
 
     report_progress(75, 'Drawing glasses on 8 faces')
-    report_progress(90, 'Encoding the result')
-    return {'image': IMAGE, 'error': None}
+    report_progress(90, 'Writing the pictures')
+    return written()
