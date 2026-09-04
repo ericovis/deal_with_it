@@ -12,15 +12,30 @@ from tests.test_ui import submit
 URL = 'https://example.test/a.png'
 
 
+#: A moment 20 seconds into a window, so a frozen clock leaves a `retry_after`
+#: that is neither 0 nor the whole window.
+FROZEN = 1_700_000_000
+
+
 @pytest.fixture
 def limits(monkeypatch):
-    """Settings with a rate limit and queue cap small enough to hit."""
+    """Settings with a rate limit and queue cap small enough to hit, and a
+    clock that does not move under them.
+
+    The limiter is a fixed window -- `now - now % rate_window` is part of the
+    key -- so a test that makes four calls either side of a minute boundary
+    watches the counter reset and never sees the limit. Rare, real, and it
+    fails in CI rather than here, which is the worst way to find it. Freezing
+    the clock is what makes these tests about the limit instead of about when
+    they happened to run.
+    """
 
     def install(**overrides):
         settings = Settings(**{'rate_limit': 3, 'rate_window': 60, 'max_queue_depth': 2,
                                **overrides})
         monkeypatch.setattr(throttle, 'get_settings', lambda: settings)
         monkeypatch.setattr(jobs, 'get_settings', lambda: settings)
+        monkeypatch.setattr(throttle.time, 'time', lambda: float(FROZEN))
         get_settings.cache_clear()
         return settings
 
@@ -47,6 +62,24 @@ class TestRateLimit:
         for _ in range(3):
             throttle.check_rate('1.2.3.4')
         throttle.check_rate('5.6.7.8')
+
+    def test_a_new_window_starts_the_count_again(self, sync_queue, limits, monkeypatch):
+        """The property that made these tests flaky, stated on purpose.
+
+        It is a fixed window, so the count resets on the boundary and a client
+        can spend its whole budget twice across one -- deliberate, per
+        `check_rate`: this exists to stop floods, not to meter usage. Worth a
+        test because the alternative is finding it as a failure that only
+        happens on some minutes.
+        """
+        limits()
+        for _ in range(3):
+            throttle.check_rate('1.2.3.4')
+        with pytest.raises(throttle.TooManyRequests):
+            throttle.check_rate('1.2.3.4')
+
+        monkeypatch.setattr(throttle.time, 'time', lambda: float(FROZEN + 60))
+        throttle.check_rate('1.2.3.4')
 
     def test_the_counter_expires_with_the_window(self, sync_queue, limits):
         settings = limits()
