@@ -596,8 +596,6 @@ def share_page(job_id: str, record: dict, theme: str | None, reachable: bool) ->
                 H1('Someone dealt with it'),
                 P(caption, cls='lead'),
                 _result_view(job_id, pictures, downloads, expires_at=expires_at),
-                P(A('Deal with your own picture', href='/', cls='btn'),
-                  cls='lost-actions'),
                 cls='shared',
             ),
             cls='container layout',
