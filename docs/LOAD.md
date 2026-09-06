@@ -135,7 +135,7 @@ without the card's *state* waiting on them.
 Done. The worker writes what each place needs instead of one full-resolution
 file: a 160 px thumbnail, a 1600 px viewing copy used by both the card and the
 full-screen view, the same for the submitted image, a 1200 px JPEG for link
-previews, and the full-resolution file for download.
+previews, the 480 px animated GIF, and the full-resolution file for download.
 
 | upload | full-res result | what a finished card fetches |
 |--------|-----------------|------------------------------|
@@ -145,6 +145,16 @@ previews, and the full-resolution file for download.
 Against 15.8 MB as URLs, or 42 MB inlined. The derivatives cost about 0.9 s of
 worker time per job, against removing the base64 encode and megabytes of Redis
 traffic.
+
+The animation is not in those figures because it is not in that fetch: the
+card's third tab carries `loading="lazy"` and a `display: none` image is never
+near the viewport, so the GIF is fetched when someone opens the tab. Over the
+sample pictures it is 143–262 KB (median 169) and about 100 ms of worker time,
+whether there is one face in the picture or twenty-nine — the cost is the
+480 px frames, not the faces. What keeps it in that range is one shared
+palette, no dithering, and still beats held as duration rather than drawn: an
+eighteen-frame file for a three-second loop, with every frame after the first
+stored as the rectangle that changed.
 
 The static side went the same way: 200 px WebP centre crops for the sample
 grid (exactly what `object-fit: cover` was already showing) and 760 px figures
@@ -161,7 +171,8 @@ is no longer bounded by the Redis ceiling — it is bounded by how long a queue
 is worth watching.
 
 **Disk is now the thing that fills.** Roughly 12 MB per finished job (the
-full-resolution result, its WebP and JPEG siblings, and the derivatives;
+full-resolution result, its WebP and JPEG siblings, and the derivatives,
+the GIF among them at ~0.17 MB;
 the submitted source is deleted on success). At the 170 jobs/min above that is
 ~2 GB a minute, so on this host `DWI_BLOB_MAX_BYTES` (1 GB), not
 `DWI_BLOB_TTL` (1 hour), is what binds under load — the TTL is what binds

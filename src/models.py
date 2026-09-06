@@ -142,6 +142,7 @@ class JobImages(BaseModel):
         'view': f'{EXAMPLE_HOST}/i/{EXAMPLE_ID}/view.webp',
         'thumb': f'{EXAMPLE_HOST}/i/{EXAMPLE_ID}/thumb.webp',
         'before': f'{EXAMPLE_HOST}/i/{EXAMPLE_ID}/before.webp',
+        'animation': f'{EXAMPLE_HOST}/i/{EXAMPLE_ID}/animation.gif',
         'full': f'{EXAMPLE_HOST}/i/{EXAMPLE_ID}/result.jpg',
         'card': f'{EXAMPLE_HOST}/i/{EXAMPLE_ID}/card.jpg',
     }})
@@ -154,6 +155,12 @@ class JobImages(BaseModel):
                     'while the job is still running.')
     before: str | None = Field(
         default=None, description='The submitted image at viewing size (WebP).')
+    animation: str | None = Field(
+        default=None,
+        description='The glasses dropping onto every face and the caption '
+                    'landing, as a looping GIF, 480px on its long side. '
+                    'Absent if the animation could not be built.',
+    )
     full: str = Field(description='The result at full resolution, in the format '
                                   'it was submitted in.')
     card: str | None = Field(
@@ -173,12 +180,14 @@ class JobResult(BaseModel):
             'view': f'{EXAMPLE_HOST}/i/{EXAMPLE_ID}/view.webp',
             'thumb': f'{EXAMPLE_HOST}/i/{EXAMPLE_ID}/thumb.webp',
             'before': f'{EXAMPLE_HOST}/i/{EXAMPLE_ID}/before.webp',
+            'animation': f'{EXAMPLE_HOST}/i/{EXAMPLE_ID}/animation.gif',
             'full': f'{EXAMPLE_HOST}/i/{EXAMPLE_ID}/result.jpg',
             'card': f'{EXAMPLE_HOST}/i/{EXAMPLE_ID}/card.jpg',
         },
         'downloads': {
             'jpg': f'{EXAMPLE_HOST}/i/{EXAMPLE_ID}/result.jpg',
             'webp': f'{EXAMPLE_HOST}/i/{EXAMPLE_ID}/result.webp',
+            'gif': f'{EXAMPLE_HOST}/i/{EXAMPLE_ID}/animation.gif',
         },
         'share_url': f'{EXAMPLE_HOST}/s/{EXAMPLE_ID}',
         'expires_at': '2026-09-04T19:00:37Z',
@@ -206,14 +215,16 @@ class JobResult(BaseModel):
     )
     downloads: dict[str, str] | None = Field(
         default=None,
-        description='The full-resolution result, keyed by file format. Always '
-                    'includes the format the picture was submitted in, plus '
-                    '`webp`; a PNG submission also gets `jpg`. A JPEG one does '
-                    'not get `png`, because a lossless wrapper around lossy '
-                    'data is just a bigger file.',
+        description='The result keyed by file format. Always includes the '
+                    'format the picture was submitted in, plus `webp`; a PNG '
+                    'submission also gets `jpg`. A JPEG one does not get '
+                    '`png`, because a lossless wrapper around lossy data is '
+                    'just a bigger file. All of those are full resolution. '
+                    '`gif` is the animation, which is 480px by nature.',
         examples=[{
             'jpg': f'{EXAMPLE_HOST}/i/{EXAMPLE_ID}/result.jpg',
             'webp': f'{EXAMPLE_HOST}/i/{EXAMPLE_ID}/result.webp',
+            'gif': f'{EXAMPLE_HOST}/i/{EXAMPLE_ID}/animation.gif',
         }],
     )
     share_url: str | None = Field(

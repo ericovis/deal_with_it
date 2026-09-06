@@ -76,11 +76,13 @@ class TestReadJob:
             'view': f'{host}/i/{job_id}/view.webp',
             'thumb': f'{host}/i/{job_id}/thumb.webp',
             'before': f'{host}/i/{job_id}/before.webp',
+            'animation': f'{host}/i/{job_id}/animation.gif',
             'full': f'{host}/i/{job_id}/result.png',
             'card': f'{host}/i/{job_id}/card.jpg',
         }
         assert body['downloads'] == {'png': f'{host}/i/{job_id}/result.png',
-                                     'webp': f'{host}/i/{job_id}/result.webp'}
+                                     'webp': f'{host}/i/{job_id}/result.webp',
+                                     'gif': f'{host}/i/{job_id}/animation.gif'}
         assert body['share_url'] == f'{host}/s/{job_id}', 'a link worth passing on'
         assert body['expires_at'], 'so a caller knows how long the links last'
         assert 'image' not in body, 'the base64 data URI is gone on purpose'
@@ -257,13 +259,14 @@ class TestTheOpenAPISchema:
         which tells a reader nothing about what the keys are."""
         field = self.schema(client)['components']['schemas']['JobResult']['properties']
         [example] = field['downloads']['examples']
-        assert set(example) == {'jpg', 'webp'}
+        assert set(example) == {'jpg', 'webp', 'gif'}
         assert all(url.startswith('http') for url in example.values())
 
     def test_a_finished_job_has_a_whole_worked_example(self, client):
         example = self.schema(client)['components']['schemas']['JobResult']['example']
         assert example['state'] == 'finished'
-        assert set(example['images']) == {'view', 'thumb', 'before', 'full', 'card'}
+        assert set(example['images']) == {'view', 'thumb', 'before', 'animation',
+                                          'full', 'card'}
         assert example['expires_at'] and example['share_url']
         assert example['faces'][0]['landmarks'], 'the shape of a face, not just its box'
 

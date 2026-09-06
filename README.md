@@ -3,7 +3,8 @@ A Python API for creating "Deal With It"-like Images
 
 [![Tests](https://github.com/ericovis/deal_with_it/actions/workflows/tests.yml/badge.svg?branch=master)](https://github.com/ericovis/deal_with_it/actions/workflows/tests.yml)
 
-Give it a picture, get it back with the meme sunglasses on every face in it.
+Give it a picture, get it back with the meme sunglasses on every face in it --
+and a GIF of them dropping into place, with DEAL WITH IT landing underneath.
 
 ## How it works
 
@@ -115,9 +116,10 @@ is done:
     "view":   "https://example.com/i/9f2c.../view.webp",
     "thumb":  "https://example.com/i/9f2c.../thumb.webp",
     "before": "https://example.com/i/9f2c.../before.webp",
+    "animation": "https://example.com/i/9f2c.../animation.gif",
     "full":   "https://example.com/i/9f2c.../result.jpg"
   },
-  "downloads": {"jpg": "...", "webp": "..."},
+  "downloads": {"jpg": "...", "webp": "...", "gif": "..."},
   "share_url": "https://example.com/s/9f2c...",
   "expires_at": "2026-09-04T17:32:00Z",
   "error": null,
@@ -139,8 +141,9 @@ is done:
 `images` are links, not bytes. `view` is the one to show — WebP, 1600px, a
 fortieth of the full-resolution file — while `full` keeps the format the
 picture was submitted in, and `downloads` offers whichever other formats were
-written for it. Everything under `/i/` stops existing at `expires_at`, and so
-does `share_url`.
+written for it. `animation` is the loop: the glasses dropping onto every face
+and DEAL WITH IT landing under them, as a GIF. Everything under `/i/` stops
+existing at `expires_at`, and so does `share_url`.
 
 > **API 2.0.** The result used to come back inline as `image`, a base64 data
 > URI. It is gone: it put megabytes through Redis and out again in every poll,
@@ -171,9 +174,9 @@ reports how far through it is.
 
 The page uses the same fields. Each submission becomes a card in the session
 list; the card polls itself, shows the progress bar, and turns into the result
-in place -- with a Before/After toggle, a download link, and a Retry button if
-it failed. Several pictures can be dropped at once, each getting its own card.
-The list lives in that tab only.
+in place -- with a Before/After/Animated switch, a download link, and a Retry
+button if it failed. Several pictures can be dropped at once, each getting its
+own card. The list lives in that tab only.
 
 `GET /api/health` reports whether the broker is reachable.
 
@@ -200,7 +203,6 @@ The only thing the page stores about a person is a `dwi_theme` cookie holding
 
 #### Some features you could build:
 
-- Add the ability to create a animated GIF out of the original image
 - Add more processors
 - Add APIs for Slack integration
 - Nonsense stuff ;D
@@ -213,7 +215,10 @@ the 1927 Solvay conference, and paintings by Leonardo, Vermeer, Rembrandt,
 Grant Wood, van Gogh, Munch, Landseer, Ronner-Knip and Coolidge.
 
 The sunglasses are the ones from the
-[Deal With It](https://knowyourmeme.com/memes/deal-with-it) meme.
+[Deal With It](https://knowyourmeme.com/memes/deal-with-it) meme. The
+animation's caption is set in [Anton](https://fonts.google.com/specimen/Anton)
+(SIL Open Font License 1.1) and committed as outlines, so no font is loaded at
+run time.
 
 The group photo in the showcase is the 2013 class of NASA astronauts by
 Robert Markowitz, a work of the US federal government and therefore public

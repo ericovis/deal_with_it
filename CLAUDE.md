@@ -53,10 +53,12 @@ src/config.py       Settings, all DWI_-prefixed env vars
 src/errors.py       DealWithItError: failures whose message is safe to show
 src/blobs.py        The blob store. Web-safe: no imaging library, ever
 src/derivatives.py  Pixels to files. Worker-only; all the Pillow lives here
+src/animation.py    The falling-glasses GIF. Worker-only; the choreography
+src/svg.py          One rasteriser for both bits of artwork. Worker-only
 src/assets.py       Content-hashed /static URLs and their cache headers
 src/processors/     BaseProcessor + DealWithItProcessor
-src/static/         style.css, the sample photos, glasses.svg, the app
-                    icons and the web manifest
+src/static/         style.css, the sample photos, glasses.svg,
+                    dealwithit.svg, the app icons and the web manifest
 tests/              Hermetic: no network, no Redis server, no committed
                     fixtures; blobs go to a per-test tmp_path
 ```
@@ -94,6 +96,18 @@ Invariants worth knowing before editing:
   `os.replace` inside it, so a reader sees a whole file or nothing; the temp
   name is dot-prefixed and both servers refuse to serve one. A retry
   hard-links rather than sharing a directory.
+- **The GIF is drawn by the same rule as the still, not a copy of it.**
+  `src/animation.py` is handed the three landmarks per face and
+  `DealWithItProcessor.place` itself, so the frame the fall lands on *is* the
+  picture the job produced, at 480px. The still beats are one frame with a
+  long duration, not thirty drawn ones, so a three-second loop is eighteen
+  frames; every frame shares one palette and dithering is off, which is what
+  lets Pillow store each as the rectangle that changed. About 170 KB and
+  0.1 s a job, so there is no knob to turn it off.
+- **A job can finish without its animation.** `tasks.animate` swallows and
+  logs its own failures: by the time it runs the pictures are written and the
+  job has succeeded. The card builds its switch from the pictures that are
+  there, so a result from before the GIF existed is a switch with two tabs.
 - **`view.webp` is one size for the card *and* the lightbox, on purpose.**
   `_result_view` reuses the same `<img>` for both and the lightbox is a CSS
   `:has(:checked)` state, so no `srcset`/`sizes` pair can describe it —
@@ -136,7 +150,10 @@ Invariants worth knowing before editing:
   by `POST /theme`. `style.css` reads only that span; an absent attribute lets
   `prefers-color-scheme` decide. Do not drive it from `:checked`.
 - **`glasses.svg` is the only copy of the artwork.** The worker rasterises it
-  per face, in memory, at the width that face needs.
+  per face, in memory, at the width that face needs, through `src/svg.py` --
+  which is also where the caption comes from. `dealwithit.svg` is the words
+  DEAL WITH IT as outlines, not text: no font is loaded at run time and none
+  is committed.
 - **The detector is thread-local** (`_detector` in
   `src/processors/deal_with_it.py`): `setInputSize` mutates it. The shape
   predictor is shared; it is thread-safe. OpenCV's own thread pool is pinned
@@ -172,12 +189,13 @@ Invariants worth knowing before editing:
   its hit area back over the whole card -- which is what keeps a click or a
   drop on the padding working. `.pick-row` is `position: relative` so its two
   buttons sit above that overlay, and `order` puts the limits line after them.
-- **The phone's Before/After is a second pair of labels for the same
+- **The phone's Before/After/Animated is a second set of labels for the same
   radios**, inside `.frame` as a pill on the picture. The rule that styles
   the checked one matches through `.result` rather than as `input:checked +
   label`, so one rule dresses the footer's segmented control, the phone's
   pill and the overlay's copy of it. The footer's own segmented is
-  `.desktop-only`.
+  `.desktop-only`, and the pill says "GIF" where "Animated" would not fit
+  beside the Full size pill on a 320px screen.
 - **`.card-foot` is `grid-auto-flow: column` on a phone**, so it is equal
   columns for however many buttons are actually there: `share.js` reveals
   the Share button only on a browser that can share a file, and a row sized
@@ -227,7 +245,8 @@ names are fully qualified because Podman will not guess a registry.
 service has a healthcheck dependency; use `docker compose up -d` again.
 
 The `web` service reloads on edit; the `worker` does not. Restart it after
-touching `src/tasks.py`, `src/images.py` or `src/processors/`.
+touching `src/tasks.py`, `src/images.py`, `src/processors/`,
+`src/derivatives.py`, `src/animation.py` or `src/svg.py`.
 
 Locally, without containers:
 
