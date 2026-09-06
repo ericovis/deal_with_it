@@ -354,7 +354,7 @@ class TestOnAPhone:
                           body, re.S).group()
         pill = re.search(r'<div class="segmented view-pill mobile-only">.*?</div>',
                          frame, re.S).group()
-        assert f'for="view-{job_id}-b"' in pill and f'for="view-{job_id}-a"' in pill
+        assert f'for="view-{job_id}-before"' in pill and f'for="view-{job_id}-after"' in pill
         assert 'data-view="before"' in pill and 'data-view="after"' in pill
         assert body.count('data-view="before"') == 2, 'the footer keeps the desktop one'
 
@@ -635,8 +635,45 @@ class TestCards:
         job_id = self.start(client, hx)
         body = client.get(f'/jobs/{job_id}', headers=hx).text
         assert 'class="before"' in body and 'class="after"' in body
-        assert f'value="after" checked id="view-{job_id}-a"' in body
+        assert f'value="after" checked id="view-{job_id}-after"' in body
         assert 'class="segmented desktop-only"' in body
+
+    def test_the_switch_offers_the_animation_as_a_third_view(self, client, hx):
+        """Before, After, Animated -- and After is what a card opens on."""
+        job_id = self.start(client, hx)
+        body = client.get(f'/jobs/{job_id}', headers=hx).text
+        assert f'value="animated" id="view-{job_id}-animated"' in body
+        assert (f'<label for="view-{job_id}-animated" data-view="animated">Animated</label>'
+                in body)
+        assert 'checked' not in body.split('value="animated"')[1].split('>')[0]
+
+    def test_the_animation_is_fetched_when_its_tab_is_opened(self):
+        """The heaviest file on the card and the least often looked at. A
+        `display: none` image is never near the viewport, so the hint holds
+        it back until the tab is chosen."""
+        pictures = JobImages(view='/v.webp', thumb='/t.webp', full='/f.png',
+                             before='/b.webp', animation='/a.gif')
+        view = to_xml(ui._result_view('abc', pictures, {}))
+        assert '<img src="/a.gif" alt="The glasses dropping into place" loading="lazy"' in view
+        assert 'loading="lazy"' not in view.split('class="after"')[0], (
+            'the result itself is not deferred'
+        )
+
+    def test_a_result_without_an_animation_is_a_switch_with_two_tabs(self):
+        """A job finished before the GIF existed, or one whose animation
+        failed: the control is built from the files that are there."""
+        pictures = JobImages(view='/v.webp', thumb='/t.webp', full='/f.png', before='/b.webp')
+        view = to_xml(ui._result_view('abc', pictures, {}))
+        assert 'data-view="before"' in view and 'data-view="after"' in view
+        assert 'animated' not in view
+
+    def test_the_phone_pill_says_gif_where_animated_would_not_fit(self, client, hx):
+        """Three words plus the Full size pill overflow a 320px picture."""
+        job_id = self.start(client, hx)
+        body = client.get(f'/jobs/{job_id}', headers=hx).text
+        pill = re.search(r'<div class="segmented view-pill mobile-only">.*?</div>',
+                         body, re.S).group()
+        assert '>GIF</label>' in pill and '>Animated</label>' not in pill
 
     def test_each_result_can_be_downloaded(self, client, hx):
         job_id = self.start(client, hx)

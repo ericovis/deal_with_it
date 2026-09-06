@@ -4,8 +4,8 @@ Every sample is public domain. Each was resized from the Wikimedia Commons
 copy and is not otherwise altered; the widths are noted because the number of
 faces the detector finds depends on them.
 
-`me.jpg`, `deal_with_me.png`, `favicon.png` and `glasses.svg` are the
-project's own.
+`me.jpg`, `deal_with_me.png`, `favicon.png`, `glasses.svg` and
+`dealwithit.svg` are the project's own.
 
 ## Photographs
 
@@ -48,6 +48,13 @@ need.
 
 The sunglasses themselves are the ones from the
 [Deal With It](https://knowyourmeme.com/memes/deal-with-it) meme.
+
+`dealwithit.svg` is the caption the animation stamps on: the words DEAL WITH
+IT set in [Anton](https://fonts.google.com/specimen/Anton) (SIL Open Font
+License 1.1, © 2020 The Anton Project Authors) and converted to outlines, so
+what is committed is 1.5 KB of path data rather than a 170 KB font, and
+nothing has to load a font at run time. The worker rasterises it with resvg,
+like the glasses.
 
 `icons/` are the same `glasses.svg`, rasterised with resvg, inverted to white
 and centred on the band colour `#24261F`: 14% padding for the app, home-screen

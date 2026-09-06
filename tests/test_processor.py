@@ -6,7 +6,7 @@ import numpy as np
 import pytest
 from PIL import Image, ImageOps
 
-from src import blobs, derivatives
+from src import blobs, derivatives, svg
 from src.processors.base import BaseProcessor
 from src.processors.deal_with_it import (
     DealWithItProcessor,
@@ -80,9 +80,7 @@ class TestDealWithItProcessor:
 
     def test_reads_the_glasses_asset_once_per_process(self, single_face_image, monkeypatch):
         """The artwork used to be re-opened from disk for every face."""
-        from src.processors import deal_with_it
-
-        deal_with_it._glasses_source.cache_clear()
+        svg.source.cache_clear()
         read = []
         real_read = Path.read_text
 
@@ -104,15 +102,15 @@ class TestDealWithItProcessor:
         """
         from src.processors import deal_with_it
 
-        deal_with_it._render_glasses.cache_clear()
+        svg.render.cache_clear()
         widths = []
-        real_render = deal_with_it._render_glasses.__wrapped__
+        real_render = svg.render.__wrapped__
 
         def recording_render(source, width):
             widths.append(width)
             return real_render(source, width)
 
-        monkeypatch.setattr(deal_with_it, '_render_glasses', recording_render)
+        monkeypatch.setattr(svg, 'render', recording_render)
         DealWithItProcessor(as_array(multiple_faces_image)).call()
 
         assert widths, 'nothing was drawn'
@@ -361,29 +359,29 @@ class TestPlacement:
 
     def test_the_left_lens_sits_on_the_left_eyes_outer_corner(self):
         proc = self.processor()
-        img, (x, y) = proc._place((120, 200), (280, 200), (200, 250))
+        img, (x, y) = proc.place((120, 200), (280, 200), (200, 250))
         assert x + int(img.width * proc.lens_offset) == 120
         assert y + int(img.height / 2) == 200
 
     def test_the_width_follows_the_eye_span(self):
         proc = self.processor()
-        wide, _ = proc._place((100, 200), (300, 200), (200, 250))
-        narrow, _ = proc._place((175, 200), (225, 200), (200, 212))
+        wide, _ = proc.place((100, 200), (300, 200), (200, 250))
+        narrow, _ = proc.place((175, 200), (225, 200), (200, 212))
         assert wide.width == round(200 * proc.width_per_span)
         assert narrow.width == round(50 * proc.width_per_span)
 
     def test_a_tilted_head_gets_a_rotated_frame(self):
         proc = self.processor()
-        level, _ = proc._place((120, 200), (280, 200), (200, 250))
-        tilted, _ = proc._place((120, 180), (280, 220), (200, 250))
+        level, _ = proc.place((120, 200), (280, 200), (200, 250))
+        tilted, _ = proc.place((120, 180), (280, 220), (200, 250))
         assert tilted.height > level.height, 'rotate(expand=True) grows the canvas'
         span = ((280 - 120) ** 2 + (220 - 180) ** 2) ** 0.5
         assert tilted.width == round(proc.width_per_span * span), 'the rotated width fits the face'
 
     def test_a_turned_head_tapers_the_far_side(self):
         proc = self.processor()
-        frontal, _ = proc._place((120, 200), (280, 200), (200, 250))
-        turned, _ = proc._place((120, 200), (280, 200), (150, 250))
+        frontal, _ = proc.place((120, 200), (280, 200), (200, 250))
+        turned, _ = proc.place((120, 200), (280, 200), (150, 250))
         alpha = np.asarray(turned)[:, :, 3]
         left_span = np.flatnonzero(alpha[:, 2] > 0)
         right_span = np.flatnonzero(alpha[:, -3] > 0)
@@ -392,7 +390,7 @@ class TestPlacement:
 
     def test_a_frontal_face_is_not_tapered(self):
         proc = self.processor()
-        img, _ = proc._place((120, 200), (280, 200), (200, 250))
+        img, _ = proc.place((120, 200), (280, 200), (200, 250))
         rendered = proc._rendered(img.width)
         assert img.height == pytest.approx(rendered.height * img.width / rendered.width, abs=1)
 

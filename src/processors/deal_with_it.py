@@ -9,7 +9,6 @@ worker can store them with the job.
 import functools
 import threading
 from dataclasses import dataclass
-from io import BytesIO
 from math import atan, atan2, degrees, hypot, sin
 from pathlib import Path
 
@@ -17,10 +16,10 @@ import cv2
 import dlib
 import face_recognition_models
 import numpy as np
-import resvg_py
 from numpy.typing import NDArray
 from PIL import Image
 
+from src import svg
 from src.errors import DealWithItError
 from src.processors.base import BaseProcessor
 
@@ -218,20 +217,6 @@ def landmarks_for(image: NDArray[np.uint8], face: Face) -> Landmarks:
     return Landmarks(tuple((float(p.x), float(p.y)) for p in shape.parts()))
 
 
-@functools.cache
-def _glasses_source(path: Path) -> str:
-    return path.read_text()
-
-
-@functools.lru_cache(maxsize=16)
-def _render_glasses(source: str, width: int) -> Image.Image:
-    """The glasses rasterised at ``width`` pixels across. Keyed on the SVG
-    text and the width, never on a processor instance. Callers only warp,
-    rotate or resize the result, which all return new images."""
-    png = bytes(resvg_py.svg_to_bytes(svg_string=source, width=width))
-    return Image.open(BytesIO(png)).convert('RGBA')
-
-
 def _perspective_coefficients(source: list[Point], target: list[Point]) -> list[float]:
     """Coefficients for ``Image.transform(PERSPECTIVE)`` mapping the four
     ``target`` corners of the output back onto ``source`` corners."""
@@ -287,8 +272,8 @@ class DealWithItProcessor(BaseProcessor):
 
     def _rendered(self, width: int) -> Image.Image:
         rendered = -(-width * SUPERSAMPLE // RENDER_STEP) * RENDER_STEP
-        return _render_glasses(
-            _glasses_source(self._glasses_path),
+        return svg.render(
+            svg.source(self._glasses_path),
             min(max(rendered, RENDER_STEP), MAX_RENDER),
         )
 
@@ -311,9 +296,14 @@ class DealWithItProcessor(BaseProcessor):
         return img.transform((w, round(H)), Image.PERSPECTIVE,
                              _perspective_coefficients(source, target), self.resample)
 
-    def _place(self, outer_left: Point, outer_right: Point,
-               nose_tip: Point) -> tuple[Image.Image, tuple[int, int]]:
+    def place(self, outer_left: Point, outer_right: Point,
+              nose_tip: Point) -> tuple[Image.Image, tuple[int, int]]:
         """The glasses drawn for one face, and where their top-left goes.
+
+        Public because the animation draws the same glasses on a smaller
+        canvas: handed landmarks scaled to that canvas, this answers with the
+        sprite and the pixel the fall has to end on, so the last frame of the
+        GIF is the picture the job produced.
 
         The rule is the original one: the frame is rotated by the angle
         between the outer eye corners, sized so its rotated width fits the
@@ -356,6 +346,6 @@ class DealWithItProcessor(BaseProcessor):
         for face in faces:
             landmarks = landmarks_for(detection_image, face).scaled(upscale)
             self.faces.append(DetectedFace(face.scaled(upscale), landmarks))
-            glasses, position = self._place(
+            glasses, position = self.place(
                 landmarks.outer_left, landmarks.outer_right, landmarks.nose_tip)
             self.output.paste(glasses, position, mask=glasses)

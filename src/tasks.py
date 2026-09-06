@@ -82,6 +82,28 @@ def show_thumbnail(reference: str) -> None:
     job.save_meta()
 
 
+def animate(job_id: str, source: Image.Image, processor: DealWithItProcessor) -> dict[str, str]:
+    """The falling-glasses GIF, if it can be made.
+
+    Swallows its own failures on purpose: by the time this runs the pictures
+    are already written and the job has already succeeded, so a GIF that
+    cannot be built is a card with one tab fewer, not a job that failed. The
+    landmarks and the placement rule both come off the processor, so the
+    animation ends on the picture it produced rather than on a re-derivation
+    of it.
+    """
+    try:
+        return derivatives.write_animation(
+            job_id, source,
+            [(face.landmarks.outer_left, face.landmarks.outer_right, face.landmarks.nose_tip)
+             for face in processor.faces],
+            processor.place,
+        )
+    except Exception:
+        logger.exception('could not animate job %s', job_id)
+        return {}
+
+
 def _job_id() -> str:
     """Whose directory the pictures go in. Falls back to an id of its own so
     the task can still be called directly, which the tests do."""
@@ -146,6 +168,15 @@ def process_image(payload: dict) -> dict:
     result, downloads = derivatives.write_result(
         job_id, processor.output, processor.img_format)
     written |= result | before.result()
+
+    report_progress(95, 'Animating the glasses')
+    written |= animate(job_id, source, processor)
+    if 'animation' in written:
+        # Offered beside the stills because it is the file most people
+        # actually want to send someone, and the download menu is the only
+        # place to ask for one.
+        downloads['gif'] = written['animation']
+
     expires_at = datetime.now(UTC) + timedelta(seconds=settings.blob_ttl)
     # Beside the pictures, not in Redis: the job record expires at
     # `result_ttl` and the pictures at `blob_ttl`, so a share page reading

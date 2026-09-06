@@ -900,8 +900,8 @@ body:has(#queue article) .clear {
     max-width: 100%;
 }
 
-/* Before/After with no script: two radios and :has(). The radios stay in the
-   tab order, so the toggle is keyboard-operable. */
+/* Before/After/Animated with no script: a radio each and :has(). The radios
+   stay in the tab order, so the switch is keyboard-operable. */
 .result {
     display: flex;
     flex-direction: column;
@@ -914,8 +914,12 @@ body:has(#queue article) .clear {
     pointer-events: none;
 }
 
-.result:has([value="after"]:checked) .before,
-.result:has([value="before"]:checked) .after {
+/* One rule per tab rather than one per pair of them: with Before, After and
+   Animated the pairs are six selectors, and `:not()` stays one per tab
+   whatever gets added next. */
+.result:has([value="before"]:checked) .frame img:not(.before),
+.result:has([value="after"]:checked) .frame img:not(.after),
+.result:has([value="animated"]:checked) .frame img:not(.animated) {
     display: none;
 }
 
@@ -945,7 +949,7 @@ body:has(#queue article) .clear {
     color: var(--text);
 }
 
-/* The phone's copy of Before/After, which lives on the picture. Not `.pill`:
+/* The phone's copy of the switch, which lives on the picture. Not `.pill`:
    that is the band's worker-status pill, and its ::before would put a green
    dot inside this one. Off here by its own selector, because `.mobile-only`
    alone would lose to `.segmented` above -- same specificity, comes later. */
@@ -958,7 +962,8 @@ body:has(#queue article) .clear {
    the same rule can style a control that is not a sibling of its radios --
    which is what lets the overlay reuse them. */
 .result:has([value="before"]:checked) label[data-view="before"],
-.result:has([value="after"]:checked) label[data-view="after"] {
+.result:has([value="after"]:checked) label[data-view="after"],
+.result:has([value="animated"]:checked) label[data-view="animated"] {
     background: var(--primary);
     color: var(--primary-fg);
 }
@@ -1124,7 +1129,8 @@ body:has(.full-toggle:checked) {
 }
 
 .result:has(.full-toggle:checked):has([value="before"]:checked) label[data-view="before"],
-.result:has(.full-toggle:checked):has([value="after"]:checked) label[data-view="after"] {
+.result:has(.full-toggle:checked):has([value="after"]:checked) label[data-view="after"],
+.result:has(.full-toggle:checked):has([value="animated"]:checked) label[data-view="animated"] {
     background: #f9f8f6;
     color: #24261F;
 }
@@ -2068,17 +2074,20 @@ code {
     }
 
     .result:has([value="before"]:checked) .view-pill label[data-view="before"],
-    .result:has([value="after"]:checked) .view-pill label[data-view="after"] {
+    .result:has([value="after"]:checked) .view-pill label[data-view="after"],
+    .result:has([value="animated"]:checked) .view-pill label[data-view="animated"] {
         background: #f9f8f6;
         color: #24261F;
     }
 
+    /* Top right, not beside the view pill: with three tabs on it that pill
+       is 164px, and 320px of phone does not hold both on one line. */
     .open-full-pill {
         display: inline-flex;
         align-items: center;
         position: absolute;
         right: 10px;
-        bottom: 10px;
+        top: 10px;
         z-index: 2;
         height: 32px;
         padding: 0 12px;
@@ -2093,7 +2102,7 @@ code {
 
     /* ----- the full-size view ----- */
 
-    /* The footer is two rows here: the Before/After pill over the buttons. */
+    /* The footer is two rows here: the view pill over the buttons. */
     .result:has(.full-toggle:checked) .frame {
         padding: calc(env(safe-area-inset-top) + 64px) 16px
                  calc(env(safe-area-inset-bottom) + 150px);

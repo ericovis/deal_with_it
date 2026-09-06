@@ -230,6 +230,19 @@ class TestComparingBeforeAndAfter:
         card.locator('.card-foot label[data-view="after"]').click()
         expect(card.locator('.frame img.after')).to_be_visible()
 
+    def test_the_third_tab_plays_the_gif(self, page: Page):
+        """Deferred until it is asked for, so this also proves the hint does
+        not strand the picture: the tab has to end up with a decoded GIF."""
+        card = run(page, 'me')
+        gif = card.locator('.frame img.animated')
+        expect(gif).to_be_hidden()
+
+        card.locator('.card-foot label[data-view="animated"]').click()
+        expect(gif).to_be_visible()
+        expect(card.locator('.frame img.after')).to_be_hidden()
+        assert gif.get_attribute('src').endswith('/animation.gif')
+        page.wait_for_function('img => img.naturalWidth > 0', arg=gif.element_handle())
+
 
 class TestTheFullSizeView:
     def test_it_opens_over_the_page_and_closes_again(self, page: Page):
@@ -483,6 +496,23 @@ class TestOnAPhone:
         pill.locator('label[data-view="after"]').click()
         expect(card.locator('.frame img.after')).to_be_visible()
 
+        pill.locator('label[data-view="animated"]').click()
+        expect(card.locator('.frame img.animated')).to_be_visible()
+
+    def test_the_pill_and_the_full_size_one_share_the_picture_without_overlapping(
+            self, page: Page):
+        """Three tabs and Full size, on the narrowest phone there is. This is
+        why the third one says GIF."""
+        page.set_viewport_size({'width': 320, 'height': 568})
+        card = run(page, 'me')
+        pill = card.locator('.frame .segmented.view-pill').bounding_box()
+        full = card.locator('.open-full-pill').bounding_box()
+        apart = (pill['x'] + pill['width'] <= full['x']
+                 or full['x'] + full['width'] <= pill['x']
+                 or pill['y'] + pill['height'] <= full['y']
+                 or full['y'] + full['height'] <= pill['y'])
+        assert apart, f'the view pill runs into Full size: {pill} against {full}'
+
     def test_full_size_is_a_pill_and_the_view_lifts_it_over_the_footer(self, page: Page):
         card = run(page, 'me')
         opener = card.locator('.open-full-pill')
@@ -678,6 +708,16 @@ class TestTheDownloadMenu:
         link = card.locator('.download-menu .formats a').first
         assert re.search(r'/i/[0-9a-f-]+/result\.\w+$', link.get_attribute('href'))
         assert link.get_attribute('download').startswith('deal-with-it-')
+
+    def test_the_animation_is_offered_last(self, page: Page):
+        """Everything above it is the same picture in another encoding."""
+        card = run(page, 'me')
+        card.locator('.download-menu summary').click()
+        links = card.locator('.download-menu .formats a')
+        last = links.nth(links.count() - 1)
+        expect(last).to_have_text('GIF')
+        assert last.get_attribute('href').endswith('/animation.gif')
+        assert last.get_attribute('download').endswith('.gif')
 
 
 class TestTheSystemShareButton:

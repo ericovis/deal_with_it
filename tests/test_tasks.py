@@ -47,6 +47,10 @@ def stub_processor(monkeypatch):
                     raise outcome
                 self.output = outcome
 
+            def place(self, outer_left, outer_right, nose_tip):
+                """What the animation asks the processor for."""
+                return Image.new('RGBA', (4, 2), 'black'), (0, 0)
+
         monkeypatch.setattr(tasks, 'DealWithItProcessor', FakeProcessor)
         return seen
 
@@ -74,12 +78,57 @@ def test_writes_the_pictures_and_returns_where_they_went(stub_load, stub_process
     result = tasks.process_image({'url': 'https://example.test/a.png', 'base64': None})
 
     assert result['error'] is None
-    assert set(result['images']) == {'full', 'view', 'thumb', 'before', 'card'}
+    assert set(result['images']) == {'full', 'view', 'thumb', 'before', 'animation', 'card'}
     for reference in result['images'].values():
         assert blobs.path(reference).is_file(), reference
     assert result['downloads']['png'] == result['images']['full']
     assert 'webp' in result['downloads']
+    assert result['downloads']['gif'] == result['images']['animation'], (
+        'the animation is the file most people want to send someone'
+    )
     assert result['expires_at'], 'the card counts down to this'
+
+
+class TestTheAnimation:
+    """The GIF is the one derivative a job can finish without."""
+
+    def test_a_finished_job_leaves_a_real_gif_behind(self, stub_load, stub_processor, blob_root):
+        stub_load(np.zeros((4, 4, 3), dtype=np.uint8))
+        stub_processor(Image.new('RGB', (8, 8), 'red'))
+
+        result = tasks.process_image({'url': 'https://example.test/a.png', 'base64': None})
+
+        with Image.open(blobs.path(result['images']['animation'])) as gif:
+            assert gif.format == 'GIF'
+            assert gif.n_frames > 1
+
+    def test_a_failure_to_animate_is_a_tab_fewer_not_a_failed_job(
+            self, stub_load, stub_processor, blob_root, monkeypatch, caplog):
+        """By the time it runs the pictures are written and the job has
+        already succeeded. Losing them over a GIF would be absurd."""
+        stub_load(np.zeros((4, 4, 3), dtype=np.uint8))
+        stub_processor(Image.new('RGB', (8, 8), 'red'))
+
+        def explode(*args, **kwargs):
+            raise RuntimeError('resvg fell over')
+
+        monkeypatch.setattr(tasks.derivatives, 'write_animation', explode)
+        result = tasks.process_image({'url': 'https://example.test/a.png', 'base64': None})
+
+        assert result['error'] is None
+        assert 'animation' not in result['images'] and 'gif' not in result['downloads']
+        assert blobs.path(result['images']['view']).is_file(), 'the pictures still landed'
+        assert 'resvg fell over' in caplog.text, 'and somebody hears about it'
+
+    def test_it_is_listed_in_the_manifest_the_share_page_reads(
+            self, stub_load, stub_processor, blob_root):
+        stub_load(np.zeros((4, 4, 3), dtype=np.uint8))
+        stub_processor(Image.new('RGB', (8, 8), 'red'))
+
+        result = tasks.process_image({'url': 'https://example.test/a.png', 'base64': None})
+        job_id = blobs.split(result['images']['animation'])[0]
+
+        assert blobs.read_json(job_id)['images']['animation'] == result['images']['animation']
 
 
 def test_a_small_picture_is_not_blown_up_to_fill_a_derivative(

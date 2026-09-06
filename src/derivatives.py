@@ -8,11 +8,12 @@ Sizes come from what the CSS actually renders, not from round numbers. See
 """
 
 import logging
+from collections.abc import Sequence
 from io import BytesIO
 
 from PIL import Image
 
-from src import blobs
+from src import animation, blobs
 
 logger = logging.getLogger(__name__)
 
@@ -38,6 +39,11 @@ FULL_QUALITY = 92
 #: large-summary card wants, and it keeps a preview off the 3-8 MB original.
 CARD = 1200
 CARD_QUALITY = 85
+#: The animation. Small because a GIF is: 256 colours and no interframe
+#: compression worth the name, so this is the size at which the loop is
+#: still a few hundred KB rather than a few MB. It is a thing to send
+#: someone, not a thing to print.
+ANIMATION = 640
 
 
 def _fit(image: Image.Image, longest: int) -> Image.Image:
@@ -103,3 +109,18 @@ def write_before(job_id: str, image: Image.Image) -> dict[str, str]:
     """The submitted picture, at viewing size, for the Before half."""
     return {'before': _write(job_id, 'before.webp', _fit(image, VIEW), 'WEBP',
                              quality=VIEW_QUALITY, method=4)}
+
+
+def write_animation(job_id: str, image: Image.Image,
+                    faces: Sequence[tuple[tuple[float, float], ...]],
+                    place: animation.Placer) -> dict[str, str]:
+    """The glasses falling onto the submitted picture, as a GIF.
+
+    The resizing happens here rather than in :mod:`src.animation` so every
+    derivative size stays in one file; the scale goes along because the
+    landmarks are in the coordinates of the picture that was submitted.
+    """
+    base = _fit(image, ANIMATION)
+    scale = base.width / image.width
+    return {'animation': blobs.put(job_id, 'animation.gif',
+                                   animation.render(base, faces, place, scale))}

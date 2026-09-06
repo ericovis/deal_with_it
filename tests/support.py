@@ -46,12 +46,14 @@ def written(img_format: str = 'PNG') -> dict:
         'view': blobs.put(job_id, 'view.webp', PIXELS),
         'thumb': blobs.put(job_id, 'thumb.webp', PIXELS),
         'before': blobs.put(job_id, 'before.webp', PIXELS),
+        'animation': blobs.put(job_id, 'animation.gif', PIXELS),
         'card': blobs.put(job_id, 'card.jpg', PIXELS),
     }
     show_thumbnail(images['thumb'])
     expires = datetime.now(UTC) + timedelta(seconds=get_settings().blob_ttl)
     downloads = {native: images['full'],
-                 'webp': blobs.put(job_id, 'result.webp', PIXELS)}
+                 'webp': blobs.put(job_id, 'result.webp', PIXELS),
+                 'gif': images['animation']}
     # The share page reads this, not Redis, so a stub that skipped it would
     # leave /s/<id> untested.
     blobs.put(job_id, 'meta.json', json.dumps({

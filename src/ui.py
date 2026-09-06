@@ -610,9 +610,13 @@ Poll once a second. When `state` is `finished`:
 - `images.view` -- WebP, 1600px. Show this to a person.
 - `images.thumb` -- WebP, 160px. Appears *before* the job finishes.
 - `images.before` -- the submitted picture, same size as `view`.
+- `images.animation` -- the glasses dropping onto every face and DEAL WITH IT
+  landing under them, as a looping GIF, 640px on its long side. Absent if it
+  could not be built.
 - `images.full` -- full resolution, in the format it was submitted in.
 - `images.card` -- JPEG, 1200px, for `og:image` where WebP is not safe.
-- `downloads` -- the full-resolution result keyed by format.
+- `downloads` -- the result keyed by file format: full resolution for the
+  stills, and `gif` for the animation.
 - `faces` -- a box, a score and 68 landmarks per face, in submitted-image
   coordinates. Useful if you want to draw something else instead.
 - `expires_at` -- when every link above stops working.
@@ -769,12 +773,16 @@ def download_menu(job_id: str, downloads: dict[str, str]) -> Details:
     `::details-content`; the same element the docs contents list uses. The
     formats are whichever ones the worker wrote, which depends on what was
     submitted, so the list is never longer than it is useful.
+
+    GIF sorts last rather than first: everything above it is the same
+    picture in another encoding, and the animation is a different picture.
     """
+    formats = sorted(downloads.items(), key=lambda item: (item[0] == 'gif', item[0]))
     return Details(
         Summary('Download', cls='download'),
         Div(
             *[A(fmt.upper(), href=url, download=f'deal-with-it-{job_id[:8]}.{fmt}')
-              for fmt, url in sorted(downloads.items())],
+              for fmt, url in formats],
             cls='formats',
         ),
         cls='download-menu',
@@ -801,10 +809,31 @@ def copy_link_button(*label, cls: str) -> Span:
     )
 
 
+@dataclass(frozen=True)
+class View:
+    """One picture the switch can show.
+
+    ``short`` is what the phone's pill says: three words do not fit beside
+    the Full size pill on a 320px screen, and "GIF" is a word everyone knows.
+    """
+
+    value: str
+    label: str
+    short: str
+    src: str | None
+    alt: str
+    #: Deferred until the tab is chosen. Only the animation is: it is the
+    #: heaviest file a card fetches and the one least often looked at, and a
+    #: `display: none` image is never near the viewport, so a browser that
+    #: honours the hint fetches it when the tab is opened and not before.
+    lazy: bool = False
+
+
 def _result_view(job_id: str, pictures: JobImages, downloads: dict[str, str],
                  share_url: str | None = None, expires_at=None,
                  copy_link: bool = False) -> Div:
-    """The finished image, its Before/After toggle, and the full-screen view.
+    """The finished image, its Before/After/Animated switch, and the
+    full-screen view.
 
     The full-screen view re-lays out the *same* frame rather than a copy, so
     the picture is referenced once. A checkbox drives it because ``<dialog>``
@@ -812,7 +841,17 @@ def _result_view(job_id: str, pictures: JobImages, downloads: dict[str, str],
     """
     toggle = f'full-{job_id}'
     zoom = f'zoom-{job_id}'
-    image, before = pictures.view, pictures.before
+    image = pictures.view
+    # Built from the files the job actually has, not from what a job is
+    # expected to have: a result written before the animation existed has no
+    # GIF, and one whose animation failed has none either -- both are a
+    # switch with one tab fewer, not a broken card.
+    views = [view for view in (
+        View('before', 'Before', 'Before', pictures.before, 'The picture as submitted'),
+        View('after', 'After', 'After', image, 'Result'),
+        View('animated', 'Animated', 'GIF', pictures.animation,
+             'The glasses dropping into place', lazy=True),
+    ) if view.src]
     footer = [
         Span(cls='spacer'),
         Input(type='checkbox', id=toggle, cls='full-toggle visually-hidden'),
@@ -847,33 +886,31 @@ def _result_view(job_id: str, pictures: JobImages, downloads: dict[str, str],
     # DOM and are positioned, so they paint over it and take the touch.
     full_pill = Label('Full size', fr=toggle, cls='open-full-pill mobile-only')
 
-    if before is None:
+    if len(views) == 1:
         frame = Div(Img(src=image, alt='Result'), tap, full_pill, cls='frame')
         controls = footer
     else:
         name = f'view-{job_id}'
-        # A second pair of labels for the same radios: the `:has()` rule that
+        shown = [Img(src=view.src, alt=view.alt, cls=view.value,
+                     **({'loading': 'lazy'} if view.lazy else {}))
+                 for view in views]
+        # A second set of labels for the same radios: the `:has()` rule that
         # styles the checked one matches through the container, so one rule
         # dresses the footer's segmented control and this pill both.
         pill = Div(
-            Label('Before', fr=f'{name}-b', data_view='before'),
-            Label('After', fr=f'{name}-a', data_view='after'),
+            *[Label(view.short, fr=f'{name}-{view.value}', data_view=view.value)
+              for view in views],
             cls='segmented view-pill mobile-only',
         )
-        frame = Div(
-            Img(src=before, alt='The picture as submitted', cls='before'),
-            Img(src=image, alt='Result', cls='after'),
-            tap,
-            pill,
-            full_pill,
-            cls='frame',
-        )
+        frame = Div(*shown, tap, pill, full_pill, cls='frame')
         controls = [
             Div(
-                Input(type='radio', id=f'{name}-b', name=name, value='before'),
-                Label('Before', fr=f'{name}-b', data_view='before'),
-                Input(type='radio', id=f'{name}-a', name=name, value='after', checked=True),
-                Label('After', fr=f'{name}-a', data_view='after'),
+                *[element for view in views for element in (
+                    Input(type='radio', id=f'{name}-{view.value}', name=name,
+                          value=view.value, **({'checked': True} if view.value == 'after'
+                                               else {})),
+                    Label(view.label, fr=f'{name}-{view.value}', data_view=view.value),
+                )],
                 cls='segmented desktop-only',
             ),
             *footer,
@@ -1131,8 +1168,9 @@ def docs_page(theme: str | None, reachable: bool) -> tuple:
                             '    "view":   ".../i/9f2c.../view.webp",\n'
                             '    "thumb":  ".../i/9f2c.../thumb.webp",\n'
                             '    "before": ".../i/9f2c.../before.webp",\n'
+                            '    "animation": ".../i/9f2c.../animation.gif",\n'
                             '    "full":   ".../i/9f2c.../result.jpg"\n  },\n'
-                            '  "downloads": {"jpg": "...", "webp": "..."},\n'
+                            '  "downloads": {"jpg": "...", "webp": "...", "gif": "..."},\n'
                             '  "share_url": ".../s/9f2c...",\n'
                             '  "expires_at": "2026-09-04T17:32:00Z",\n'
                             '  "error": null,\n'
@@ -1144,7 +1182,9 @@ def docs_page(theme: str | None, reachable: bool) -> tuple:
                     P(Code('images'), ' are links, not bytes. ', Code('view'),
                       ' is what to show someone -- WebP, 1600px, a fortieth of the '
                       'full-resolution file -- and ', Code('full'), ' keeps the format '
-                      'the picture was submitted in. ', Code('downloads'),
+                      'the picture was submitted in. ', Code('animation'), ' is the '
+                      'glasses dropping onto every face, as a looping GIF. ',
+                      Code('downloads'),
                       ' offers the same picture in whichever formats were written for '
                       'it. Everything under ', Code('/i/'), ' stops existing at ',
                       Code('expires_at'), ', and so does ', Code('share_url'), '.'),
