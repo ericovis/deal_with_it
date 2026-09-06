@@ -137,8 +137,8 @@ file: a 160 px thumbnail, a 1600 px viewing copy used by both the card and the
 full-screen view, the same for the submitted image, a 1200 px JPEG for link
 previews, the 640 px animated GIF, and the full-resolution file for download.
 
-| upload | full-res result | what a finished card fetches |
-|--------|-----------------|------------------------------|
+| upload | full-res result | the three viewing copies |
+|--------|-----------------|--------------------------|
 | 3.2 MB 36 MP JPEG | 3.09 MB | **318 KB** (thumb 3.9 + view 157 + before 157) |
 | 7.9 MB 11 MP PNG | 7.71 MB | **320 KB** |
 
@@ -146,15 +146,20 @@ Against 15.8 MB as URLs, or 42 MB inlined. The derivatives cost about 0.9 s of
 worker time per job, against removing the base64 encode and megabytes of Redis
 traffic.
 
-The animation is not in those figures because it is not in that fetch: the
-card's third tab carries `loading="lazy"` and a `display: none` image is never
-near the viewport, so the GIF is fetched when someone opens the tab. Over the
-sample pictures it is 245–428 KB (median 283) and about 150 ms of worker time,
-whether there is one face in the picture or twenty-nine — the cost is the
-640 px frames, not the faces. What keeps it in that range is one shared
-palette, no dithering, and still beats held as duration rather than drawn: an
-eighteen-frame file for a three-second loop, with every frame after the first
-stored as the rectangle that changed.
+A card no longer fetches all three at once, because it no longer opens on the
+still. It opens on the animation, and every other tab carries `loading="lazy"`
+— a `display: none` image is never near the viewport, so the viewing copy and
+the Before copy arrive when someone opens their tab. What a finished card
+fetches is therefore the thumbnail and the GIF: over the sample pictures the
+GIF is 245–428 KB (median 283), so a card lands in the same few hundred KB the
+three stills used to cost and asks for the other two only when it is asked to.
+
+The GIF is about 150 ms of worker time, whether there is one face in the
+picture or twenty-nine — the cost is the 640 px frames, not the faces. What
+keeps it in that size range is one shared palette, no dithering, and still
+beats held as duration rather than drawn: an eighteen-frame file for a
+three-second loop, with every frame after the first stored as the rectangle
+that changed.
 
 The static side went the same way: 200 px WebP centre crops for the sample
 grid (exactly what `object-fit: cover` was already showing) and 760 px figures

@@ -635,37 +635,45 @@ class TestCards:
         job_id = self.start(client, hx)
         body = client.get(f'/jobs/{job_id}', headers=hx).text
         assert 'class="before"' in body and 'class="after"' in body
-        assert f'value="after" checked id="view-{job_id}-after"' in body
+        assert f'id="view-{job_id}-after"' in body
         assert 'class="segmented desktop-only"' in body
 
     def test_the_switch_offers_the_animation_as_a_third_view(self, client, hx):
-        """Before, After, Animated -- and After is what a card opens on."""
+        """Before, After, Animated -- and Animated is what a card opens on."""
         job_id = self.start(client, hx)
         body = client.get(f'/jobs/{job_id}', headers=hx).text
-        assert f'value="animated" id="view-{job_id}-animated"' in body
+        assert f'value="animated" checked id="view-{job_id}-animated"' in body
         assert (f'<label for="view-{job_id}-animated" data-view="animated">Animated</label>'
                 in body)
-        assert 'checked' not in body.split('value="animated"')[1].split('>')[0]
+        assert 'checked' not in body.split('value="after"')[1].split('>')[0], (
+            'the still is no longer the tab a card opens on'
+        )
 
-    def test_the_animation_is_fetched_when_its_tab_is_opened(self):
-        """The heaviest file on the card and the least often looked at. A
-        `display: none` image is never near the viewport, so the hint holds
-        it back until the tab is chosen."""
+    def test_a_card_opens_on_the_animation_and_defers_the_rest(self):
+        """The glasses landing is the thing worth watching, so it is what a
+        card paints. Every other tab is deferred: a `display: none` image is
+        never near the viewport, so the hint holds each one back until its
+        tab is chosen."""
         pictures = JobImages(view='/v.webp', thumb='/t.webp', full='/f.png',
                              before='/b.webp', animation='/a.gif')
         view = to_xml(ui._result_view('abc', pictures, {}))
-        assert '<img src="/a.gif" alt="The glasses dropping into place" loading="lazy"' in view
-        assert 'loading="lazy"' not in view.split('class="after"')[0], (
-            'the result itself is not deferred'
-        )
+        assert '<img src="/a.gif" alt="The glasses dropping into place" class="animated">' in view
+        for src in ('/b.webp', '/v.webp'):
+            assert f'src="{src}"' in view
+            assert 'loading="lazy"' in view.split(f'src="{src}"')[1].split('>')[0], (
+                f'{src} is not the open tab'
+            )
 
-    def test_a_result_without_an_animation_is_a_switch_with_two_tabs(self):
+    def test_a_result_without_an_animation_opens_on_the_still(self):
         """A job finished before the GIF existed, or one whose animation
-        failed: the control is built from the files that are there."""
+        failed: the control is built from the files that are there, and the
+        tab it opens on is whichever of them is the result."""
         pictures = JobImages(view='/v.webp', thumb='/t.webp', full='/f.png', before='/b.webp')
         view = to_xml(ui._result_view('abc', pictures, {}))
         assert 'data-view="before"' in view and 'data-view="after"' in view
         assert 'animated' not in view
+        assert 'value="after" checked' in view
+        assert '<img src="/v.webp" alt="Result" class="after">' in view, 'not deferred'
 
     def test_the_phone_pill_says_gif_where_animated_would_not_fit(self, client, hx):
         """Three words plus the Full size pill overflow a 320px picture."""

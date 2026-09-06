@@ -220,28 +220,37 @@ class TestTheUrlField:
 class TestComparingBeforeAndAfter:
     def test_the_toggle_swaps_which_image_is_shown(self, page: Page):
         card = run(page, 'me')
-        expect(card.locator('.frame img.after')).to_be_visible()
+        expect(card.locator('.frame img.animated')).to_be_visible()
         expect(card.locator('.frame img.before')).to_be_hidden()
 
         card.locator('.card-foot label[data-view="before"]').click()
         expect(card.locator('.frame img.before')).to_be_visible()
-        expect(card.locator('.frame img.after')).to_be_hidden()
+        expect(card.locator('.frame img.animated')).to_be_hidden()
 
         card.locator('.card-foot label[data-view="after"]').click()
         expect(card.locator('.frame img.after')).to_be_visible()
 
-    def test_the_third_tab_plays_the_gif(self, page: Page):
-        """Deferred until it is asked for, so this also proves the hint does
-        not strand the picture: the tab has to end up with a decoded GIF."""
+    def test_the_card_opens_on_the_gif(self, page: Page):
+        """Not deferred, because it is the tab a card opens on: the picture
+        has to be decoded without anyone clicking anything."""
         card = run(page, 'me')
         gif = card.locator('.frame img.animated')
-        expect(gif).to_be_hidden()
-
-        card.locator('.card-foot label[data-view="animated"]').click()
         expect(gif).to_be_visible()
         expect(card.locator('.frame img.after')).to_be_hidden()
         assert gif.get_attribute('src').endswith('/animation.gif')
+        assert gif.get_attribute('loading') is None
         page.wait_for_function('img => img.naturalWidth > 0', arg=gif.element_handle())
+
+    def test_the_still_is_deferred_until_its_tab_is_opened(self, page: Page):
+        """The hint must not strand the picture: the tab has to end up with
+        a decoded image."""
+        card = run(page, 'me')
+        still = card.locator('.frame img.after')
+        assert still.get_attribute('loading') == 'lazy'
+
+        card.locator('.card-foot label[data-view="after"]').click()
+        expect(still).to_be_visible()
+        page.wait_for_function('img => img.naturalWidth > 0', arg=still.element_handle())
 
 
 class TestTheFullSizeView:
@@ -498,6 +507,7 @@ class TestOnAPhone:
 
         pill.locator('label[data-view="animated"]').click()
         expect(card.locator('.frame img.animated')).to_be_visible()
+        expect(card.locator('.frame img.after')).to_be_hidden()
 
     def test_the_pill_and_the_full_size_one_share_the_picture_without_overlapping(
             self, page: Page):
