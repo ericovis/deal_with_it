@@ -822,11 +822,6 @@ class View:
     short: str
     src: str | None
     alt: str
-    #: Deferred until the tab is chosen. Only the animation is: it is the
-    #: heaviest file a card fetches and the one least often looked at, and a
-    #: `display: none` image is never near the viewport, so a browser that
-    #: honours the hint fetches it when the tab is opened and not before.
-    lazy: bool = False
 
 
 def _result_view(job_id: str, pictures: JobImages, downloads: dict[str, str],
@@ -850,8 +845,12 @@ def _result_view(job_id: str, pictures: JobImages, downloads: dict[str, str],
         View('before', 'Before', 'Before', pictures.before, 'The picture as submitted'),
         View('after', 'After', 'After', image, 'Result'),
         View('animated', 'Animated', 'GIF', pictures.animation,
-             'The glasses dropping into place', lazy=True),
+             'The glasses dropping into place'),
     ) if view.src]
+    # The card opens on the animation, and falls back to the still for a
+    # result that has none. The glasses landing is the thing worth watching;
+    # a tab nobody opens is where it used to be.
+    opens_on = 'animated' if pictures.animation else 'after'
     footer = [
         Span(cls='spacer'),
         Input(type='checkbox', id=toggle, cls='full-toggle visually-hidden'),
@@ -891,8 +890,13 @@ def _result_view(job_id: str, pictures: JobImages, downloads: dict[str, str],
         controls = footer
     else:
         name = f'view-{job_id}'
+        # Everything but the open tab is deferred, rather than the GIF alone
+        # as it was when the GIF was the tab nobody opened. A `display: none`
+        # image is never near the viewport, so a browser that honours the
+        # hint fetches each one when its tab is chosen and not before -- and
+        # a card now paints one picture where it used to fetch two.
         shown = [Img(src=view.src, alt=view.alt, cls=view.value,
-                     **({'loading': 'lazy'} if view.lazy else {}))
+                     **({} if view.value == opens_on else {'loading': 'lazy'}))
                  for view in views]
         # A second set of labels for the same radios: the `:has()` rule that
         # styles the checked one matches through the container, so one rule
@@ -907,7 +911,7 @@ def _result_view(job_id: str, pictures: JobImages, downloads: dict[str, str],
             Div(
                 *[element for view in views for element in (
                     Input(type='radio', id=f'{name}-{view.value}', name=name,
-                          value=view.value, **({'checked': True} if view.value == 'after'
+                          value=view.value, **({'checked': True} if view.value == opens_on
                                                else {})),
                     Label(view.label, fr=f'{name}-{view.value}', data_view=view.value),
                 )],

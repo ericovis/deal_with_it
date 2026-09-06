@@ -108,6 +108,14 @@ Invariants worth knowing before editing:
   logs its own failures: by the time it runs the pictures are written and the
   job has succeeded. The card builds its switch from the pictures that are
   there, so a result from before the GIF existed is a switch with two tabs.
+- **A card opens on the animation** (`opens_on` in `_result_view`), and on
+  the still only when there is no GIF — a job whose animation failed, or one
+  finished before the GIF existed. Every tab that is *not* the open one is
+  `loading="lazy"`, which is the same trick as before pointed the other way:
+  a `display: none` image is never near the viewport, so each tab fetches
+  when it is chosen. A card therefore paints one picture where it used to
+  fetch two. Note that "View full size" on the open tab is the 640px GIF, not
+  `view.webp`; switching to After is the way to a sharp full-screen picture.
 - **`view.webp` is one size for the card *and* the lightbox, on purpose.**
   `_result_view` reuses the same `<img>` for both and the lightbox is a CSS
   `:has(:checked)` state, so no `srcset`/`sizes` pair can describe it —
