@@ -43,7 +43,7 @@ CARD_QUALITY = 85
 #: compression worth the name, so this is the size at which the loop is
 #: still a few hundred KB rather than a few MB. It is a thing to send
 #: someone, not a thing to print.
-ANIMATION = 480
+ANIMATION = 640
 
 
 def _fit(image: Image.Image, longest: int) -> Image.Image:

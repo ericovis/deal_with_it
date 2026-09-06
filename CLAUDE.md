@@ -99,11 +99,11 @@ Invariants worth knowing before editing:
 - **The GIF is drawn by the same rule as the still, not a copy of it.**
   `src/animation.py` is handed the three landmarks per face and
   `DealWithItProcessor.place` itself, so the frame the fall lands on *is* the
-  picture the job produced, at 480px. The still beats are one frame with a
+  picture the job produced, at 640px. The still beats are one frame with a
   long duration, not thirty drawn ones, so a three-second loop is eighteen
   frames; every frame shares one palette and dithering is off, which is what
-  lets Pillow store each as the rectangle that changed. About 170 KB and
-  0.1 s a job, so there is no knob to turn it off.
+  lets Pillow store each as the rectangle that changed. About 280 KB and
+  0.15 s a job, so there is no knob to turn it off.
 - **A job can finish without its animation.** `tasks.animate` swallows and
   logs its own failures: by the time it runs the pictures are written and the
   job has succeeded. The card builds its switch from the pictures that are

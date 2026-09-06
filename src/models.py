@@ -158,7 +158,7 @@ class JobImages(BaseModel):
     animation: str | None = Field(
         default=None,
         description='The glasses dropping onto every face and the caption '
-                    'landing, as a looping GIF, 480px on its long side. '
+                    'landing, as a looping GIF, 640px on its long side. '
                     'Absent if the animation could not be built.',
     )
     full: str = Field(description='The result at full resolution, in the format '
@@ -220,7 +220,7 @@ class JobResult(BaseModel):
                     'submission also gets `jpg`. A JPEG one does not get '
                     '`png`, because a lossless wrapper around lossy data is '
                     'just a bigger file. All of those are full resolution. '
-                    '`gif` is the animation, which is 480px by nature.',
+                    '`gif` is the animation, which is 640px by nature.',
         examples=[{
             'jpg': f'{EXAMPLE_HOST}/i/{EXAMPLE_ID}/result.jpg',
             'webp': f'{EXAMPLE_HOST}/i/{EXAMPLE_ID}/result.webp',

@@ -135,7 +135,7 @@ without the card's *state* waiting on them.
 Done. The worker writes what each place needs instead of one full-resolution
 file: a 160 px thumbnail, a 1600 px viewing copy used by both the card and the
 full-screen view, the same for the submitted image, a 1200 px JPEG for link
-previews, the 480 px animated GIF, and the full-resolution file for download.
+previews, the 640 px animated GIF, and the full-resolution file for download.
 
 | upload | full-res result | what a finished card fetches |
 |--------|-----------------|------------------------------|
@@ -149,9 +149,9 @@ traffic.
 The animation is not in those figures because it is not in that fetch: the
 card's third tab carries `loading="lazy"` and a `display: none` image is never
 near the viewport, so the GIF is fetched when someone opens the tab. Over the
-sample pictures it is 143–262 KB (median 169) and about 100 ms of worker time,
+sample pictures it is 245–428 KB (median 283) and about 150 ms of worker time,
 whether there is one face in the picture or twenty-nine — the cost is the
-480 px frames, not the faces. What keeps it in that range is one shared
+640 px frames, not the faces. What keeps it in that range is one shared
 palette, no dithering, and still beats held as duration rather than drawn: an
 eighteen-frame file for a three-second loop, with every frame after the first
 stored as the rectangle that changed.
@@ -172,7 +172,7 @@ is worth watching.
 
 **Disk is now the thing that fills.** Roughly 12 MB per finished job (the
 full-resolution result, its WebP and JPEG siblings, and the derivatives,
-the GIF among them at ~0.17 MB;
+the GIF among them at ~0.28 MB;
 the submitted source is deleted on success). At the 170 jobs/min above that is
 ~2 GB a minute, so on this host `DWI_BLOB_MAX_BYTES` (1 GB), not
 `DWI_BLOB_TTL` (1 hour), is what binds under load — the TTL is what binds

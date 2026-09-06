@@ -611,7 +611,7 @@ Poll once a second. When `state` is `finished`:
 - `images.thumb` -- WebP, 160px. Appears *before* the job finishes.
 - `images.before` -- the submitted picture, same size as `view`.
 - `images.animation` -- the glasses dropping onto every face and DEAL WITH IT
-  landing under them, as a looping GIF, 480px on its long side. Absent if it
+  landing under them, as a looping GIF, 640px on its long side. Absent if it
   could not be built.
 - `images.full` -- full resolution, in the format it was submitted in.
 - `images.card` -- JPEG, 1200px, for `og:image` where WebP is not safe.
