@@ -639,11 +639,11 @@ class TestCards:
         assert 'class="segmented desktop-only"' in body
 
     def test_the_switch_offers_the_animation_as_a_third_view(self, client, hx):
-        """Before, After, Animated -- and Animated is what a card opens on."""
+        """Before, After, GIF -- and the GIF is what a card opens on."""
         job_id = self.start(client, hx)
         body = client.get(f'/jobs/{job_id}', headers=hx).text
         assert f'value="animated" checked id="view-{job_id}-animated"' in body
-        assert (f'<label for="view-{job_id}-animated" data-view="animated">Animated</label>'
+        assert (f'<label for="view-{job_id}-animated" data-view="animated">GIF</label>'
                 in body)
         assert 'checked' not in body.split('value="after"')[1].split('>')[0], (
             'the still is no longer the tab a card opens on'
@@ -677,13 +677,14 @@ class TestCards:
         opened = view.split('src="/v.webp"')[1].split('>')[0]
         assert 'class="after"' in opened and 'loading' not in opened, 'not deferred'
 
-    def test_the_phone_pill_says_gif_where_animated_would_not_fit(self, client, hx):
-        """Three words plus the Full size pill overflow a 320px picture."""
+    def test_both_switches_say_gif_because_they_drive_the_same_radios(self, client, hx):
+        """The phone's pill said GIF and the desktop's control said Animated.
+        The width was only ever the phone's problem; two labels for one radio
+        reading differently was everybody's."""
         job_id = self.start(client, hx)
         body = client.get(f'/jobs/{job_id}', headers=hx).text
-        pill = re.search(r'<div class="segmented view-pill mobile-only">.*?</div>',
-                         body, re.S).group()
-        assert '>GIF</label>' in pill and '>Animated</label>' not in pill
+        assert body.count('>GIF</label>') == 2, 'the pill and the footer both'
+        assert '>Animated</label>' not in body
 
     def test_each_result_can_be_downloaded(self, client, hx):
         job_id = self.start(client, hx)
@@ -1027,7 +1028,7 @@ class TestProgress:
 class TestRetry:
     def start_failing(self, client, hx, stub_task):
         stub_task(support.REJECTS)
-        return job_ids(submit(client, hx, sample='socks').text)[0]
+        return job_ids(submit(client, hx, sample='poker').text)[0]
 
     def test_a_retry_queues_the_same_picture_again(self, client, hx, stub_task):
         job_id = self.start_failing(client, hx, stub_task)
@@ -1044,7 +1045,7 @@ class TestRetry:
                 == blobs.path(original['blob']).stat().st_ino), (
             'hard-linked, so either job can be swept without taking the other'
         )
-        assert 'socks_the_cat.jpg' in response.text, 'and it remembers what it was called'
+        assert 'dogs_playing_poker.jpg' in response.text, 'and it remembers what it was called'
 
     def test_retrying_an_expired_job_says_so(self, client, hx):
         body = client.post('/jobs/long-gone/retry', headers=hx).text

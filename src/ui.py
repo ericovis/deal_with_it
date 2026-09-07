@@ -9,7 +9,7 @@ same one-liner, ``UPLOAD_ONE_BY_ONE`` (which htmx has no attribute for),
 ``countdown.js``, which turns a server-rendered expiry into a ticking one,
 ``share.js``, which reveals a button that cannot honestly be offered until
 the browser has said it can share a file, and ``views.js``, which fetches a
-card's other tabs on the first sign that someone is reaching for the switch.
+card's other tabs, in order, as soon as the card lands.
 """
 
 import json
@@ -119,6 +119,13 @@ class Sample:
 
 
 #: Public domain, credited in src/static/img/CREDITS.md, shown in this order.
+#:
+#: Every one of them has a face in it. The four that had none -- two cats, a
+#: Van Gogh and *The Scream* -- were a joke about what the detector cannot
+#: see, and the joke costs a person a tile that only ever answers "No faces
+#: were found in this image." The pictures are still committed, and
+#: ``FACELESS`` in tests/test_processor.py still pins their zero, because
+#: that a cat is not a face is worth keeping a test on.
 SAMPLES = {
     'me': Sample('me.jpg', 'One face', 'image/jpeg'),
     'apollo': Sample('apollo_11_crew.jpg', 'Three faces', 'image/jpeg'),
@@ -136,11 +143,6 @@ SAMPLES = {
     'princess_mary': Sample(
         'princess_mary_and_nelson.jpg', 'Two faces', 'image/jpeg'),
     'poker': Sample('dogs_playing_poker.jpg', 'Three faces', 'image/jpeg'),
-    'cat_nap': Sample('cat_nap.jpg', 'No faces', 'image/jpeg'),
-    'socks': Sample('socks_the_cat.jpg', 'No faces', 'image/jpeg'),
-
-    'van_gogh': Sample('van_gogh_self_portrait.jpg', 'No faces', 'image/jpeg'),
-    'scream': Sample('the_scream.jpg', 'No faces', 'image/jpeg'),
 }
 
 #: Which sample the API example points at, and where that picture came from.
@@ -249,7 +251,7 @@ def head_tags(title: str, theme: str | None, image: str | None = None,
         # countdown turns a server-rendered expiry into a ticking one,
         # share.js reveals a button that cannot be offered without first
         # asking the browser whether it can share a file at all, and views.js
-        # fetches a card's other tabs a moment before they are asked for.
+        # fetches a card's other tabs, in order, as soon as the card lands.
         Script(src=asset('/static/js/countdown.js'), defer=True),
         Script(src=asset('/static/js/share.js'), defer=True),
         Script(src=asset('/static/js/views.js'), defer=True),
@@ -435,7 +437,7 @@ def sample_tile(name: str) -> Button:
     sample = SAMPLES[name]
     return Button(
         # Square because the CSS crops it square anyway; width and height so
-        # the grid does not reflow as sixteen of them arrive.
+        # the grid does not reflow as a dozen of them arrive.
         Img(src=tile_url(sample), alt='', width=200, height=200),
         Span(B(sample.title), Span(sample.filename), cls='caption'),
         type='button',
@@ -816,8 +818,11 @@ def copy_link_button(*label, cls: str) -> Span:
 class View:
     """One picture the switch can show.
 
-    ``short`` is what the phone's pill says: three words do not fit beside
-    the Full size pill on a 320px screen, and "GIF" is a word everyone knows.
+    One ``label`` for both switches. The phone's pill said "GIF" where the
+    desktop said "Animated", because three words do not fit beside the Full
+    size pill on a 320px screen -- but "GIF" is a word everyone knows and
+    two controls for the same radios reading differently was the oddity,
+    not the width.
 
     ``src`` is what the tab displays and ``file`` is what Send hands to the
     system sheet -- the same picture at the size worth keeping, which for
@@ -827,7 +832,6 @@ class View:
 
     value: str
     label: str
-    short: str
     src: str | None
     alt: str
     file: str | None
@@ -853,11 +857,11 @@ def _result_view(job_id: str, pictures: JobImages, downloads: dict[str, str],
     # switch with one tab fewer, not a broken card.
     stem = f'deal-with-it-{job_id[:8]}'
     views = [view for view in (
-        View('before', 'Before', 'Before', pictures.before, 'The picture as submitted',
+        View('before', 'Before', pictures.before, 'The picture as submitted',
              file=pictures.before, name=f'{stem}-before'),
-        View('after', 'After', 'After', image, 'Result',
+        View('after', 'After', image, 'Result',
              file=pictures.full, name=stem),
-        View('animated', 'Animated', 'GIF', pictures.animation,
+        View('animated', 'GIF', pictures.animation,
              'The glasses dropping into place',
              file=pictures.animation, name=stem),
     ) if view.src]
@@ -910,16 +914,17 @@ def _result_view(job_id: str, pictures: JobImages, downloads: dict[str, str],
         controls = footer
     else:
         name = f'view-{job_id}'
-        # Everything but the open tab is deferred, rather than the GIF alone
-        # as it was when the GIF was the tab nobody opened. A `display: none`
-        # image is never near the viewport, so a browser that honours the
-        # hint fetches each one when its tab is chosen and not before -- and
-        # a card now paints one picture where it used to fetch two.
+        # Everything but the open tab is deferred, and `views.js` then
+        # un-defers them in order the moment the card lands: GIF, After,
+        # Before, one at a time. The hint is what keeps that an order rather
+        # than a scramble -- released together, three pictures would race and
+        # the one being looked at would lose. Without script it is the old
+        # behaviour, each tab fetching when it is chosen, because a
+        # `display: none` image is never near the viewport.
         #
-        # `views.js` flips the hint on the first sign that someone is about
-        # to use the switch, so the wait moves off the click. Each one also
-        # carries the file Send should hand over when its tab is the open
-        # one; the tab shows `src`, which for the result is the 1600px WebP.
+        # Each one also carries the file Send should hand over when its tab
+        # is the open one; the tab shows `src`, which for the result is the
+        # 1600px WebP.
         shown = [Img(src=view.src, alt=view.alt, cls=view.value,
                      data_share=view.file, data_name=view.name,
                      **({} if view.value == opens_on else {'loading': 'lazy'}))
@@ -928,7 +933,7 @@ def _result_view(job_id: str, pictures: JobImages, downloads: dict[str, str],
         # styles the checked one matches through the container, so one rule
         # dresses the footer's segmented control and this pill both.
         pill = Div(
-            *[Label(view.short, fr=f'{name}-{view.value}', data_view=view.value)
+            *[Label(view.label, fr=f'{name}-{view.value}', data_view=view.value)
               for view in views],
             cls='segmented view-pill mobile-only',
         )
