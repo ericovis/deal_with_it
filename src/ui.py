@@ -2,13 +2,14 @@
 
 Two pages: the app at ``/`` and the docs at ``/docs``. Submitting a picture
 swaps a card into ``#queue``; the card polls itself until the worker is done
-and then turns into the result in place. Five pieces of script in the whole
-interface, four of them enhancements the page reads correctly without: the
+and then turns into the result in place. Six pieces of script in the whole
+interface, five of them enhancements the page reads correctly without: the
 clipboard call on the docs page and the share page's Copy link, which is the
 same one-liner, ``UPLOAD_ONE_BY_ONE`` (which htmx has no attribute for),
 ``countdown.js``, which turns a server-rendered expiry into a ticking one,
-and ``share.js``, which reveals a button that cannot honestly be offered
-until the browser has said it can share a file.
+``share.js``, which reveals a button that cannot honestly be offered until
+the browser has said it can share a file, and ``views.js``, which fetches a
+card's other tabs on the first sign that someone is reaching for the switch.
 """
 
 import json
@@ -244,12 +245,14 @@ def head_tags(title: str, theme: str | None, image: str | None = None,
                                     'family=Manrope:wght@400;500;600;700;800&'
                                     'family=Fira+Code:wght@400;500&display=swap'),
         Link(rel='stylesheet', href=asset('/static/css/style.css')),
-        # The two scripts that are not htmx wiring. Both are enhancements:
-        # the countdown turns a server-rendered expiry into a ticking one, and
+        # The three scripts that are not htmx wiring. All enhancements: the
+        # countdown turns a server-rendered expiry into a ticking one,
         # share.js reveals a button that cannot be offered without first
-        # asking the browser whether it can share a file at all.
+        # asking the browser whether it can share a file at all, and views.js
+        # fetches a card's other tabs a moment before they are asked for.
         Script(src=asset('/static/js/countdown.js'), defer=True),
         Script(src=asset('/static/js/share.js'), defer=True),
+        Script(src=asset('/static/js/views.js'), defer=True),
     )
 
 
@@ -815,6 +818,11 @@ class View:
 
     ``short`` is what the phone's pill says: three words do not fit beside
     the Full size pill on a 320px screen, and "GIF" is a word everyone knows.
+
+    ``src`` is what the tab displays and ``file`` is what Send hands to the
+    system sheet -- the same picture at the size worth keeping, which for
+    the result is full resolution and for the other two is the only file
+    there is.
     """
 
     value: str
@@ -822,6 +830,8 @@ class View:
     short: str
     src: str | None
     alt: str
+    file: str | None
+    name: str
 
 
 def _result_view(job_id: str, pictures: JobImages, downloads: dict[str, str],
@@ -841,11 +851,15 @@ def _result_view(job_id: str, pictures: JobImages, downloads: dict[str, str],
     # expected to have: a result written before the animation existed has no
     # GIF, and one whose animation failed has none either -- both are a
     # switch with one tab fewer, not a broken card.
+    stem = f'deal-with-it-{job_id[:8]}'
     views = [view for view in (
-        View('before', 'Before', 'Before', pictures.before, 'The picture as submitted'),
-        View('after', 'After', 'After', image, 'Result'),
+        View('before', 'Before', 'Before', pictures.before, 'The picture as submitted',
+             file=pictures.before, name=f'{stem}-before'),
+        View('after', 'After', 'After', image, 'Result',
+             file=pictures.full, name=stem),
         View('animated', 'Animated', 'GIF', pictures.animation,
-             'The glasses dropping into place'),
+             'The glasses dropping into place',
+             file=pictures.animation, name=stem),
     ) if view.src]
     # The card opens on the animation, and falls back to the still for a
     # result that has none. The glasses landing is the thing worth watching;
@@ -866,8 +880,14 @@ def _result_view(job_id: str, pictures: JobImages, downloads: dict[str, str],
         # share.js does. On a phone this is the system sheet -- save to
         # Photos, send on WhatsApp -- and there is no way to offer that
         # without asking the browser first.
-        Button('Share', type='button', cls='share-system', hidden=True,
-               data_share=pictures.full, data_name=f'deal-with-it-{job_id[:8]}'),
+        #
+        # "Send", not "Share": "Get a link" beside it also shares, and the
+        # difference a person cares about is that this one hands over the
+        # picture itself. It sends whichever tab is open, which is why the
+        # attributes here are only the fallback for a card with one tab --
+        # share.js prefers the checked view's own file.
+        Button('Send', type='button', cls='share-system', hidden=True,
+               data_share=pictures.full, data_name=stem),
         # The phone's copy of "Get a link", which the desktop shows on the
         # row below instead. Same doubling as the dropzone's copy.
         *([A('Get a link', href=share_url, cls='share mobile-only')] if share_url else []),
@@ -895,7 +915,13 @@ def _result_view(job_id: str, pictures: JobImages, downloads: dict[str, str],
         # image is never near the viewport, so a browser that honours the
         # hint fetches each one when its tab is chosen and not before -- and
         # a card now paints one picture where it used to fetch two.
+        #
+        # `views.js` flips the hint on the first sign that someone is about
+        # to use the switch, so the wait moves off the click. Each one also
+        # carries the file Send should hand over when its tab is the open
+        # one; the tab shows `src`, which for the result is the 1600px WebP.
         shown = [Img(src=view.src, alt=view.alt, cls=view.value,
+                     data_share=view.file, data_name=view.name,
                      **({} if view.value == opens_on else {'loading': 'lazy'}))
                  for view in views]
         # A second set of labels for the same radios: the `:has()` rule that
@@ -924,8 +950,9 @@ def _result_view(job_id: str, pictures: JobImages, downloads: dict[str, str],
     if share_url or expires_at or copy_link:
         short = urlparse(_absolute(f'/s/{job_id}')).netloc + f'/s/{job_id[:8]}…'
         below.append(Div(
-            # Not "Share": the button above already is, and it does a
-            # different thing. This one opens a page to send someone.
+            # Not "Share" either: the button above hands over the picture,
+            # this one gives out an address. Naming both for the thing they
+            # produce is what keeps them apart.
             *( [A('Get a link', href=share_url, cls='share desktop-only')] if share_url else [] ),
             *( [copy_link_button(Span('Copy link'), Code(short), cls='desktop-only')]
                if copy_link else [] ),

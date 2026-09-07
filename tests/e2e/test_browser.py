@@ -463,7 +463,7 @@ class TestOnAPhone:
         assert picture.bounding_box()['width'] == fitted
 
     def test_the_footer_is_one_row_of_equal_buttons(self, page: Page):
-        """Share, Get a link and Download, one row, nothing wrapped."""
+        """Send, Get a link and Download, one row, nothing wrapped."""
         pretend_sharing(page, True)
         run(page, 'me')
         share, link, download = boxes(page, '.card-foot .share-system, '
@@ -474,7 +474,7 @@ class TestOnAPhone:
         assert len(widths) == 1, f'equal columns, got {widths}'
 
     def test_the_row_closes_up_when_the_browser_cannot_share(self, page: Page):
-        """grid-auto-flow: column, so a hidden Share leaves two equal buttons
+        """grid-auto-flow: column, so a hidden Send leaves two equal buttons
         rather than a row sized for three with a hole in it."""
         pretend_sharing(page, False)
         card = run(page, 'me')
@@ -763,6 +763,74 @@ class TestTheSystemShareButton:
         assert name.startswith('deal-with-it-')
         assert kind.startswith('image/')
         assert size > 0
+
+    def test_it_sends_whichever_tab_is_open(self, page: Page, context):
+        """A Send button beside a picture of the animation that sent the
+        still was a button that lied. The card opens on the GIF; switching
+        to Before changes what the sheet is handed."""
+        context.add_init_script("""
+            window.__shared = null;
+            navigator.canShare = () => true;
+            navigator.share = (data) => {
+                window.__shared = data.files.map(f => [f.name, f.type]);
+                return Promise.resolve();
+            };
+        """)
+        card = run(page, 'me')
+        card.locator('button.share-system').click()
+        page.wait_for_function('window.__shared !== null', timeout=15000)
+        [[name, kind]] = page.evaluate('window.__shared')
+        assert kind == 'image/gif' and name.endswith('.gif'), 'the tab it opened on'
+
+        page.evaluate('window.__shared = null')
+        card.locator('.card-foot label[data-view="before"]').click()
+        card.locator('button.share-system').click()
+        page.wait_for_function('window.__shared !== null', timeout=15000)
+        [[name, kind]] = page.evaluate('window.__shared')
+        assert kind == 'image/webp'
+        assert name.endswith('-before.webp'), 'and it does not overwrite the result'
+
+
+class TestWarmingTheOtherTabs:
+    """Reaching for the switch is prediction enough.
+
+    A card still paints one picture, so the deferred tabs are what they
+    were; what changed is when they stop being deferred -- the first hover,
+    press or keystroke on the switch, rather than the click that chooses a
+    tab. The wait moves off the click instead of onto the card.
+    """
+
+    LOADED = 'el => el.complete && el.naturalWidth > 0'
+
+    def test_the_tabs_a_card_is_not_showing_start_deferred(self, page: Page):
+        card = run(page, 'me')
+        assert card.locator('.frame img.animated').get_attribute('loading') is None
+        for tab in ('before', 'after'):
+            image = card.locator(f'.frame img.{tab}')
+            assert image.get_attribute('loading') == 'lazy'
+            assert not image.evaluate(self.LOADED), f'{tab} fetched before anyone asked'
+
+    def test_reaching_for_the_switch_fetches_every_one(self, page: Page):
+        card = run(page, 'me')
+        card.locator('.card-foot .segmented').hover()
+        for tab in ('before', 'after'):
+            image = card.locator(f'.frame img.{tab}')
+            page.wait_for_function(self.LOADED, arg=image.element_handle(), timeout=15000)
+
+    def test_a_keyboard_gets_the_same_head_start(self, page: Page):
+        """Arrowing through the radios is neither a hover nor a press."""
+        card = run(page, 'me')
+        card.locator('.card-foot input[type="radio"]').first.focus()
+        page.wait_for_function(self.LOADED,
+                               arg=card.locator('.frame img.after').element_handle(),
+                               timeout=15000)
+
+    def test_a_card_left_alone_fetches_nothing_more(self, page: Page):
+        """The point of the hint is that a card is one picture until it is
+        touched; warming on sight would give that back."""
+        card = run(page, 'me')
+        page.wait_for_timeout(500)
+        assert not card.locator('.frame img.before').evaluate(self.LOADED)
 
 
 class TestSharing:

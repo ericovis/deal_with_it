@@ -138,7 +138,7 @@ class TestSharing:
         body = client.get(f'/jobs/{job_id}', headers=hx).text
         assert f'href="/s/{job_id}"' in body
         assert '>Get a link</a>' in body, (
-            'the Share button beside it hands the file to the system sheet, '
+            'the Send button beside it hands the file to the system sheet, '
             'which is a different thing to offer'
         )
 
@@ -657,7 +657,8 @@ class TestCards:
         pictures = JobImages(view='/v.webp', thumb='/t.webp', full='/f.png',
                              before='/b.webp', animation='/a.gif')
         view = to_xml(ui._result_view('abc', pictures, {}))
-        assert '<img src="/a.gif" alt="The glasses dropping into place" class="animated">' in view
+        opened = view.split('src="/a.gif"')[1].split('>')[0]
+        assert 'class="animated"' in opened and 'loading' not in opened
         for src in ('/b.webp', '/v.webp'):
             assert f'src="{src}"' in view
             assert 'loading="lazy"' in view.split(f'src="{src}"')[1].split('>')[0], (
@@ -673,7 +674,8 @@ class TestCards:
         assert 'data-view="before"' in view and 'data-view="after"' in view
         assert 'animated' not in view
         assert 'value="after" checked' in view
-        assert '<img src="/v.webp" alt="Result" class="after">' in view, 'not deferred'
+        opened = view.split('src="/v.webp"')[1].split('>')[0]
+        assert 'class="after"' in opened and 'loading' not in opened, 'not deferred'
 
     def test_the_phone_pill_says_gif_where_animated_would_not_fit(self, client, hx):
         """Three words plus the Full size pill overflow a 320px picture."""
@@ -861,6 +863,33 @@ class TestResultPictures:
         button = re.search(r'<button[^>]*class="share-system"[^>]*>', body).group()
         assert 'hidden' in button
         assert f'data-share="/i/{job_id}/result.png"' in button
+
+    def test_the_button_says_send_because_get_a_link_also_shares(self, client, hx):
+        """Two controls beside each other both share; the word that tells
+        them apart is that this one hands over the picture itself."""
+        job_id = self.upload(client, hx)
+        body = client.get(f'/jobs/{job_id}', headers=hx).text
+        assert '>Send</button>' in body
+        assert '>Share</button>' not in body
+
+    def test_every_tab_carries_the_file_send_should_hand_over(self, client, hx):
+        """Send follows the switch, so each tab names its own file: the
+        result at full resolution, the GIF, and the picture as submitted.
+        Sending the still while a card shows the animation was a lie."""
+        job_id = self.upload(client, hx)
+        body = client.get(f'/jobs/{job_id}', headers=hx).text
+        frame = re.search(r'<div class="frame">.*?</div>', body, re.S).group()
+        files = {re.search(r'class="([\w-]+)"', img).group(1):
+                 re.search(r'data-share="([^"]+)"', img).group(1)
+                 for img in re.findall(r'<img [^>]*>', frame)}
+        assert files == {
+            'before': f'/i/{job_id}/before.webp',
+            'after': f'/i/{job_id}/result.png',
+            'animated': f'/i/{job_id}/animation.gif',
+        }
+        assert f'data-name="deal-with-it-{job_id[:8]}-before"' in frame, (
+            'Before saved beside the result must not overwrite it'
+        )
 
     def test_the_pictures_a_card_points_at_are_all_fetchable(self, client, hx):
         job_id = self.upload(client, hx)

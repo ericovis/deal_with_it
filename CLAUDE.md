@@ -116,6 +116,22 @@ Invariants worth knowing before editing:
   when it is chosen. A card therefore paints one picture where it used to
   fetch two. Note that "View full size" on the open tab is the 640px GIF, not
   `view.webp`; switching to After is the way to a sharp full-screen picture.
+- **`views.js` un-defers the rest on the first sign of intent**, so a card
+  is still one picture on arrival but the wait is off the click. The first
+  `pointerover`, `pointerdown`, `focusin` or `change` on a `.segmented` — the
+  footer's control or the phone's pill, either means the same thing — flips
+  every remaining `loading="lazy"` in that card to `eager`, which is what
+  resumes a deferred load; `data-warmed` on the `.result` makes it once per
+  card. It is the same request the image was always going to make, moved
+  earlier, never a second one. Do not warm on sight: that is the two-picture
+  card the hint exists to avoid.
+- **Send hands over the tab that is open** (`share.js`). Each `<img>` in the
+  frame carries its own `data-share`/`data-name` — full resolution for the
+  result, the GIF for the animation, `before.webp` for Before, and Before's
+  name is suffixed so saving it does not overwrite the result. The button's
+  own attributes are the fallback for a card with no switch. It says **Send**
+  rather than Share because "Get a link" beside it also shares; the
+  difference worth naming is that this one hands over the picture itself.
 - **`view.webp` is one size for the card *and* the lightbox, on purpose.**
   `_result_view` reuses the same `<img>` for both and the lightbox is a CSS
   `:has(:checked)` state, so no `srcset`/`sizes` pair can describe it —
@@ -217,12 +233,14 @@ Invariants worth knowing before editing:
   indicator counted an iPhone's inset twice under `viewport-fit=cover`. The
   12px floor is for a device with no inset at all.
 - **Script is only ever an enhancement.** `countdown.js` retimes a sentence
-  the server already rendered correctly; `share.js` reveals a Share button
+  the server already rendered correctly; `share.js` reveals a Send button
   that starts `hidden`, because only the browser knows whether it can share a
-  *file* and a button that half-works is worse than none. Both are delegated
-  from the document and re-run on `htmx:afterSwap`, since cards are swapped in
-  and out constantly — a held element reference goes stale immediately.
-  Five pieces of script now: the share page's Copy link is the docs page's
+  *file* and a button that half-works is worse than none; `views.js` fetches
+  tabs a browser would have fetched anyway, a moment sooner. All three are
+  delegated from the document, and the first two re-run on `htmx:afterSwap`,
+  since cards are swapped in and out constantly — a held element reference
+  goes stale immediately.
+  Six pieces of script now: the share page's Copy link is the docs page's
   clipboard one-liner, on `location.href` because `public_url` may be unset
   in development and a relative path is not a link anyone can paste.
 - **`/llms.txt` is generated, not committed** (`llms_txt()` in `src/ui.py`).
