@@ -95,7 +95,7 @@ class TestSubmitting:
     def test_a_picture_goes_all_the_way_to_a_result(self, page: Page):
         """Browser to htmx to FastHTML to RQ to the detector to Pillow and back."""
         card = run(page, 'me')
-        expect(card.locator('.frame img.after')).to_be_visible()
+        expect(card.locator('.frame img.animated')).to_be_visible()
         expect(card.locator('.card-id b')).to_have_text('me.jpg')
         expect(card.locator('.card-id span')).to_have_text('Sample picture · 1 face')
         expect(page.locator('.empty')).to_be_hidden()
@@ -205,6 +205,13 @@ class TestTheUrlField:
     def test_submitting_empties_the_field(self, page: Page):
         """The blank form comes back as an out-of-band swap."""
         page.goto('/')
+        # The card's thumbnail *is* the submitted URL, so the browser fetches
+        # it, and a host that does not resolve is a console error -- on a
+        # machine whose resolver says so before the test is over. Answer the
+        # fetch here instead: the worker's own attempt still fails, in-process
+        # and stubbed, which is all the card needs.
+        page.route('https://example.test/**', lambda route: route.fulfill(
+            status=200, content_type='image/png', body=make_png()))
         page.locator('#url').fill('https://example.test/photo.jpg')
         page.locator('#form button[type="submit"]').click()
         expect(page.locator('#queue article')).to_have_count(1, timeout=TIMEOUT)
@@ -260,7 +267,7 @@ class TestTheFullSizeView:
 
         card.locator('.open-full').click()
         expect(card.locator('.lightbox-close')).to_be_visible()
-        expect(card.locator('.frame img.after')).to_be_visible()
+        expect(card.locator('.frame img.animated')).to_be_visible()
 
         card.locator('.lightbox-close').click()
         expect(card.locator('.lightbox-close')).to_be_hidden()
@@ -439,7 +446,7 @@ class TestOnAPhone:
         # The card is the scroll container, so it must have stopped growing
         # before it is scrolled: a re-layout puts a snap container back on
         # the panel it was showing, which is the card body.
-        card.locator('.frame img.after').evaluate('img => img.decode()')
+        card.locator('.frame img.animated').evaluate('img => img.decode()')
         card.evaluate('el => el.scrollTo({left: el.scrollWidth, behavior: "instant"})')
         expect(remove).to_be_in_viewport()
         remove.locator('button').click()
@@ -454,7 +461,7 @@ class TestOnAPhone:
     def test_the_full_size_view_zooms_and_fits_again(self, page: Page):
         card = run(page, 'me')
         card.locator('.frame-tap').click()
-        picture = card.locator('.frame img.after')
+        picture = card.locator('.frame img.animated')
         fitted = picture.bounding_box()['width']
         card.locator('.zoom').click()
         expect(card.locator('.zoom .out')).to_have_text('Fit')
@@ -771,8 +778,8 @@ class TestSharing:
         # Two of them now: the desktop's is the one beside the expiry line.
         card.locator('.card-share a.share').click()
         expect(page.locator('h1')).to_contain_text('Someone dealt with it')
-        expect(page.locator('.frame img.after')).to_be_visible()
-        page.locator('.frame img.after').evaluate('img => img.decode()')
+        expect(page.locator('.frame img.animated')).to_be_visible()
+        page.locator('.frame img.animated').evaluate('img => img.decode()')
 
 
 class TestNotFound:
