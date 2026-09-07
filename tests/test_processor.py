@@ -187,6 +187,16 @@ SAMPLE_FACES = {
     # tell, and the captions say what it draws on.
     'princess_mary_and_nelson.jpg': 2,
     'dogs_playing_poker.jpg': 3,
+}
+
+#: Committed, and deliberately not offered: every sample has a face in it now,
+#: because a tile whose only answer is "No faces were found in this image."
+#: spends somebody's click on a joke. The pictures stay, and so does the pin --
+#: that the detector finds nothing in a cat, a Van Gogh or *The Scream* is the
+#: half of its behaviour a face count cannot assert. ``socks_the_cat.jpg`` is
+#: also the ``faceless_image`` fixture and what the e2e suite uploads to reach
+#: the failure path.
+FACELESS = {
     'cat_nap.jpg': 0,
     'van_gogh_self_portrait.jpg': 0,
     'the_scream.jpg': 0,
@@ -200,7 +210,7 @@ IN_WORDS = {
 }
 
 
-@pytest.mark.parametrize('filename,claimed', sorted(SAMPLE_FACES.items()))
+@pytest.mark.parametrize('filename,claimed', sorted((SAMPLE_FACES | FACELESS).items()))
 def test_every_sample_has_the_faces_its_caption_claims(filename, claimed):
     """The tiles say "Three faces", "Twenty-nine faces" and so on.
 
@@ -208,6 +218,9 @@ def test_every_sample_has_the_faces_its_caption_claims(filename, claimed):
     generated: resize one, swap one, or upgrade the detector, and the page
     would quietly start lying. Anyone who changes a picture has to change the
     number in src/ui.py:SAMPLES to match.
+
+    The faceless four have no caption to be wrong any more, and are here for
+    the other direction: a detector that started seeing a face in a cat.
     """
     from tests.conftest import STATIC_IMG
 
@@ -217,7 +230,7 @@ def test_every_sample_has_the_faces_its_caption_claims(filename, claimed):
 
 
 def test_every_sample_has_a_tile_to_show():
-    """The grid shows `tiles/<stem>.webp`, not the sample itself: sixteen
+    """The grid shows `tiles/<stem>.webp`, not the sample itself: a dozen
     full-size JPEGs was 4.0 MB inside ~92 px squares. Add a sample without
     running scripts/make_tiles.py and the grid gets a broken image.
     """

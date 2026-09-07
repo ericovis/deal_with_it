@@ -138,7 +138,7 @@ class TestSharing:
         body = client.get(f'/jobs/{job_id}', headers=hx).text
         assert f'href="/s/{job_id}"' in body
         assert '>Get a link</a>' in body, (
-            'the Share button beside it hands the file to the system sheet, '
+            'the Send button beside it hands the file to the system sheet, '
             'which is a different thing to offer'
         )
 
@@ -639,11 +639,11 @@ class TestCards:
         assert 'class="segmented desktop-only"' in body
 
     def test_the_switch_offers_the_animation_as_a_third_view(self, client, hx):
-        """Before, After, Animated -- and Animated is what a card opens on."""
+        """Before, After, GIF -- and the GIF is what a card opens on."""
         job_id = self.start(client, hx)
         body = client.get(f'/jobs/{job_id}', headers=hx).text
         assert f'value="animated" checked id="view-{job_id}-animated"' in body
-        assert (f'<label for="view-{job_id}-animated" data-view="animated">Animated</label>'
+        assert (f'<label for="view-{job_id}-animated" data-view="animated">GIF</label>'
                 in body)
         assert 'checked' not in body.split('value="after"')[1].split('>')[0], (
             'the still is no longer the tab a card opens on'
@@ -657,7 +657,8 @@ class TestCards:
         pictures = JobImages(view='/v.webp', thumb='/t.webp', full='/f.png',
                              before='/b.webp', animation='/a.gif')
         view = to_xml(ui._result_view('abc', pictures, {}))
-        assert '<img src="/a.gif" alt="The glasses dropping into place" class="animated">' in view
+        opened = view.split('src="/a.gif"')[1].split('>')[0]
+        assert 'class="animated"' in opened and 'loading' not in opened
         for src in ('/b.webp', '/v.webp'):
             assert f'src="{src}"' in view
             assert 'loading="lazy"' in view.split(f'src="{src}"')[1].split('>')[0], (
@@ -673,15 +674,17 @@ class TestCards:
         assert 'data-view="before"' in view and 'data-view="after"' in view
         assert 'animated' not in view
         assert 'value="after" checked' in view
-        assert '<img src="/v.webp" alt="Result" class="after">' in view, 'not deferred'
+        opened = view.split('src="/v.webp"')[1].split('>')[0]
+        assert 'class="after"' in opened and 'loading' not in opened, 'not deferred'
 
-    def test_the_phone_pill_says_gif_where_animated_would_not_fit(self, client, hx):
-        """Three words plus the Full size pill overflow a 320px picture."""
+    def test_both_switches_say_gif_because_they_drive_the_same_radios(self, client, hx):
+        """The phone's pill said GIF and the desktop's control said Animated.
+        The width was only ever the phone's problem; two labels for one radio
+        reading differently was everybody's."""
         job_id = self.start(client, hx)
         body = client.get(f'/jobs/{job_id}', headers=hx).text
-        pill = re.search(r'<div class="segmented view-pill mobile-only">.*?</div>',
-                         body, re.S).group()
-        assert '>GIF</label>' in pill and '>Animated</label>' not in pill
+        assert body.count('>GIF</label>') == 2, 'the pill and the footer both'
+        assert '>Animated</label>' not in body
 
     def test_each_result_can_be_downloaded(self, client, hx):
         job_id = self.start(client, hx)
@@ -862,6 +865,33 @@ class TestResultPictures:
         assert 'hidden' in button
         assert f'data-share="/i/{job_id}/result.png"' in button
 
+    def test_the_button_says_send_because_get_a_link_also_shares(self, client, hx):
+        """Two controls beside each other both share; the word that tells
+        them apart is that this one hands over the picture itself."""
+        job_id = self.upload(client, hx)
+        body = client.get(f'/jobs/{job_id}', headers=hx).text
+        assert '>Send</button>' in body
+        assert '>Share</button>' not in body
+
+    def test_every_tab_carries_the_file_send_should_hand_over(self, client, hx):
+        """Send follows the switch, so each tab names its own file: the
+        result at full resolution, the GIF, and the picture as submitted.
+        Sending the still while a card shows the animation was a lie."""
+        job_id = self.upload(client, hx)
+        body = client.get(f'/jobs/{job_id}', headers=hx).text
+        frame = re.search(r'<div class="frame">.*?</div>', body, re.S).group()
+        files = {re.search(r'class="([\w-]+)"', img).group(1):
+                 re.search(r'data-share="([^"]+)"', img).group(1)
+                 for img in re.findall(r'<img [^>]*>', frame)}
+        assert files == {
+            'before': f'/i/{job_id}/before.webp',
+            'after': f'/i/{job_id}/result.png',
+            'animated': f'/i/{job_id}/animation.gif',
+        }
+        assert f'data-name="deal-with-it-{job_id[:8]}-before"' in frame, (
+            'Before saved beside the result must not overwrite it'
+        )
+
     def test_the_pictures_a_card_points_at_are_all_fetchable(self, client, hx):
         job_id = self.upload(client, hx)
         body = client.get(f'/jobs/{job_id}', headers=hx).text
@@ -998,7 +1028,7 @@ class TestProgress:
 class TestRetry:
     def start_failing(self, client, hx, stub_task):
         stub_task(support.REJECTS)
-        return job_ids(submit(client, hx, sample='socks').text)[0]
+        return job_ids(submit(client, hx, sample='poker').text)[0]
 
     def test_a_retry_queues_the_same_picture_again(self, client, hx, stub_task):
         job_id = self.start_failing(client, hx, stub_task)
@@ -1015,7 +1045,7 @@ class TestRetry:
                 == blobs.path(original['blob']).stat().st_ino), (
             'hard-linked, so either job can be swept without taking the other'
         )
-        assert 'socks_the_cat.jpg' in response.text, 'and it remembers what it was called'
+        assert 'dogs_playing_poker.jpg' in response.text, 'and it remembers what it was called'
 
     def test_retrying_an_expired_job_says_so(self, client, hx):
         body = client.post('/jobs/long-gone/retry', headers=hx).text

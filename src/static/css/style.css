@@ -603,9 +603,11 @@ input[type="text"]:focus {
 
 .samples {
     display: grid;
-    /* Packs three across a narrow column and four across a wide one, rather
-       than stretching three tiles to whatever width is going. */
-    grid-template-columns: repeat(auto-fill, minmax(88px, 1fr));
+    /* Three, at every width. It used to pack by size -- three across a narrow
+       column, four across a wide one -- which made the grid a different shape
+       on every screen and the tiles a different size from the pictures beside
+       them. A fixed count is one shape to design for. */
+    grid-template-columns: repeat(3, 1fr);
     gap: 10px;
 }
 
@@ -627,7 +629,7 @@ input[type="text"]:focus {
 .sample img {
     width: 100%;
     /* `height: auto` is load-bearing, not tidiness: the tag carries width and
-       height attributes (so the grid does not reflow as sixteen tiles land),
+       height attributes (so the grid does not reflow as a dozen tiles land),
        and those become a presentational `height: 200px`. aspect-ratio only
        governs when height is auto, so without this the tile renders one
        column wide and 200px tall. */
@@ -877,6 +879,12 @@ body:has(#queue article) .clear {
 
 .frame {
     position: relative;
+    /* A stacking context, so the skeleton below can sit at -1: under every
+       picture and control in here, but still over the frame's own
+       background. Without it the -1 would fall through to the nearest
+       context outside and the background would hide the sheen. The
+       full-screen state raises this to 101 and takes the context with it. */
+    z-index: 0;
     background: var(--surface-2);
     border-radius: 10px;
     overflow: hidden;
@@ -898,6 +906,45 @@ body:has(#queue article) .clear {
     display: block;
     max-height: 460px;
     max-width: 100%;
+}
+
+/* The seconds before the first picture lands. An `<img>` with nothing in it
+   yet has no height, so a finished card used to arrive as a footer with a
+   gap above it and then jump; this reserves the shape and puts a sheen
+   across it while the fetch is in flight, the same placeholder a video site
+   shows over a thumbnail.
+
+   `sweep` is the indeterminate progress bar's animation, unchanged: same
+   200% background walked from one side to the other. */
+.frame::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    /* Under the pictures, so a loaded one hides the skeleton by covering it
+       -- no script in the path and nothing to time. Under the tap target and
+       the phone's pills too, which is what the images must never be. */
+    z-index: -1;
+    background-image: linear-gradient(100deg,
+        transparent 20%, var(--surface) 50%, transparent 80%);
+    background-size: 200% 100%;
+    animation: sweep 1.4s infinite linear;
+}
+
+/* Only until something has painted. `views.js` sets the attribute when the
+   tab the card opens on has loaded; with no script the sheen keeps running
+   under a picture that covers it, which is invisible and harmless. */
+.result:not([data-ready]) .frame {
+    min-height: 260px;
+}
+
+.result[data-ready] .frame::after {
+    display: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .frame::after {
+        animation: none;
+    }
 }
 
 /* Before/After/Animated with no script: a radio each and :has(). The radios

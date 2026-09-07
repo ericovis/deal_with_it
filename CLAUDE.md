@@ -116,6 +116,35 @@ Invariants worth knowing before editing:
   when it is chosen. A card therefore paints one picture where it used to
   fetch two. Note that "View full size" on the open tab is the 640px GIF, not
   `view.webp`; switching to After is the way to a sharp full-screen picture.
+- **`views.js` un-defers the rest as soon as the card lands, in order and one
+  at a time**: GIF, then After, then Before, each starting when the one
+  before it has settled. Nobody opens a result to look at one tab, so all
+  three are fetched up front. The `loading="lazy"` in the markup is what
+  makes that an *order* rather than three downloads racing the one being
+  looked at — flipping the hint to `eager` is what resumes a deferred load,
+  so these are the requests the images were always going to make, never a
+  second one. `data-warmed` on the `.result` makes it once per card. A tab
+  clicked before its turn simply loads on being shown, as it always did.
+- **The skeleton is covered, not toggled.** `.frame::after` is an animated
+  sheen (the progress bar's `sweep` keyframes, reused) and `.frame img` is
+  `position: relative; z-index: 1`, so a picture hides the placeholder by
+  painting over it — no script in the path. `views.js` then sets
+  `data-ready` on the `.result` once the open tab has loaded, which drops
+  the `min-height: 260px` and stops the animation. That attribute is a
+  tidy-up: with no script the sheen runs under a picture that covers it,
+  which is invisible. The min-height exists because an `<img>` with nothing
+  in it yet has no height, so a finished card used to arrive as a footer.
+- **Send hands over the tab that is open** (`share.js`). Each `<img>` in the
+  frame carries its own `data-share`/`data-name` — full resolution for the
+  result, the GIF for the animation, `before.webp` for Before, and Before's
+  name is suffixed so saving it does not overwrite the result. The button's
+  own attributes are the fallback for a card with no switch. It says **Send**
+  rather than Share because "Get a link" beside it also shares; the
+  difference worth naming is that this one hands over the picture itself.
+- **One label per tab, on both switches.** The desktop's segmented control
+  said "Animated" where the phone's pill said "GIF"; they drive the same
+  radios, so they now both say GIF and `View` has no `short` field. The
+  width was only ever the phone's problem — "GIF" fits everywhere.
 - **`view.webp` is one size for the card *and* the lightbox, on purpose.**
   `_result_view` reuses the same `<img>` for both and the lightbox is a CSS
   `:has(:checked)` state, so no `srcset`/`sizes` pair can describe it —
@@ -173,6 +202,19 @@ Invariants worth knowing before editing:
   `tests/test_processor.py`. YuNet finds every human face in the samples at
   `SCORE_THRESHOLD` and never a cat, but it does find dogs (three poker
   players, Nelson), and the captions say so.
+- **Every sample has a face in it.** The four that had none — two cats, a Van
+  Gogh and *The Scream* — were a joke about what the detector cannot see, and
+  a tile whose only answer is "No faces were found in this image." spends
+  somebody's click on it. The pictures are still committed and still pinned
+  at zero, as `FACELESS` in `tests/test_processor.py`, because a detector
+  that started seeing a face in a cat is worth catching;
+  `socks_the_cat.jpg` is the `faceless_image` fixture and what the e2e suite
+  uploads to reach the failure path. `SAMPLE_FACES` is the offered set alone,
+  and a test still asserts it matches `SAMPLES` key for key.
+- **The sample grid is three columns at every width** (`.samples`). It used
+  to pack by tile size, so the grid was a different shape on every screen.
+  The phone's sideways scrolling strip over the add bar is a different
+  control with its own flex layout; it is not the grid.
 - **The phone layout has no server side.** Below 600px the page has two
   states and the CSS reads which one from the list itself: with nothing in
   `#queue` the input pane is the page, and `body:has(#queue article)` moves
@@ -202,11 +244,11 @@ Invariants worth knowing before editing:
   the checked one matches through `.result` rather than as `input:checked +
   label`, so one rule dresses the footer's segmented control, the phone's
   pill and the overlay's copy of it. The footer's own segmented is
-  `.desktop-only`, and the pill says "GIF" where "Animated" would not fit
-  beside the Full size pill on a 320px screen.
+  `.desktop-only`. Both read the same words: the pill said "GIF" where the
+  footer said "Animated", and one label for one radio is the simpler rule.
 - **`.card-foot` is `grid-auto-flow: column` on a phone**, so it is equal
   columns for however many buttons are actually there: `share.js` reveals
-  the Share button only on a browser that can share a file, and a row sized
+  the Send button only on a browser that can share a file, and a row sized
   for three would otherwise have a hole in it. The children that do not
   belong on a phone (`.spacer`, `.open-full`, the desktop segmented) are
   `display: none`, which takes them out of the grid rather than leaving an
@@ -217,12 +259,14 @@ Invariants worth knowing before editing:
   indicator counted an iPhone's inset twice under `viewport-fit=cover`. The
   12px floor is for a device with no inset at all.
 - **Script is only ever an enhancement.** `countdown.js` retimes a sentence
-  the server already rendered correctly; `share.js` reveals a Share button
+  the server already rendered correctly; `share.js` reveals a Send button
   that starts `hidden`, because only the browser knows whether it can share a
-  *file* and a button that half-works is worse than none. Both are delegated
-  from the document and re-run on `htmx:afterSwap`, since cards are swapped in
-  and out constantly — a held element reference goes stale immediately.
-  Five pieces of script now: the share page's Copy link is the docs page's
+  *file* and a button that half-works is worse than none; `views.js` fetches
+  tabs a browser would have fetched anyway, sooner, and retires a skeleton a
+  picture already covers. All three are delegated from the document and
+  re-run on `htmx:afterSwap`, since cards are swapped in and out constantly —
+  a held element reference goes stale immediately.
+  Six pieces of script now: the share page's Copy link is the docs page's
   clipboard one-liner, on `location.href` because `public_url` may be unset
   in development and a relative path is not a link anyone can paste.
 - **`/llms.txt` is generated, not committed** (`llms_txt()` in `src/ui.py`).

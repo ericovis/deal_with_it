@@ -6,6 +6,13 @@
  * hidden and this reveals it — a desktop Chrome that can only share links
  * never shows a button that would half-work.
  *
+ * It sends whichever tab is open, because a Send button beside a picture of
+ * a GIF that sends the still is a button that lied. The URL comes off the
+ * shown `<img>`, which carries the file worth keeping for its own tab: full
+ * resolution for the result, the GIF for the animation, the submitted
+ * picture for Before. The button's own attributes are the fallback, for a
+ * card whose job wrote one picture and so has no switch at all.
+ *
  * Delegated from the document, because htmx swaps these cards in and out.
  */
 (function () {
@@ -20,9 +27,21 @@
         });
     }
 
+    /* The open tab's image, or nothing when the card has no switch. Read
+     * from the radios rather than from what is visible: the overlay and the
+     * card share one set of them, and `display` is a question about layout
+     * that a card still being swapped in cannot answer. */
+    function openTab(button) {
+        var result = button.closest('.result');
+        var checked = result && result.querySelector('.segmented input[type="radio"]:checked');
+        return checked && result.querySelector('.frame img.' + checked.value);
+    }
+
     async function share(button) {
-        var url = button.getAttribute('data-share');
-        var name = button.getAttribute('data-name') || 'deal-with-it';
+        var source = openTab(button) || button;
+        var url = source.getAttribute('data-share');
+        var name = source.getAttribute('data-name') || 'deal-with-it';
+        if (!url) { return; }
         button.disabled = true;
         try {
             var response = await fetch(url);
