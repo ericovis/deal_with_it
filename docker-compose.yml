@@ -16,6 +16,28 @@ services:
       # Localhost only: no password on this Redis.
       - "127.0.0.1:6379:6379"
 
+  # The blob store as a service, over HTTP/3, on its own disk: what
+  # production runs, because there every container's disk is its own. Drop
+  # DWI_BLOB_STORE_URL from web and worker and they share .data/blobs through
+  # the bind mount instead, which is what the tests do.
+  store:
+    build:
+      context: .
+      target: dev
+    # No reloader: restart after editing src/store.py or src/blobs.py.
+    command: python -m src.store
+    environment:
+      DWI_STORE_BIND: 0.0.0.0:5001
+      DWI_BLOB_DIR: /data/blobs
+    healthcheck:
+      test: ["CMD", "python", "-c",
+             "import urllib.request; urllib.request.urlopen('http://127.0.0.1:5001/health')"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    volumes:
+      - .:/app
+
   web:
     build:
       context: .
@@ -23,12 +45,15 @@ services:
     command: uvicorn src.app:app --reload --host 0.0.0.0 --port 5000
     environment:
       DWI_REDIS_URL: redis://redis:6379/0
+      DWI_BLOB_STORE_URL: https://store:5001
     volumes:
       - .:/app
     ports:
       - "5000:5000"
     depends_on:
       redis:
+        condition: service_healthy
+      store:
         condition: service_healthy
 
   worker:
@@ -39,9 +64,17 @@ services:
     command: python -m src.worker
     environment:
       DWI_REDIS_URL: redis://redis:6379/0
+      DWI_BLOB_STORE_URL: https://store:5001
       # One process, DWI_WORKER_THREADS threads (default 2). See docs/LOAD.md.
+    healthcheck:
+      test: ["CMD", "python", "-m", "src.worker", "--health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
     volumes:
       - .:/app
     depends_on:
       redis:
+        condition: service_healthy
+      store:
         condition: service_healthy

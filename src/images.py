@@ -280,7 +280,7 @@ def load(url: str | None = None, base64_data: str | None = None,
     settings = settings or get_settings()
     if blob is not None:
         try:
-            data = blobs.path(blob).read_bytes()
+            data = blobs.get(blob)
         except (OSError, blobs.UnsafeReference) as exc:
             raise ImageSourceError('The submitted image is no longer available.') from exc
         return decode(data, settings)

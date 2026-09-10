@@ -31,13 +31,21 @@ browser ───────────────► web (FastAPI+FastHTML) 
         GET  /api/jobs/{id}  (htmx polls every 1s)         │ fetch, detect, paste
         ◄─────────────── {state, images}  ◄────────────────┘   write derivatives
                                     │                          │
-        GET /i/{job}/view.webp ─────┴──► Caddy, off the shared blob directory
+        GET /i/{job}/view.webp ─────┴──► web, by way of the store
+                                    │                          │
+                              HTTP/3 (QUIC)              HTTP/3 (QUIC)
+                                    ▼                          ▼
+                              store (python -m src.store): the one disk
 ```
 
 The web tier never *decodes* an image: it validates the request shape, writes
 the submitted bytes to the blob store, puts a path on the queue and reads job
-state back. The task is enqueued **by name** (`src/jobs.py:TASK`) so the web
-process never imports OpenCV.
+state back. The blob store is a third service when the two tiers cannot
+share a disk (production, under caramelo): `src/store.py` owns the directory
+and `src/blobs.py` talks to it over HTTP/3, so every caller is unchanged.
+With `DWI_BLOB_STORE_URL` unset the same functions are the local disk, which
+is what the tests and a bare checkout use. The task is enqueued **by name**
+(`src/jobs.py:TASK`) so the web process never imports OpenCV.
 
 ```
 src/app.py          Composition root: FastAPI outer app, FastHTML mounted at /
@@ -51,7 +59,12 @@ src/images.py       Fetching (SSRF-guarded) and decoding into a numpy array
 src/models.py       Pydantic v2 request/response schemas. Shape only
 src/config.py       Settings, all DWI_-prefixed env vars
 src/errors.py       DealWithItError: failures whose message is safe to show
-src/blobs.py        The blob store. Web-safe: no imaging library, ever
+src/blobs.py        The blob store's API. Web-safe: no imaging library, ever.
+                    The disk, or a client of src/store.py, per DWI_BLOB_STORE_URL
+src/store.py        `python -m src.store` — the blob store as a service, over
+                    HTTP/3 (hypercorn + QUIC), on its own disk
+src/h3.py           A sync HTTP/3 client on aioquic: one connection, one
+                    thread, streams for concurrency. Web-safe
 src/derivatives.py  Pixels to files. Worker-only; all the Pillow lives here
 src/animation.py    The falling-glasses GIF. Worker-only; the choreography
 src/svg.py          One rasteriser for both bits of artwork. Worker-only
@@ -85,6 +98,24 @@ Invariants worth knowing before editing:
   path; the worker writes sized derivatives there and the result is a map of
   URLs. A finished card fetches ~320 KB where it once fetched 15.8 MB as URLs,
   or 42 MB inlined. `JobResult.image` is gone — that is API 2.0.
+- **The store is a service because caramelo gives every container its own
+  disk.** No service-level volume exists there, so web and worker cannot mount
+  one directory; `src/store.py` owns it and the others reach it by name on
+  the environment's network. Every public function in `src/blobs.py` is
+  `@_dispatched`: with `DWI_BLOB_STORE_URL` set it is one HTTP/3 request to
+  the store, which runs the same function's `.local` half on disk. The
+  store's own thread is marked with `blobs.serve_locally()` so `reap`, which
+  calls `usage()` through the dispatcher, never asks the store for the
+  store. References are validated on both sides. The store has no
+  password, like Redis, because the network it sits on has no strangers.
+  It speaks QUIC on the UDP side of `DWI_STORE_BIND` under a certificate it
+  mints at start-up (the client does not verify it; the tunnel is still
+  encrypted) and plain HTTP on the TCP side for a health check. `HEAD` is
+  answered with an empty response of the store's own, not a `FileResponse`:
+  hypercorn's HTTP/3 layer treats a content-length with no body as a broken
+  stream and closes the connection. One replica, always: its disk is its
+  own, and a deploy that replaces it loses the last hour of results, which
+  is what `blob_ttl` already promises.
 - **`src/blobs.py` is web-safe and `src/derivatives.py` is not.** blobs imports
   no imaging library, which is what lets the web tier mint paths and store
   opaque bytes without gaining the ability to decode an attacker's image; a
@@ -167,6 +198,12 @@ Invariants worth knowing before editing:
   ABANDONED_GRACE`. `ThreadWorker` also reaps every `REAP_INTERVAL`
   (`src/worker.py`), which is what gives an abandoned job's payload a TTL
   rather than leaving it in a `noeviction` Redis for good.
+- **The worker's health check is RQ's own registry.** `python -m src.worker
+  --health` counts this host's worker keys in Redis, which each thread
+  writes at birth and refreshes on every heartbeat, and exits 0 when every
+  thread is there. No file, no port: the key lives exactly as long as RQ
+  itself would trust the worker. It is the exec `health:` in `caramelo.yaml`
+  and the compose healthcheck.
 - **Progress is stage markers** written to `job.meta` by the worker. The face
   count is lifted out of the "Drawing glasses on N faces" step because the
   next checkpoint overwrites `step`.
@@ -296,9 +333,10 @@ names are fully qualified because Podman will not guess a registry.
 `docker compose restart <service>` does not work under podman-compose when the
 service has a healthcheck dependency; use `docker compose up -d` again.
 
-The `web` service reloads on edit; the `worker` does not. Restart it after
-touching `src/tasks.py`, `src/images.py`, `src/processors/`,
-`src/derivatives.py`, `src/animation.py` or `src/svg.py`.
+The `web` service reloads on edit; the `worker` and `store` do not. Restart
+the worker after touching `src/tasks.py`, `src/images.py`, `src/processors/`,
+`src/derivatives.py`, `src/animation.py` or `src/svg.py`; the store after
+`src/store.py`, `src/blobs.py` or `src/h3.py`.
 
 Locally, without containers:
 
@@ -326,6 +364,9 @@ let the container restart. Measured numbers are in `docs/LOAD.md`.
   `pkg_resources`, hence `setuptools>=80,<82`: setuptools 82 removed it.
 - `resvg-py` rasterises the glasses. Statically linked, so no apt layer.
   `cairosvg` would need libcairo; don't swap it in.
+- `aioquic` is the QUIC and HTTP/3 stack, on both sides; `hypercorn[h3]`
+  serves the store over it. `requests` and `httpx` speak neither, which is
+  why `src/h3.py` exists.
 
 ## Testing
 
@@ -333,6 +374,10 @@ let the container restart. Measured numbers are in `docs/LOAD.md`.
 
 - `stub_dns` (autouse) replaces `socket.getaddrinfo`; `responses` intercepts
   HTTP; `fakeredis` stands in for the broker.
+- `tests/test_store.py` runs a real hypercorn over QUIC on a loopback UDP
+  port, in a thread, and drives it through `blobs.*` with
+  `DWI_BLOB_STORE_URL` set. Same process, so the store writes to the test's
+  own `blob_root`.
 - `sync_queue` runs jobs inline. `async_queue` + `drain` (a `SimpleWorker`
   burst) covers queued→finished. The forking `Worker` silently does nothing
   against fakeredis — never use it in a test.

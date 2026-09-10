@@ -1,4 +1,11 @@
-"""The blob store: where a job's pictures live, on a disk both tiers share.
+"""The blob store: where a job's pictures live.
+
+On one disk both tiers share, when there is one, or behind ``python -m
+src.store`` when there is not: every public function here asks
+:func:`_remote` first and, with ``DWI_BLOB_STORE_URL`` set, becomes a call
+over HTTP/3 to that service, which runs the very same function's ``.local``
+half on its own disk. The tests and the compose file use the disk; a
+deployment that gives every service its own filesystem uses the service.
 
 Web-safe on purpose. This module imports no imaging library -- no Pillow, no
 numpy, no OpenCV -- so the web tier can mint paths, hand out URLs and store
@@ -15,17 +22,21 @@ import logging
 import os
 import re
 import shutil
+import threading
 import time
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager, suppress
 from dataclasses import dataclass
+from functools import wraps
 from pathlib import Path
 from uuid import uuid4
 
+from starlette.concurrency import run_in_threadpool
 from starlette.responses import Response
 from starlette.staticfiles import StaticFiles
 
 from src.config import get_settings
+from src.h3 import H3Client, H3Error
 
 logger = logging.getLogger(__name__)
 
@@ -52,6 +63,7 @@ EXTENSIONS = {
     'image/tiff': 'tiff',
 }
 OPAQUE_EXTENSION = 'bin'
+EXTENSIONS_TO_TYPES = {ext: kind for kind, ext in EXTENSIONS.items()} | {'json': 'application/json'}
 
 
 def extension_for(media_type: str | None) -> str:
@@ -61,6 +73,24 @@ def extension_for(media_type: str | None) -> str:
 
 class UnsafeReference(ValueError):
     """A job id or file name that will not be turned into a path."""
+
+
+def _dispatched(function: Callable) -> Callable:
+    """Send the call to the store service when there is one.
+
+    The decorated body is the filesystem and stays reachable as
+    ``function.local``, which is what :mod:`src.store` runs on the other
+    side. Decided per call, not at import: the app is built once and the
+    store's location is configuration.
+    """
+    @wraps(function)
+    def wrapper(*args, **kwargs):
+        remote = _remote()
+        if remote is not None:
+            return getattr(remote, function.__name__)(*args, **kwargs)
+        return function(*args, **kwargs)
+    wrapper.local = function
+    return wrapper
 
 
 def root() -> Path:
@@ -109,6 +139,13 @@ def url(reference: str) -> str:
     return PREFIX + '/'.join(split(reference))
 
 
+@_dispatched
+def get(reference: str) -> bytes:
+    """A blob's bytes. Raises ``OSError`` for one that is not there."""
+    return path(reference).read_bytes()
+
+
+@_dispatched
 def read_json(job_id: str, name: str = 'meta.json') -> dict | None:
     """A job's own record of itself, or None once it has been swept.
 
@@ -121,6 +158,7 @@ def read_json(job_id: str, name: str = 'meta.json') -> dict | None:
         return None
 
 
+@_dispatched
 def exists(reference: str) -> bool:
     try:
         return path(reference).is_file()
@@ -151,6 +189,7 @@ def open_for_write(job_id: str, name: str) -> Iterator[Path]:
         temporary.unlink(missing_ok=True)
 
 
+@_dispatched
 def put(job_id: str, name: str, data: bytes) -> str:
     """Store bytes and return the reference. Opaque: nothing here reads them."""
     with open_for_write(job_id, name) as temporary:
@@ -158,6 +197,7 @@ def put(job_id: str, name: str, data: bytes) -> str:
     return ref(job_id, name)
 
 
+@_dispatched
 def link(source: str, job_id: str, name: str) -> str:
     """Point a second job's directory at an existing blob.
 
@@ -178,11 +218,13 @@ def link(source: str, job_id: str, name: str) -> str:
     return ref(job_id, name)
 
 
+@_dispatched
 def delete(reference: str) -> None:
     with suppress(UnsafeReference):
         path(reference).unlink(missing_ok=True)
 
 
+@_dispatched
 def forget(job_id: str) -> None:
     """Drop a job's whole directory."""
     shutil.rmtree(job_dir(job_id), ignore_errors=True)
@@ -197,6 +239,7 @@ class Entry:
     size: int
 
 
+@_dispatched
 def usage() -> list[Entry]:
     """Every job directory with its age and weight.
 
@@ -219,6 +262,7 @@ def usage() -> list[Entry]:
     return entries
 
 
+@_dispatched
 def reap(ttl: float, max_bytes: int, min_age: float, now: float | None = None) -> list[str]:
     """Drop what has expired, then the oldest of what is left until the store
     fits. Returns the job ids that went.
@@ -253,6 +297,108 @@ def reap(ttl: float, max_bytes: int, min_age: float, now: float | None = None) -
     if doomed:
         logger.info('swept %s job directories from the blob store', len(doomed))
     return [entry.job_id for entry in doomed]
+
+
+class _Remote:
+    """The same functions, asked of ``python -m src.store`` over HTTP/3.
+
+    References are validated here before anything leaves, so a bad one
+    raises :class:`UnsafeReference` exactly as the disk would, and the
+    store's own 400 is a belt to this brace.
+    """
+
+    def __init__(self, url: str) -> None:
+        self.client = H3Client(url)
+
+    def _ask(self, method: str, path: str, body: bytes = b'',
+             content_type: str | None = None):
+        headers = [(b'content-type', content_type.encode())] if content_type else []
+        return self.client.request(method, path, body, headers)
+
+    def get(self, reference: str) -> bytes:
+        response = self._ask('GET', '/' + '/'.join(split(reference)))
+        if response.status == 404:
+            raise FileNotFoundError(reference)
+        if response.status != 200:
+            raise OSError(f'store answered {response.status} for {reference}')
+        return response.body
+
+    def read_json(self, job_id: str, name: str = 'meta.json') -> dict | None:
+        try:
+            return json.loads(self.get(ref(job_id, name)))
+        except (OSError, ValueError, UnsafeReference):
+            return None
+
+    def exists(self, reference: str) -> bool:
+        try:
+            return self._ask('HEAD', '/' + '/'.join(split(reference))).status == 200
+        except (UnsafeReference, H3Error):
+            return False
+
+    def put(self, job_id: str, name: str, data: bytes) -> str:
+        reference = ref(job_id, name)
+        response = self._ask('PUT', '/' + reference, data, 'application/octet-stream')
+        if response.status != 201:
+            raise OSError(f'store refused {reference}: {response.status}')
+        return reference
+
+    def link(self, source: str, job_id: str, name: str) -> str:
+        split(source)
+        reference = ref(job_id, name)
+        body = json.dumps({'source': source, 'job_id': job_id, 'name': name}).encode()
+        response = self._ask('POST', '/link', body, 'application/json')
+        if response.status == 404:
+            raise FileNotFoundError(source)
+        if response.status != 201:
+            raise OSError(f'store would not link {source}: {response.status}')
+        return reference
+
+    def delete(self, reference: str) -> None:
+        with suppress(UnsafeReference):
+            self._ask('DELETE', '/' + '/'.join(split(reference)))
+
+    def forget(self, job_id: str) -> None:
+        if not _SAFE_ID.match(job_id or ''):
+            raise UnsafeReference(f'not a usable job id: {job_id!r}')
+        self._ask('DELETE', '/' + job_id)
+
+    def usage(self) -> list[Entry]:
+        response = self._ask('GET', '/usage')
+        return [Entry(**entry) for entry in json.loads(response.body)]
+
+    def reap(self, ttl: float, max_bytes: int, min_age: float,
+             now: float | None = None) -> list[str]:
+        body = json.dumps({'ttl': ttl, 'max_bytes': max_bytes, 'min_age': min_age}).encode()
+        response = self._ask('POST', '/reap', body, 'application/json')
+        if response.status != 200:
+            raise OSError(f'store would not sweep: {response.status}')
+        return json.loads(response.body)
+
+
+_remotes: dict[str, _Remote] = {}
+_remotes_lock = threading.Lock()
+_thread = threading.local()
+
+
+def serve_locally() -> None:
+    """Make this thread the store: its calls stay on disk whatever the
+    settings say. :func:`reap` asks :func:`usage`, and a store that asked
+    itself over the network would wait on its own answer."""
+    _thread.local_only = True
+
+
+def _remote() -> _Remote | None:
+    """The store service, if the settings name one. One client per URL, for
+    the life of the process: it holds the QUIC connection."""
+    if getattr(_thread, 'local_only', False):
+        return None
+    url = get_settings().blob_store_url
+    if not url:
+        return None
+    with _remotes_lock:
+        if url not in _remotes:
+            _remotes[url] = _Remote(url)
+        return _remotes[url]
 
 
 def cache_control() -> str:
@@ -290,7 +436,25 @@ class BlobFiles(StaticFiles):
         if any(part.startswith('.') for part in path.split('/')):
             # A write that is still in flight. Not ours to serve.
             return Response('', status_code=404)
+        if _remote() is not None:
+            return await run_in_threadpool(self._fetched, path)
         response = await super().get_response(path, scope)
         if response.status_code < 400:
             response.headers['cache-control'] = cache_control()
         return response
+
+    @staticmethod
+    def _fetched(path: str) -> Response:
+        """The blob, by way of the store service. A hop and a copy per view,
+        which at 320 KB a card is cheaper than teaching the edge to serve
+        one directory of one container."""
+        try:
+            data = get(path)
+        except (UnsafeReference, FileNotFoundError):
+            return Response('', status_code=404)
+        except (OSError, H3Error):
+            logger.exception('the blob store did not answer for %s', path)
+            return Response('', status_code=502)
+        media_type = EXTENSIONS_TO_TYPES.get(path.rsplit('.', 1)[-1], 'application/octet-stream')
+        return Response(data, media_type=media_type,
+                        headers={'cache-control': cache_control()})

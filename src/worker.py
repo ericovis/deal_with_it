@@ -16,7 +16,7 @@ import sys
 import threading
 import time
 
-from rq import SimpleWorker
+from rq import SimpleWorker, Worker
 from rq.cron import CronScheduler
 from rq.timeouts import TimerDeathPenalty
 from rq.worker import WorkerStatus
@@ -122,7 +122,34 @@ def serve(workers: list[ThreadWorker], stop: threading.Event, grace: float,
         worker.register_death()
 
 
-def main() -> int:
+def health(connection, expected: int, hostname: str | None = None) -> int:
+    """``python -m src.worker --health``: 0 when every thread is alive.
+
+    What a container's health check runs. RQ already keeps the answer: each
+    thread registers itself in Redis at birth and refreshes the key on every
+    heartbeat, so the key is there exactly as long as RQ itself would trust
+    the worker -- ``worker_ttl`` between dequeues, ``job_timeout`` plus a
+    minute while a job runs. Counting this host's registrations is therefore
+    the same liveness RQ uses, from outside the process, with no file or
+    port the worker would have to keep up.
+    """
+    hostname = hostname or socket.gethostname()
+    alive = [w for w in Worker.all(connection=connection) if w.hostname == hostname]
+    if len(alive) >= expected:
+        print(f'{len(alive)} of {expected} worker threads registered')
+        return 0
+    print(f'only {len(alive)} of {expected} worker threads registered on {hostname}',
+          file=sys.stderr)
+    return 1
+
+
+def main(argv: list[str] | None = None) -> int:
+    argv = sys.argv[1:] if argv is None else argv
+    if argv == ['--health']:
+        return health(jobs.get_queue().connection, get_settings().worker_threads)
+    if argv:
+        print(f'usage: python -m src.worker [--health]; got {argv!r}', file=sys.stderr)
+        return 2
     logging.basicConfig(
         level=logging.INFO,
         format='%(asctime)s %(levelname)s %(name)s %(message)s',

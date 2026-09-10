@@ -37,6 +37,13 @@ class Settings(BaseSettings):
     #: directory and the reverse proxy serves it. Empty means ``.data/blobs``
     #: beside the checkout, which is gitignored and fine for development.
     blob_dir: str = ''
+    #: Where the pictures live when the tiers cannot share a disk: the
+    #: ``https://host:port`` of ``python -m src.store``, spoken to over QUIC.
+    #: Empty means the directory above, on this machine.
+    blob_store_url: str = ''
+    #: What ``python -m src.store`` listens on, UDP for QUIC and TCP for the
+    #: health check, same number.
+    store_bind: str = '0.0.0.0:5001'
     #: How long a result stays fetchable, and therefore shareable. This is
     #: the number the card counts down to.
     blob_ttl: int = 3600

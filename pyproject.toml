@@ -20,6 +20,8 @@ dependencies = [
     "numpy>=2",
     # face_recognition_models imports pkg_resources, which setuptools 82 removed.
     "setuptools>=80,<82",
+    "aioquic>=1.2",
+    "hypercorn[h3]>=0.17",
 ]
 
 [project.optional-dependencies]
