@@ -47,10 +47,10 @@ services:
     build: .
     run: python -m src.worker
     port: none
-    # MemoryMax=2G in the Ansible: a runaway job kills the worker alone, not
-    # Redis. The box has 3.8 GB and no swap.
+    # Enough for one small job at a time in a preview; production raises it
+    # to the Ansible's MemoryMax=2G under envs: below.
     resources:
-      memory: 2g
+      memory: 512m
 
   store:
     build: .
@@ -104,3 +104,8 @@ envs:
     services:
       web:
         replicas: 2
+      # MemoryMax=2G in the Ansible: a runaway job kills the worker alone,
+      # not Redis. The box has 3.8 GB and no swap.
+      worker:
+        resources:
+          memory: 2g
