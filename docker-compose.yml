@@ -66,6 +66,11 @@ services:
       DWI_REDIS_URL: redis://redis:6379/0
       DWI_BLOB_STORE_URL: https://store:5001
       # One process, DWI_WORKER_THREADS threads (default 2). See docs/LOAD.md.
+    healthcheck:
+      test: ["CMD", "python", "-m", "src.worker", "--health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
     volumes:
       - .:/app
     depends_on:

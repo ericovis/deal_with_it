@@ -87,6 +87,43 @@ class TestServe:
         assert Worker.all(connection=async_queue.connection) == []
 
 
+class TestHealth:
+    """``--health`` counts this host's live registrations in Redis."""
+
+    def test_every_thread_registered_is_healthy(self, async_queue):
+        workers = worker.build_workers(2, async_queue.name, async_queue.connection)
+        for w in workers:
+            w.register_birth()
+        assert worker.health(async_queue.connection, expected=2) == 0
+
+    def test_a_missing_thread_is_not(self, async_queue, capsys):
+        workers = worker.build_workers(2, async_queue.name, async_queue.connection)
+        workers[0].register_birth()
+        assert worker.health(async_queue.connection, expected=2) == 1
+        assert 'only 1 of 2' in capsys.readouterr().err
+
+    def test_nothing_registered_is_not(self, async_queue):
+        assert worker.health(async_queue.connection, expected=1) == 1
+
+    def test_another_hosts_workers_do_not_count(self, async_queue):
+        """Two worker containers share one Redis; each answers for itself."""
+        workers = worker.build_workers(2, async_queue.name, async_queue.connection)
+        for w in workers:
+            w.register_birth()
+        assert worker.health(async_queue.connection, expected=2, hostname='elsewhere') == 1
+
+    def test_a_dead_thread_stops_counting(self, async_queue):
+        workers = worker.build_workers(1, async_queue.name, async_queue.connection)
+        workers[0].register_birth()
+        workers[0].register_death()
+        assert worker.health(async_queue.connection, expected=1) == 1
+
+    def test_main_knows_the_flag(self, async_queue, monkeypatch):
+        monkeypatch.setattr(jobs, 'get_queue', lambda: async_queue)
+        assert worker.main(['--health']) == 1
+        assert worker.main(['--bogus']) == 2
+
+
 @pytest.fixture(autouse=True)
 def _quiet_rq(caplog):
     caplog.set_level('CRITICAL', logger='rq.worker')

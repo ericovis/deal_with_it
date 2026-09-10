@@ -198,6 +198,12 @@ Invariants worth knowing before editing:
   ABANDONED_GRACE`. `ThreadWorker` also reaps every `REAP_INTERVAL`
   (`src/worker.py`), which is what gives an abandoned job's payload a TTL
   rather than leaving it in a `noeviction` Redis for good.
+- **The worker's health check is RQ's own registry.** `python -m src.worker
+  --health` counts this host's worker keys in Redis, which each thread
+  writes at birth and refreshes on every heartbeat, and exits 0 when every
+  thread is there. No file, no port: the key lives exactly as long as RQ
+  itself would trust the worker. It is the exec `health:` in `caramelo.yaml`
+  and the compose healthcheck.
 - **Progress is stage markers** written to `job.meta` by the worker. The face
   count is lifted out of the "Drawing glasses on N faces" step because the
   next checkpoint overwrites `step`.

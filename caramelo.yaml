@@ -47,6 +47,9 @@ services:
     build: .
     run: python -m src.worker
     port: none
+    # No port, so an exec check: RQ registers every thread in Redis with a
+    # heartbeat, and this counts the live ones for this container.
+    health: [python, -m, src.worker, --health]
     # Enough for one small job at a time in a preview; production raises it
     # to the Ansible's MemoryMax=2G under envs: below.
     resources:
