@@ -1,0 +1,105 @@
+# How caramelo runs deal_with_it. This replaces the Ansible in deploy/.
+#
+# Three services where the Ansible had two: caramelo gives every container its
+# own disk and no volume two services could share, and web and worker share a
+# blob directory -- the web tier writes an upload there, the worker reads it
+# and writes the derivatives beside it, and the app serves /i/ off it. So the
+# directory belongs to a third service, `store` (src/store.py), and the other
+# two talk to it over HTTP/3 through the same src/blobs.py they always used.
+#
+# Still served by the app, as they always were, only no longer fronted by
+# Caddy: /static (src/assets.py) and /i (src/blobs.py, by way of the store)
+# with the same cache rules the Caddyfile repeated. The edge does not serve
+# files or compress.
+
+name: deal-with-it
+
+# Previews land at <env>.asrv.click; production's name is under envs: below.
+domain: asrv.click
+
+deps:
+  # Known image: port 6379, `redis-cli ping` readiness. data: "" is the
+  # Ansible's --appendonly no, bare --save: nothing survives a restart, on
+  # purpose, because a job or a result is worth an hour at most.
+  redis:
+    image: redis:7-alpine
+    data: ""
+
+services:
+  web:
+    # The Dockerfile's last stage is `worker`: the base plus the face stack.
+    # One image for all three services, since caramelo builds one target.
+    build: .
+    port: 5000
+    health: /api/health
+    expose: https
+    # --forwarded-allow-ips '*': only the edge can reach this port (it is
+    # published on 127.0.0.1 of the box), and it rewrites X-Forwarded-For with
+    # the address it saw.
+    run: >-
+      uvicorn src.app:app --host 0.0.0.0 --port 5000
+      --proxy-headers --forwarded-allow-ips "*"
+    resources:
+      memory: 512m
+
+  worker:
+    build: .
+    run: python -m src.worker
+    port: none
+    # MemoryMax=2G in the Ansible: a runaway job kills the worker alone, not
+    # Redis. The box has 3.8 GB and no swap.
+    resources:
+      memory: 2g
+
+  store:
+    build: .
+    run: python -m src.store
+    # TCP for the health check, UDP for QUIC, same number (DWI_STORE_BIND).
+    port: 5001
+    health: /health
+    expose: none
+    # One replica, always: its disk is its own. A deploy that replaces it
+    # loses the last hour of results, which is what DWI_BLOB_TTL promises.
+    replicas: 1
+    resources:
+      memory: 256m
+
+test: pytest -m "not e2e"
+
+# app.env from the Ansible, minus the two that differ per environment:
+# DWI_SECRET_KEY is an app-scope secret and DWI_PUBLIC_URL an env-scope one
+# (every secret is injected as a variable whether or not it is named here).
+env:
+  DWI_REDIS_URL: redis://${deps.redis.host}:${deps.redis.port}/0
+  DWI_BLOB_STORE_URL: https://${services.store.host}:${services.store.port}
+  DWI_STORE_BIND: 0.0.0.0:5001
+  DWI_BLOB_DIR: /data/blobs
+  DWI_WORKER_THREADS: "2"
+  DWI_MAX_QUEUE_DEPTH: "30"
+  DWI_RESULT_TTL: "600"
+  DWI_FAILURE_TTL: "600"
+  DWI_BLOB_TTL: "3600"
+  DWI_BLOB_MAX_BYTES: "1073741824"
+  # Off while Cloudflare proxies the name: the edge has no trusted-proxies list
+  # yet, so every client would key the limit on a Cloudflare address and one
+  # busy stranger would throttle everybody. The queue cap above is the bound
+  # that remains. Restore 30 once the edge trusts Cloudflare's ranges.
+  DWI_RATE_LIMIT: "0"
+
+deploy:
+  # The smoke test runs against the new web replica by container name, before
+  # the flip. /api/health also proves the new container reaches Redis.
+  check: >-
+    python -c "import os, urllib.request as u;
+    u.urlopen(os.environ['CARAMELO_CHECK_URL'] + '/api/health', timeout=10).read()"
+  watch: 60s
+  max_errors: 5%
+  promote: auto
+  keep: 5
+
+envs:
+  production:
+    hosts: [deal-with-it.asrv.click]
+    services:
+      web:
+        replicas: 2
