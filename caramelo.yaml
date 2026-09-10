@@ -14,8 +14,9 @@
 
 name: deal-with-it
 
-# Previews land at <env>.asrv.click; production's name is under envs: below.
-domain: asrv.click
+# Every environment lands at <env>.deal-with-it.asrv.click; production is
+# the apex itself, under envs: below.
+domain: deal-with-it.asrv.click
 
 deps:
   # Known image: port 6379, `redis-cli ping` readiness. data: "" is the
